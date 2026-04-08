@@ -1,0 +1,90 @@
+import { AnalyticsQueryService } from "@hori/analytics";
+import { assertEnvForRole, loadEnv } from "@hori/config";
+import { EmbeddingAdapter, OllamaClient } from "@hori/llm";
+import { ProfileService, RetrievalService, SummaryService } from "@hori/memory";
+import { SearchCacheService } from "@hori/search";
+import { createAppQueues, createLogger, createPrismaClient, createRedisClient, createWorker, QUEUE_NAMES } from "@hori/shared";
+
+import { createCleanupJob } from "./jobs/cleanup";
+import { createEmbeddingJob } from "./jobs/embeddings";
+import { createProfileJob } from "./jobs/profiles";
+import { createSearchCacheCleanupJob } from "./jobs/search-cache";
+import { createSummaryJob } from "./jobs/summaries";
+
+export interface WorkerRuntime {
+  env: ReturnType<typeof loadEnv>;
+  logger: ReturnType<typeof createLogger>;
+  prisma: ReturnType<typeof createPrismaClient>;
+  redis: ReturnType<typeof createRedisClient>;
+  queues: ReturnType<typeof createAppQueues>;
+  analytics: AnalyticsQueryService;
+  summaryService: SummaryService;
+  profileService: ProfileService;
+  retrievalService: RetrievalService;
+  searchCache: SearchCacheService;
+  llmClient: OllamaClient;
+  embeddingAdapter: EmbeddingAdapter;
+}
+
+async function main() {
+  const env = loadEnv();
+  assertEnvForRole(env, "worker");
+
+  const logger = createLogger(env.LOG_LEVEL);
+  const prisma = createPrismaClient();
+  const redis = createRedisClient(env.REDIS_URL);
+  const queues = createAppQueues(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
+  const analytics = new AnalyticsQueryService(prisma);
+  const summaryService = new SummaryService(prisma);
+  const profileService = new ProfileService(prisma, env);
+  const retrievalService = new RetrievalService(prisma);
+  const searchCache = new SearchCacheService(prisma, redis);
+  const llmClient = new OllamaClient(env, logger);
+  const embeddingAdapter = new EmbeddingAdapter(llmClient, env);
+
+  const runtime: WorkerRuntime = {
+    env,
+    logger,
+    prisma,
+    redis,
+    queues,
+    analytics,
+    summaryService,
+    profileService,
+    retrievalService,
+    searchCache,
+    llmClient,
+    embeddingAdapter
+  };
+
+  const workers = [
+    createWorker(QUEUE_NAMES.summary, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSummaryJob(runtime), env.JOB_CONCURRENCY_SUMMARIES),
+    createWorker(QUEUE_NAMES.profile, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createProfileJob(runtime), env.JOB_CONCURRENCY_PROFILES),
+    createWorker(QUEUE_NAMES.embedding, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createEmbeddingJob(runtime), env.JOB_CONCURRENCY_EMBEDDINGS),
+    createWorker(QUEUE_NAMES.searchCache, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSearchCacheCleanupJob(runtime), 1),
+    createWorker(QUEUE_NAMES.cleanup, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createCleanupJob(runtime), 1)
+  ];
+
+  await Promise.all([
+    queues.cleanup.add("cleanup", { kind: "logs" }, { jobId: "cleanup:logs", repeat: { every: 24 * 60 * 60 * 1000 } }),
+    queues.cleanup.add("cleanup", { kind: "interjections" }, { jobId: "cleanup:interjections", repeat: { every: 24 * 60 * 60 * 1000 } }),
+    queues.searchCache.add(
+      "search-cache",
+      { nowIso: new Date().toISOString() },
+      { jobId: "search-cache:cleanup", repeat: { every: 60 * 60 * 1000 } }
+    )
+  ]);
+
+  for (const worker of workers) {
+    worker.on("failed", (job, error) => {
+      logger.error({ queue: worker.name, jobId: job?.id, error }, "worker job failed");
+    });
+  }
+
+  logger.info("workers started");
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

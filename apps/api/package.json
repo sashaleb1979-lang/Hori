@@ -1,0 +1,20 @@
+{
+  "name": "@hori/api",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs --dts --clean",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@hori/analytics": "workspace:*",
+    "@hori/config": "workspace:*",
+    "@hori/core": "workspace:*",
+    "@hori/memory": "workspace:*",
+    "@hori/shared": "workspace:*",
+    "fastify": "^5.2.1"
+  }
+}
+

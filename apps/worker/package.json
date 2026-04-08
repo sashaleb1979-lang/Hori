@@ -1,0 +1,21 @@
+{
+  "name": "@hori/worker",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs --dts --clean",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@hori/analytics": "workspace:*",
+    "@hori/config": "workspace:*",
+    "@hori/llm": "workspace:*",
+    "@hori/memory": "workspace:*",
+    "@hori/search": "workspace:*",
+    "@hori/shared": "workspace:*",
+    "bullmq": "^5.48.1"
+  }
+}
+

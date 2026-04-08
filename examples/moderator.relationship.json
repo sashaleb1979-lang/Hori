@@ -1,0 +1,12 @@
+{
+  "userId": "123456789012345678",
+  "guildId": "987654321098765432",
+  "toneBias": "playful",
+  "roastLevel": 1,
+  "praiseBias": 1,
+  "interruptPriority": 2,
+  "doNotMock": false,
+  "doNotInitiate": false,
+  "protectedTopics": ["семья", "здоровье"]
+}
+
