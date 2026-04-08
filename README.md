@@ -129,9 +129,9 @@ Notes:
 - `/bot-stats`
 
 ## Context Actions
-- `Попросить Хори объяснить`
-- `Попросить Хори кратко пересказать`
-- `Попросить Хори оценить тон`
+- `Хори: объяснить`
+- `Хори: кратко`
+- `Хори: оценить тон`
 
 ## Prompt Templates And Example Config
 - Base persona, profile and search templates: [examples/prompt-templates.md](./examples/prompt-templates.md)
