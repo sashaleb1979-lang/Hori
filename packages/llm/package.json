@@ -1,0 +1,16 @@
+{
+  "name": "@hori/llm",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs --dts --clean"
+  },
+  "dependencies": {
+    "@hori/config": "workspace:*",
+    "@hori/shared": "workspace:*",
+    "zod": "^3.24.2"
+  }
+}
+

@@ -1,0 +1,37 @@
+{
+  "name": "hori-discord-bot",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.11.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3"
+  },
+  "scripts": {
+    "build": "node scripts/run-with-env-aliases.mjs \"corepack pnpm exec prisma generate\" && corepack pnpm -r build",
+    "dev:bot": "corepack pnpm --filter @hori/bot dev",
+    "dev:api": "corepack pnpm --filter @hori/api dev",
+    "dev:worker": "corepack pnpm --filter @hori/worker dev",
+    "start:bot": "node apps/bot/dist/index.js",
+    "start:api": "node apps/api/dist/index.js",
+    "start:worker": "node apps/worker/dist/index.js",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prisma:generate": "node scripts/run-with-env-aliases.mjs \"corepack pnpm exec prisma generate\"",
+    "prisma:migrate": "node scripts/run-with-env-aliases.mjs \"corepack pnpm exec prisma migrate dev\"",
+    "prisma:deploy": "node scripts/run-with-env-aliases.mjs \"corepack pnpm exec prisma migrate deploy\"",
+    "seed": "node scripts/run-with-env-aliases.mjs \"corepack pnpm exec tsx prisma/seed.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "prisma": "^6.6.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.3",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^3.1.2"
+  }
+}

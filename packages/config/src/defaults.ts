@@ -1,0 +1,53 @@
+import type { PersonaSettings } from "@hori/shared";
+
+export const defaultPersonaSettings: PersonaSettings = {
+  botName: "Хори",
+  preferredLanguage: "ru",
+  roughnessLevel: 2,
+  sarcasmLevel: 2,
+  roastLevel: 2,
+  interjectTendency: 1,
+  replyLength: "short",
+  preferredStyle: "коротко, сухо, по делу",
+  forbiddenWords: [],
+  forbiddenTopics: []
+};
+
+export const defaultRuntimeTuning = {
+  FEATURE_WEB_SEARCH: true,
+  FEATURE_AUTOINTERJECT: false,
+  FEATURE_USER_PROFILES: true,
+  FEATURE_CONTEXT_ACTIONS: true,
+  FEATURE_ROAST: true,
+  LLM_MAX_CONTEXT_MESSAGES: 24,
+  LLM_MAX_TOOL_CALLS: 4,
+  LLM_REPLY_MAX_TOKENS: 350,
+  USER_PROFILE_MIN_MESSAGES: 50,
+  USER_PROFILE_REFRESH_MESSAGES: 40,
+  USER_PROFILE_REFRESH_HOURS: 12,
+  SUMMARY_CHUNK_MESSAGE_COUNT: 80,
+  SUMMARY_MIN_MESSAGES: 25,
+  SEARCH_CACHE_TTL_SEC: 1800,
+  SEARCH_MAX_REQUESTS_PER_RESPONSE: 2,
+  SEARCH_MAX_PAGES_PER_RESPONSE: 3,
+  SEARCH_USER_COOLDOWN_SEC: 30,
+  SEARCH_DOMAIN_ALLOWLIST: [] as string[],
+  SEARCH_DOMAIN_DENYLIST: ["reddit.com"] as string[],
+  AUTOINTERJECT_CHANNEL_ALLOWLIST: [] as string[],
+  AUTOINTERJECT_COOLDOWN_SEC: 900,
+  AUTOINTERJECT_MAX_PER_HOUR: 2,
+  AUTOINTERJECT_MIN_CONFIDENCE: 0.8,
+  MESSAGE_HISTORY_LIMIT: 40,
+  MESSAGE_EMBED_MIN_CHARS: 40,
+  MESSAGE_EMBED_BATCH_SIZE: 16,
+  DEFAULT_REPLY_MAX_CHARS: 550,
+  DEFAULT_ROAST_LEVEL: 2,
+  DEFAULT_SARCASM_LEVEL: 2,
+  DEFAULT_INTERJECT_TENDENCY: 1,
+  JOB_QUEUE_PREFIX: "hori",
+  JOB_CONCURRENCY_SUMMARIES: 2,
+  JOB_CONCURRENCY_PROFILES: 1,
+  JOB_CONCURRENCY_EMBEDDINGS: 2
+};
+
+export type RuntimeTuning = typeof defaultRuntimeTuning;
