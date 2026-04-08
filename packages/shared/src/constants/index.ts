@@ -7,9 +7,9 @@ export const QUEUE_NAMES = {
 } as const;
 
 export const CONTEXT_ACTIONS = {
-  explain: "Попросить Хори объяснить",
-  summarize: "Попросить Хори кратко пересказать",
-  tone: "Попросить Хори оценить тон"
+  explain: "Хори: объяснить",
+  summarize: "Хори: кратко",
+  tone: "Хори: оценить тон"
 } as const;
 
 export const SLASH_COMMANDS = [
@@ -26,4 +26,3 @@ export const SLASH_COMMANDS = [
 ] as const;
 
 export const HALF_HOUR_MS = 30 * 60 * 1000;
-
