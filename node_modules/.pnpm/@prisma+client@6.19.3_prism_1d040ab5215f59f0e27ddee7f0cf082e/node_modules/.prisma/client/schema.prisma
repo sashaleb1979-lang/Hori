@@ -341,3 +341,11 @@ model ChannelDailyAggregate {
 
   @@unique([guildId, channelId, day])
 }
+
+model RuntimeSetting {
+  key       String   @id
+  value     String   @db.Text
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

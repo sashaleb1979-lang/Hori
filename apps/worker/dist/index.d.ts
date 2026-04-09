@@ -1,6 +1,6 @@
 import { AnalyticsQueryService } from '@hori/analytics';
 import { loadEnv } from '@hori/config';
-import { OllamaClient, EmbeddingAdapter } from '@hori/llm';
+import { LlmClient, EmbeddingAdapter } from '@hori/llm';
 import { SummaryService, ProfileService, RetrievalService } from '@hori/memory';
 import { SearchCacheService } from '@hori/search';
 import { createLogger, createPrismaClient, createRedisClient, createAppQueues } from '@hori/shared';
@@ -16,7 +16,7 @@ interface WorkerRuntime {
     profileService: ProfileService;
     retrievalService: RetrievalService;
     searchCache: SearchCacheService;
-    llmClient: OllamaClient;
+    llmClient: LlmClient;
     embeddingAdapter: EmbeddingAdapter;
 }
 

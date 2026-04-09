@@ -58,7 +58,7 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
           if (probe.ok) {
             const data = (await probe.json()) as { models?: { name: string }[] };
             const models = data.models?.map((m) => m.name).join(", ") ?? "?";
-            (runtime.env as Record<string, unknown>).OLLAMA_BASE_URL = newUrl;
+            runtime.env.OLLAMA_BASE_URL = newUrl;
             appliedUrl = newUrl;
             status = `✅ Ollama доступен (модели: ${models})`;
 
@@ -77,8 +77,7 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
         }
 
         await interaction.editReply({
-          content: `AI URL ${appliedUrl === newUrl ? "обновлён" : "не изменён"}\nТекущий: \`${appliedUrl}\`\nПроверяли: \`${newUrl}\`\n\n${status}`,
-          flags: MessageFlags.Ephemeral
+          content: `AI URL ${appliedUrl === newUrl ? "обновлён" : "не изменён"}\nТекущий: \`${appliedUrl}\`\nПроверяли: \`${newUrl}\`\n\n${status}`
         });
         return;
       }

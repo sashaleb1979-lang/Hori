@@ -136,7 +136,8 @@ async function bootstrapApi() {
     redisUrl: env.REDIS_URL,
     prisma,
     redis,
-    logger
+    logger,
+    allowRedisFailure: env.NODE_ENV !== "production"
   });
   const analytics = new import_analytics.AnalyticsQueryService(prisma);
   const app = (0, import_fastify.default)({ logger: false });

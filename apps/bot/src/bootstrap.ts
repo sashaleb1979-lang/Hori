@@ -11,18 +11,58 @@ import { createLogger, createPrismaClient, createRedisClient, createAppQueues, e
 import { createDiscordClient } from "./gateway/create-discord-client";
 import { registerEvents } from "./events/register-events";
 
+interface BotQueueHandle {
+  add(jobName: string, payload?: unknown, options?: unknown): Promise<unknown>;
+}
+
+interface BotQueues {
+  summary: BotQueueHandle;
+  profile: BotQueueHandle;
+  embedding: BotQueueHandle;
+  cleanup: BotQueueHandle;
+  searchCache: BotQueueHandle;
+  prefix: string;
+}
+
 export interface BotRuntime {
   env: ReturnType<typeof loadEnv>;
   client: Client;
   logger: ReturnType<typeof createLogger>;
   prisma: ReturnType<typeof createPrismaClient>;
   redis: ReturnType<typeof createRedisClient>;
-  queues: ReturnType<typeof createAppQueues>;
+  queues: BotQueues;
   ingestService: MessageIngestService;
   analytics: AnalyticsQueryService;
   slashAdmin: SlashAdminService;
   runtimeConfig: RuntimeConfigService;
   orchestrator: ReturnType<typeof createChatOrchestrator>;
+}
+
+function createNoopQueues(logger: ReturnType<typeof createLogger>, prefix: string): BotQueues {
+  let warned = false;
+
+  const createNoopQueue = (queueName: string): BotQueueHandle => ({
+      async add(jobName: string) {
+        if (!warned) {
+          warned = true;
+          logger.warn(
+            { queue: queueName, jobName },
+            "redis unavailable, background jobs are disabled in local fallback mode"
+          );
+        }
+
+        return null;
+      }
+    });
+
+  return {
+    summary: createNoopQueue("summary"),
+    profile: createNoopQueue("profile"),
+    embedding: createNoopQueue("embedding"),
+    cleanup: createNoopQueue("cleanup"),
+    searchCache: createNoopQueue("searchCache"),
+    prefix
+  };
 }
 
 export async function bootstrapBot() {
@@ -32,25 +72,28 @@ export async function bootstrapBot() {
   const logger = createLogger(env.LOG_LEVEL);
   const prisma = createPrismaClient();
   const redis = createRedisClient(env.REDIS_URL);
-  await ensureInfrastructureReady({
+  const { redisReady } = await ensureInfrastructureReady({
     role: "bot",
     nodeEnv: env.NODE_ENV,
     databaseUrl: env.DATABASE_URL,
     redisUrl: env.REDIS_URL,
     prisma,
     redis,
-    logger
+    logger,
+    allowRedisFailure: env.NODE_ENV !== "production"
   });
 
   if (!env.OLLAMA_BASE_URL) {
     const persistedOllamaUrl = await loadPersistedOllamaBaseUrl(prisma, logger);
 
     if (persistedOllamaUrl) {
-      (env as Record<string, unknown>).OLLAMA_BASE_URL = persistedOllamaUrl;
+      env.OLLAMA_BASE_URL = persistedOllamaUrl;
     }
   }
 
-  const queues = createAppQueues(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
+  const queues: BotQueues = redisReady
+    ? createAppQueues(env.REDIS_URL, env.JOB_QUEUE_PREFIX)
+    : createNoopQueues(logger, env.JOB_QUEUE_PREFIX);
   const client = createDiscordClient();
 
   const analytics = new AnalyticsQueryService(prisma);
@@ -85,7 +128,7 @@ export async function bootstrapBot() {
 
   const modelRouter = new ModelRouter(env);
   const embeddingAdapter = new EmbeddingAdapter(llmClient, env);
-  const searchCache = new SearchCacheService(prisma, redis);
+  const searchCache = new SearchCacheService(prisma, redisReady ? redis : null, logger);
   const searchClient = new BraveSearchClient(env, logger, searchCache);
   const toolOrchestrator = new ToolOrchestrator(llmClient, logger);
   const ingestService = new MessageIngestService(prisma, logger);

@@ -24,7 +24,7 @@
     "prisma:generate": "node scripts/run-with-env-aliases.mjs \"corepack pnpm exec prisma generate\"",
     "prisma:migrate": "node scripts/run-with-env-aliases.mjs \"corepack pnpm exec prisma migrate dev\"",
     "prisma:deploy": "node scripts/run-with-env-aliases.mjs \"corepack pnpm exec prisma migrate deploy\"",
-    "seed": "node scripts/run-with-env-aliases.mjs \"corepack pnpm exec tsx prisma/seed.ts\""
+    "seed": "node scripts/run-with-env-aliases.mjs \"node prisma/seed.mjs\""
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -24,6 +24,34 @@ function Wait-HttpReady {
   return $false
 }
 
+function Wait-DnsReady {
+  param(
+    [Parameter(Mandatory)]
+    [string]$Url,
+    [int]$Attempts = 15,
+    [int]$DelaySeconds = 2
+  )
+
+  try {
+    $hostName = ([uri]$Url).Host
+  } catch {
+    return $false
+  }
+
+  for ($i = 1; $i -le $Attempts; $i++) {
+    try {
+      $resolved = Resolve-DnsName $hostName -ErrorAction Stop
+      if ($resolved) {
+        return $true
+      }
+    } catch {}
+
+    Start-Sleep -Seconds $DelaySeconds
+  }
+
+  return $false
+}
+
 function Get-TunnelUrlFromLog {
   param([string]$LogPath)
 
@@ -196,6 +224,44 @@ if (-not $tunnelUrl) {
   } else {
     exit 1
   }
+}
+
+# Если quick tunnel отдал URL, но DNS ещё не поднялся, не показываем его как рабочий.
+if ($tunnelUrl -and -not (Wait-DnsReady -Url $tunnelUrl -Attempts 10 -DelaySeconds 2)) {
+  Write-Host "[!] URL туннеля не резолвится через DNS: $tunnelUrl" -ForegroundColor Yellow
+  Show-LogTail -LogPath $tunnelLogFile -Title "tunnel log"
+  $tunnelUrl = $null
+
+  if ($npx) {
+    Write-Host "[*] Пробую fallback через localtunnel..." -ForegroundColor Yellow
+    $localTunnelLogFile = Join-Path $env:TEMP "localtunnel.log"
+    if (Test-Path $localTunnelLogFile) { Remove-Item $localTunnelLogFile -Force }
+
+    $tunnelProcess = Start-Process -FilePath $npx `
+      -ArgumentList "-y","localtunnel","--port","11434" `
+      -PassThru -WindowStyle Hidden `
+      -RedirectStandardOutput $localTunnelLogFile `
+      -RedirectStandardError $localTunnelLogFile
+
+    $tunnelLogFile = $localTunnelLogFile
+    for ($i = 0; $i -lt 30; $i++) {
+      Start-Sleep -Seconds 1
+      if ($tunnelProcess.HasExited) {
+        break
+      }
+
+      $tunnelUrl = Get-TunnelUrlFromLog -LogPath $tunnelLogFile
+      if ($tunnelUrl) {
+        break
+      }
+    }
+  }
+}
+
+if (-not $tunnelUrl) {
+  Write-Host "[!] После DNS-проверки рабочий URL туннеля так и не получен" -ForegroundColor Red
+  Show-LogTail -LogPath $tunnelLogFile -Title "tunnel log"
+  exit 1
 }
 
 # --- 4. Проверить что туннель живой ---

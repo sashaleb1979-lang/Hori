@@ -7,7 +7,7 @@ var import_core = require("@hori/core");
 var import_llm = require("@hori/llm");
 var import_memory = require("@hori/memory");
 var import_search = require("@hori/search");
-var import_shared4 = require("@hori/shared");
+var import_shared5 = require("@hori/shared");
 
 // src/gateway/create-discord-client.ts
 var import_discord = require("discord.js");
@@ -61,7 +61,8 @@ var slashCommandDefinitions = [
   new import_discord2.SlashCommandBuilder().setName("bot-summary").setDescription("\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 channel summaries").addChannelOption(
     (option) => option.setName("channel").setDescription("\u041A\u0430\u043D\u0430\u043B").addChannelTypes(import_discord2.ChannelType.GuildText, import_discord2.ChannelType.PublicThread, import_discord2.ChannelType.PrivateThread).setRequired(true)
   ),
-  new import_discord2.SlashCommandBuilder().setName("bot-stats").setDescription("\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u043D\u0435\u0434\u0435\u043B\u044C\u043D\u0443\u044E \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0443")
+  new import_discord2.SlashCommandBuilder().setName("bot-stats").setDescription("\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u043D\u0435\u0434\u0435\u043B\u044C\u043D\u0443\u044E \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0443"),
+  new import_discord2.SlashCommandBuilder().setName("bot-ai-url").setDescription("\u0421\u043C\u0435\u043D\u0438\u0442\u044C Ollama URL (\u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446 \u0431\u043E\u0442\u0430)").addStringOption((option) => option.setName("url").setDescription("\u041D\u043E\u0432\u044B\u0439 URL (https://...)").setRequired(true))
 ].map((command) => command.toJSON());
 var contextMenuDefinitions = [
   new import_discord2.ContextMenuCommandBuilder().setName(import_shared.CONTEXT_ACTIONS.explain).setType(import_discord2.ApplicationCommandType.Message),
@@ -78,18 +79,65 @@ function ensureModerator(interaction) {
 async function routeInteraction(runtime, interaction) {
   if (interaction.isChatInputCommand()) {
     if (!interaction.guildId) {
-      await interaction.reply({ content: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043D\u0443\u0442\u0440\u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.", ephemeral: true });
+      await interaction.reply({ content: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043D\u0443\u0442\u0440\u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
       return;
     }
     const isModerator = ensureModerator(interaction);
     if (!isModerator && interaction.commandName !== "bot-help") {
-      await interaction.reply({ content: "\u042D\u0442\u043E \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u043C\u043E\u0434\u0435\u0440\u043E\u0432.", ephemeral: true });
+      await interaction.reply({ content: "\u042D\u0442\u043E \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u043C\u043E\u0434\u0435\u0440\u043E\u0432.", flags: import_discord3.MessageFlags.Ephemeral });
       return;
     }
     switch (interaction.commandName) {
       case "bot-help":
-        await interaction.reply({ content: await runtime.slashAdmin.handleHelp(), ephemeral: true });
+        await interaction.reply({ content: await runtime.slashAdmin.handleHelp(), flags: import_discord3.MessageFlags.Ephemeral });
         return;
+      case "bot-ai-url": {
+        const isOwner = runtime.env.DISCORD_OWNER_IDS.includes(interaction.user.id);
+        if (!isOwner) {
+          await interaction.reply({ content: "\u042D\u0442\u0430 \u043A\u043E\u043C\u0430\u043D\u0434\u0430 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u0431\u043E\u0442\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+          return;
+        }
+        const newUrl = interaction.options.getString("url", true).trim();
+        try {
+          new URL(newUrl);
+        } catch {
+          await interaction.reply({ content: `\u041D\u0435\u0432\u0430\u043B\u0438\u0434\u043D\u044B\u0439 URL: ${newUrl}`, flags: import_discord3.MessageFlags.Ephemeral });
+          return;
+        }
+        const oldUrl = runtime.env.OLLAMA_BASE_URL ?? "(\u043D\u0435 \u0437\u0430\u0434\u0430\u043D)";
+        await interaction.deferReply({ flags: import_discord3.MessageFlags.Ephemeral });
+        let status = "\u23F3 \u043F\u0440\u043E\u0432\u0435\u0440\u044F\u044E...";
+        let appliedUrl = oldUrl;
+        try {
+          const probe = await fetch(new URL("/api/tags", newUrl), { signal: AbortSignal.timeout(5e3) });
+          if (probe.ok) {
+            const data = await probe.json();
+            const models = data.models?.map((m) => m.name).join(", ") ?? "?";
+            runtime.env.OLLAMA_BASE_URL = newUrl;
+            appliedUrl = newUrl;
+            status = `\u2705 Ollama \u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D (\u043C\u043E\u0434\u0435\u043B\u0438: ${models})`;
+            try {
+              await (0, import_shared2.persistOllamaBaseUrl)(runtime.prisma, newUrl, interaction.user.id);
+              status += "\n\u{1F4BE} URL \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D \u0438 \u043F\u0435\u0440\u0435\u0436\u0438\u0432\u0451\u0442 \u0440\u0435\u0441\u0442\u0430\u0440\u0442.";
+            } catch (error) {
+              runtime.logger.warn({ error: (0, import_shared2.asErrorMessage)(error), url: newUrl }, "failed to persist ollama url");
+              status += "\n\u26A0\uFE0F URL \u043F\u0440\u0438\u043C\u0435\u043D\u0451\u043D \u0442\u043E\u043B\u044C\u043A\u043E \u0432 \u043F\u0430\u043C\u044F\u0442\u0438 \u043F\u0440\u043E\u0446\u0435\u0441\u0441\u0430. \u041F\u043E\u0441\u043B\u0435 \u0440\u0435\u0441\u0442\u0430\u0440\u0442\u0430 \u043F\u043E\u043D\u0430\u0434\u043E\u0431\u0438\u0442\u0441\u044F \u0437\u0430\u0434\u0430\u0442\u044C \u0435\u0433\u043E \u0441\u043D\u043E\u0432\u0430.";
+            }
+          } else {
+            status = `\u274C URL \u043D\u0435 \u043F\u0440\u0438\u043C\u0435\u043D\u0451\u043D: Ollama \u0432\u0435\u0440\u043D\u0443\u043B ${probe.status}`;
+          }
+        } catch (err) {
+          status = `\u274C URL \u043D\u0435 \u043F\u0440\u0438\u043C\u0435\u043D\u0451\u043D: ${err instanceof Error ? err.message : "unknown"}`;
+        }
+        await interaction.editReply({
+          content: `AI URL ${appliedUrl === newUrl ? "\u043E\u0431\u043D\u043E\u0432\u043B\u0451\u043D" : "\u043D\u0435 \u0438\u0437\u043C\u0435\u043D\u0451\u043D"}
+\u0422\u0435\u043A\u0443\u0449\u0438\u0439: \`${appliedUrl}\`
+\u041F\u0440\u043E\u0432\u0435\u0440\u044F\u043B\u0438: \`${newUrl}\`
+
+${status}`
+        });
+        return;
+      }
       case "bot-style":
         await interaction.reply({
           content: await runtime.slashAdmin.updateStyle(interaction.guildId, {
@@ -102,7 +150,7 @@ async function routeInteraction(runtime, interaction) {
             forbiddenWords: interaction.options.getString("forbidden-words"),
             forbiddenTopics: interaction.options.getString("forbidden-topics")
           }),
-          ephemeral: true
+          flags: import_discord3.MessageFlags.Ephemeral
         });
         return;
       case "bot-memory": {
@@ -114,7 +162,7 @@ async function routeInteraction(runtime, interaction) {
           key,
           interaction.options.getString("value", true)
         ) : await runtime.slashAdmin.forget(interaction.guildId, key);
-        await interaction.reply({ content, ephemeral: true });
+        await interaction.reply({ content, flags: import_discord3.MessageFlags.Ephemeral });
         return;
       }
       case "bot-relationship":
@@ -133,7 +181,7 @@ async function routeInteraction(runtime, interaction) {
               protectedTopics: (interaction.options.getString("protected-topics") ?? "").split(",").map((part) => part.trim()).filter(Boolean)
             }
           ),
-          ephemeral: true
+          flags: import_discord3.MessageFlags.Ephemeral
         });
         return;
       case "bot-feature":
@@ -143,19 +191,19 @@ async function routeInteraction(runtime, interaction) {
             interaction.options.getString("key", true),
             interaction.options.getBoolean("enabled", true)
           ),
-          ephemeral: true
+          flags: import_discord3.MessageFlags.Ephemeral
         });
         return;
       case "bot-debug":
         await interaction.reply({
           content: await runtime.slashAdmin.debugTrace(interaction.options.getString("message-id", true)),
-          ephemeral: true
+          flags: import_discord3.MessageFlags.Ephemeral
         });
         return;
       case "bot-profile":
         await interaction.reply({
           content: await runtime.slashAdmin.profile(interaction.guildId, interaction.options.getUser("user", true).id),
-          ephemeral: true
+          flags: import_discord3.MessageFlags.Ephemeral
         });
         return;
       case "bot-channel":
@@ -170,20 +218,20 @@ async function routeInteraction(runtime, interaction) {
               topicInterestTags: interaction.options.getString("topic-interest-tags")
             }
           ),
-          ephemeral: true
+          flags: import_discord3.MessageFlags.Ephemeral
         });
         return;
       case "bot-summary":
         await interaction.reply({
           content: await runtime.slashAdmin.summary(interaction.guildId, interaction.options.getChannel("channel", true).id),
-          ephemeral: true
+          flags: import_discord3.MessageFlags.Ephemeral
         });
         return;
       case "bot-stats":
-        await interaction.reply({ content: await runtime.slashAdmin.stats(interaction.guildId), ephemeral: true });
+        await interaction.reply({ content: await runtime.slashAdmin.stats(interaction.guildId), flags: import_discord3.MessageFlags.Ephemeral });
         return;
       default:
-        await interaction.reply({ content: "\u041D\u0435 \u0437\u043D\u0430\u044E \u0442\u0430\u043A\u0443\u044E \u043A\u043E\u043C\u0430\u043D\u0434\u0443.", ephemeral: true });
+        await interaction.reply({ content: "\u041D\u0435 \u0437\u043D\u0430\u044E \u0442\u0430\u043A\u0443\u044E \u043A\u043E\u043C\u0430\u043D\u0434\u0443.", flags: import_discord3.MessageFlags.Ephemeral });
         return;
     }
   }
@@ -192,7 +240,7 @@ async function routeInteraction(runtime, interaction) {
   }
   const featureFlags = await runtime.runtimeConfig.getFeatureFlags(interaction.guildId);
   if (!featureFlags.contextActions) {
-    await interaction.reply({ content: "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u044B\u0435 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044F \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u044B.", ephemeral: true });
+    await interaction.reply({ content: "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u044B\u0435 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044F \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u044B.", flags: import_discord3.MessageFlags.Ephemeral });
     return;
   }
   const action = interaction.commandName === import_shared2.CONTEXT_ACTIONS.explain ? "explain" : interaction.commandName === import_shared2.CONTEXT_ACTIONS.summarize ? "summarize" : "tone";
@@ -204,12 +252,13 @@ async function routeInteraction(runtime, interaction) {
     action,
     sourceMessageId: interaction.targetId
   });
-  await interaction.reply({ content: result, ephemeral: true });
+  await interaction.reply({ content: result, flags: import_discord3.MessageFlags.Ephemeral });
 }
 
 // src/router/message-router.ts
 var import_discord4 = require("discord.js");
 var import_analytics = require("@hori/analytics");
+var import_shared4 = require("@hori/shared");
 
 // src/responders/message-responder.ts
 var import_shared3 = require("@hori/shared");
@@ -225,6 +274,47 @@ async function sendReply(message, text) {
 }
 
 // src/router/message-router.ts
+async function enqueueBackgroundJobs(runtime, envelope) {
+  const jobs = [
+    {
+      queue: "summary",
+      task: runtime.queues.summary.add(
+        "summary",
+        { guildId: envelope.guildId, channelId: envelope.channelId },
+        { jobId: `summary:${envelope.guildId}:${envelope.channelId}` }
+      )
+    },
+    {
+      queue: "profile",
+      task: runtime.queues.profile.add(
+        "profile",
+        { guildId: envelope.guildId, userId: envelope.userId },
+        { jobId: `profile:${envelope.guildId}:${envelope.userId}` }
+      )
+    },
+    {
+      queue: "embedding",
+      task: envelope.content.length >= runtime.env.MESSAGE_EMBED_MIN_CHARS ? runtime.queues.embedding.add(
+        "embedding",
+        { entityType: "message", entityId: envelope.messageId },
+        { jobId: `embedding:${envelope.messageId}` }
+      ) : Promise.resolve()
+    }
+  ];
+  const results = await Promise.allSettled(jobs.map((job) => job.task));
+  for (const [index, result] of results.entries()) {
+    if (result.status === "rejected") {
+      runtime.logger.warn(
+        {
+          queue: jobs[index]?.queue,
+          messageId: envelope.messageId,
+          error: (0, import_shared4.asErrorMessage)(result.reason)
+        },
+        "background queue enqueue failed"
+      );
+    }
+  }
+}
 async function detectTriggerSource(message, botName, botId) {
   const content = message.content.trim();
   if (message.mentions.has(botId)) {
@@ -308,11 +398,7 @@ async function routeMessage(runtime, message) {
     isBotUser: false
   });
   (0, import_analytics.trackIngestedMessage)();
-  await Promise.all([
-    runtime.queues.summary.add("summary", { guildId: envelope.guildId, channelId: envelope.channelId }, { jobId: `summary:${envelope.guildId}:${envelope.channelId}` }),
-    runtime.queues.profile.add("profile", { guildId: envelope.guildId, userId: envelope.userId }, { jobId: `profile:${envelope.guildId}:${envelope.userId}` }),
-    message.content.length >= runtime.env.MESSAGE_EMBED_MIN_CHARS ? runtime.queues.embedding.add("embedding", { entityType: "message", entityId: envelope.messageId }, { jobId: `embedding:${envelope.messageId}` }) : Promise.resolve()
-  ]);
+  await enqueueBackgroundJobs(runtime, envelope);
   if (!explicitInvocation && !autoInterject) {
     return;
   }
@@ -372,7 +458,7 @@ async function syncCommands(runtime) {
   runtime.logger.info({ scope: "global" }, "discord commands synced");
 }
 function registerEvents(runtime) {
-  runtime.client.once("ready", async () => {
+  runtime.client.once("clientReady", async () => {
     runtime.logger.info({ user: runtime.client.user?.tag }, "discord client ready");
     await syncCommands(runtime);
   });
@@ -391,29 +477,59 @@ function registerEvents(runtime) {
     } catch (error) {
       runtime.logger.error({ error }, "interaction handler failed");
       if (interaction.isRepliable() && !interaction.replied) {
-        await interaction.reply({ content: "\u0427\u0442\u043E-\u0442\u043E \u0441\u043B\u043E\u043C\u0430\u043B\u043E\u0441\u044C.", ephemeral: true });
+        await interaction.reply({ content: "\u0427\u0442\u043E-\u0442\u043E \u0441\u043B\u043E\u043C\u0430\u043B\u043E\u0441\u044C.", flags: import_discord5.MessageFlags.Ephemeral });
       }
     }
   });
 }
 
 // src/bootstrap.ts
+function createNoopQueues(logger, prefix) {
+  let warned = false;
+  const createNoopQueue = (queueName) => ({
+    async add(jobName) {
+      if (!warned) {
+        warned = true;
+        logger.warn(
+          { queue: queueName, jobName },
+          "redis unavailable, background jobs are disabled in local fallback mode"
+        );
+      }
+      return null;
+    }
+  });
+  return {
+    summary: createNoopQueue("summary"),
+    profile: createNoopQueue("profile"),
+    embedding: createNoopQueue("embedding"),
+    cleanup: createNoopQueue("cleanup"),
+    searchCache: createNoopQueue("searchCache"),
+    prefix
+  };
+}
 async function bootstrapBot() {
   const env = (0, import_config.loadEnv)();
   (0, import_config.assertEnvForRole)(env, "bot");
-  const logger = (0, import_shared4.createLogger)(env.LOG_LEVEL);
-  const prisma = (0, import_shared4.createPrismaClient)();
-  const redis = (0, import_shared4.createRedisClient)(env.REDIS_URL);
-  await (0, import_shared4.ensureInfrastructureReady)({
+  const logger = (0, import_shared5.createLogger)(env.LOG_LEVEL);
+  const prisma = (0, import_shared5.createPrismaClient)();
+  const redis = (0, import_shared5.createRedisClient)(env.REDIS_URL);
+  const { redisReady } = await (0, import_shared5.ensureInfrastructureReady)({
     role: "bot",
     nodeEnv: env.NODE_ENV,
     databaseUrl: env.DATABASE_URL,
     redisUrl: env.REDIS_URL,
     prisma,
     redis,
-    logger
+    logger,
+    allowRedisFailure: env.NODE_ENV !== "production"
   });
-  const queues = (0, import_shared4.createAppQueues)(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
+  if (!env.OLLAMA_BASE_URL) {
+    const persistedOllamaUrl = await (0, import_shared5.loadPersistedOllamaBaseUrl)(prisma, logger);
+    if (persistedOllamaUrl) {
+      env.OLLAMA_BASE_URL = persistedOllamaUrl;
+    }
+  }
+  const queues = redisReady ? (0, import_shared5.createAppQueues)(env.REDIS_URL, env.JOB_QUEUE_PREFIX) : createNoopQueues(logger, env.JOB_QUEUE_PREFIX);
   const client = createDiscordClient();
   const analytics = new import_analytics2.AnalyticsQueryService(prisma);
   const summaryService = new import_memory.SummaryService(prisma);
@@ -423,9 +539,28 @@ async function bootstrapBot() {
   const runtimeConfig = new import_core.RuntimeConfigService(prisma, env);
   const contextService = new import_memory.ContextService(prisma, summaryService, profileService, relationshipService, retrievalService);
   const llmClient = new import_llm.OllamaClient(env, logger);
+  if (env.OLLAMA_BASE_URL) {
+    try {
+      const probe = await fetch(new URL("/api/tags", env.OLLAMA_BASE_URL), {
+        signal: AbortSignal.timeout(5e3)
+      });
+      if (probe.ok) {
+        const data = await probe.json();
+        const models = data.models?.map((m) => m.name) ?? [];
+        logger.info({ url: env.OLLAMA_BASE_URL, models }, `ollama reachable: url=${env.OLLAMA_BASE_URL} models=${models.join(",")}`);
+      } else {
+        logger.warn({ url: env.OLLAMA_BASE_URL, status: probe.status }, `ollama responded with error: url=${env.OLLAMA_BASE_URL} status=${probe.status} \u2014 fallback replies until fixed`);
+      }
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : String(error);
+      logger.warn({ url: env.OLLAMA_BASE_URL, error: errorText }, `ollama unreachable: url=${env.OLLAMA_BASE_URL} error=${errorText} \u2014 bot will use fallback replies. Run start-tunnel.ps1 and /bot-ai-url`);
+    }
+  } else {
+    logger.warn("OLLAMA_BASE_URL not set \u2014 bot will use fallback replies for all LLM calls");
+  }
   const modelRouter = new import_llm.ModelRouter(env);
   const embeddingAdapter = new import_llm.EmbeddingAdapter(llmClient, env);
-  const searchCache = new import_search.SearchCacheService(prisma, redis);
+  const searchCache = new import_search.SearchCacheService(prisma, redisReady ? redis : null, logger);
   const searchClient = new import_search.BraveSearchClient(env, logger, searchCache);
   const toolOrchestrator = new import_llm.ToolOrchestrator(llmClient, logger);
   const ingestService = new import_analytics2.MessageIngestService(prisma, logger);

@@ -21,7 +21,7 @@ var import_config = require("@hori/config");
 var import_llm3 = require("@hori/llm");
 var import_memory = require("@hori/memory");
 var import_search = require("@hori/search");
-var import_shared2 = require("@hori/shared");
+var import_shared4 = require("@hori/shared");
 
 // src/jobs/cleanup.ts
 function createCleanupJob(runtime) {
@@ -51,7 +51,13 @@ function createEmbeddingJob(runtime) {
       if (!message || message.content.length < runtime.env.MESSAGE_EMBED_MIN_CHARS) {
         return { skipped: true, reason: "message not eligible" };
       }
-      const vector2 = await runtime.embeddingAdapter.embedOne(message.content);
+      let vector2;
+      try {
+        vector2 = await runtime.embeddingAdapter.embedOne(message.content);
+      } catch (error) {
+        runtime.logger.warn({ entityId: message.id, error: (0, import_shared.asErrorMessage)(error), jobId: job.id }, "embedding skipped because ollama is unavailable");
+        return { skipped: true, reason: "ollama unavailable" };
+      }
       await runtime.prisma.messageEmbedding.upsert({
         where: { messageId: message.id },
         update: {
@@ -82,7 +88,13 @@ function createEmbeddingJob(runtime) {
       return { skipped: true, reason: "entity not found" };
     }
     const value = "value" in source ? source.value : "";
-    const vector = await runtime.embeddingAdapter.embedOne(value);
+    let vector;
+    try {
+      vector = await runtime.embeddingAdapter.embedOne(value);
+    } catch (error) {
+      runtime.logger.warn({ entityId: job.data.entityId, error: (0, import_shared.asErrorMessage)(error), jobId: job.id }, "embedding skipped because ollama is unavailable");
+      return { skipped: true, reason: "ollama unavailable" };
+    }
     await runtime.retrievalService.setEmbedding(job.data.entityType, job.data.entityId, (0, import_shared.toVectorLiteral)(vector));
     return { skipped: false, entityType: job.data.entityType };
   };
@@ -90,6 +102,7 @@ function createEmbeddingJob(runtime) {
 
 // src/jobs/profiles.ts
 var import_llm = require("@hori/llm");
+var import_shared2 = require("@hori/shared");
 function createProfileJob(runtime) {
   return async (job) => {
     const stats = await runtime.analytics.getUserStats(job.data.guildId, job.data.userId);
@@ -105,19 +118,26 @@ function createProfileJob(runtime) {
       return { skipped: true, reason: "profile refresh not needed" };
     }
     const messages = await runtime.profileService.getRecentMessagesForProfile(job.data.guildId, job.data.userId, 50);
-    const response = await runtime.llmClient.chat({
-      model: runtime.env.OLLAMA_SMART_MODEL,
-      messages: (0, import_llm.buildUserProfilePrompt)(
-        [
-          `\u0421\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0430: totalMessages=${stats.totalMessages}, avgMessageLength=${stats.avgMessageLength}, totalReplies=${stats.totalReplies}, totalMentions=${stats.totalMentions}.`,
-          "\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F:",
-          ...messages.map((message) => `- ${message.content}`)
-        ].join("\n")
-      ),
-      format: "json",
-      temperature: 0.2
-    });
-    const parsed = JSON.parse(response.message.content);
+    const prompt = (0, import_llm.buildUserProfilePrompt)(
+      [
+        `\u0421\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0430: totalMessages=${stats.totalMessages}, avgMessageLength=${stats.avgMessageLength}, totalReplies=${stats.totalReplies}, totalMentions=${stats.totalMentions}.`,
+        "\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F:",
+        ...messages.map((message) => `- ${message.content}`)
+      ].join("\n")
+    );
+    let parsed;
+    try {
+      const response = await runtime.llmClient.chat({
+        model: runtime.env.OLLAMA_SMART_MODEL,
+        messages: prompt,
+        format: "json",
+        temperature: 0.2
+      });
+      parsed = JSON.parse(response.message.content);
+    } catch (error) {
+      runtime.logger.warn({ error: (0, import_shared2.asErrorMessage)(error), guildId: job.data.guildId, jobId: job.id, userId: job.data.userId }, "profile refresh skipped because ollama is unavailable or returned invalid json");
+      return { skipped: true, reason: "ollama unavailable" };
+    }
     await runtime.profileService.upsertProfile({
       guildId: job.data.guildId,
       userId: job.data.userId,
@@ -142,6 +162,7 @@ function createSearchCacheCleanupJob(runtime) {
 
 // src/jobs/summaries.ts
 var import_llm2 = require("@hori/llm");
+var import_shared3 = require("@hori/shared");
 function createSummaryJob(runtime) {
   return async (job) => {
     const messages = await runtime.summaryService.getMessagesForNextSummary(
@@ -156,10 +177,16 @@ function createSummaryJob(runtime) {
       messages.map((message) => `[${message.user.globalName || message.user.username || message.userId}] ${message.content}`).join("\n"),
       "\u0421\u0434\u0435\u043B\u0430\u0439 \u043A\u0440\u0430\u0442\u043A\u0443\u044E \u0438 \u0434\u043B\u0438\u043D\u043D\u0443\u044E \u0441\u0432\u043E\u0434\u043A\u0443. \u0412 \u043F\u0435\u0440\u0432\u043E\u0439 \u0441\u0442\u0440\u043E\u043A\u0435 \u043A\u043E\u0440\u043E\u0442\u043A\u043E, \u0434\u0430\u043B\u044C\u0448\u0435 \u043F\u043E\u0434\u0440\u043E\u0431\u043D\u0435\u0435."
     );
-    const response = await runtime.llmClient.chat({
-      model: runtime.env.OLLAMA_SMART_MODEL,
-      messages: prompt
-    });
+    let response;
+    try {
+      response = await runtime.llmClient.chat({
+        model: runtime.env.OLLAMA_SMART_MODEL,
+        messages: prompt
+      });
+    } catch (error) {
+      runtime.logger.warn({ channelId: job.data.channelId, error: (0, import_shared3.asErrorMessage)(error), guildId: job.data.guildId, jobId: job.id }, "summary skipped because ollama is unavailable");
+      return { skipped: true, reason: "ollama unavailable" };
+    }
     const [summaryShort, ...rest] = response.message.content.split("\n");
     await runtime.summaryService.storeSummary({
       guildId: job.data.guildId,
@@ -179,10 +206,10 @@ function createSummaryJob(runtime) {
 async function main() {
   const env = (0, import_config.loadEnv)();
   (0, import_config.assertEnvForRole)(env, "worker");
-  const logger = (0, import_shared2.createLogger)(env.LOG_LEVEL);
-  const prisma = (0, import_shared2.createPrismaClient)();
-  const redis = (0, import_shared2.createRedisClient)(env.REDIS_URL);
-  await (0, import_shared2.ensureInfrastructureReady)({
+  const logger = (0, import_shared4.createLogger)(env.LOG_LEVEL);
+  const prisma = (0, import_shared4.createPrismaClient)();
+  const redis = (0, import_shared4.createRedisClient)(env.REDIS_URL);
+  await (0, import_shared4.ensureInfrastructureReady)({
     role: "worker",
     nodeEnv: env.NODE_ENV,
     databaseUrl: env.DATABASE_URL,
@@ -191,7 +218,16 @@ async function main() {
     redis,
     logger
   });
-  const queues = (0, import_shared2.createAppQueues)(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
+  if (!env.OLLAMA_BASE_URL) {
+    const persistedOllamaUrl = await (0, import_shared4.loadPersistedOllamaBaseUrl)(prisma, logger);
+    if (persistedOllamaUrl) {
+      env.OLLAMA_BASE_URL = persistedOllamaUrl;
+    }
+  }
+  if ((0, import_shared4.shouldAutoSyncOllamaBaseUrl)()) {
+    (0, import_shared4.startOllamaBaseUrlSync)({ env, prisma, logger });
+  }
+  const queues = (0, import_shared4.createAppQueues)(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
   const analytics = new import_analytics.AnalyticsQueryService(prisma);
   const summaryService = new import_memory.SummaryService(prisma);
   const profileService = new import_memory.ProfileService(prisma, env);
@@ -214,11 +250,11 @@ async function main() {
     embeddingAdapter
   };
   const workers = [
-    (0, import_shared2.createWorker)(import_shared2.QUEUE_NAMES.summary, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSummaryJob(runtime), env.JOB_CONCURRENCY_SUMMARIES),
-    (0, import_shared2.createWorker)(import_shared2.QUEUE_NAMES.profile, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createProfileJob(runtime), env.JOB_CONCURRENCY_PROFILES),
-    (0, import_shared2.createWorker)(import_shared2.QUEUE_NAMES.embedding, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createEmbeddingJob(runtime), env.JOB_CONCURRENCY_EMBEDDINGS),
-    (0, import_shared2.createWorker)(import_shared2.QUEUE_NAMES.searchCache, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSearchCacheCleanupJob(runtime), 1),
-    (0, import_shared2.createWorker)(import_shared2.QUEUE_NAMES.cleanup, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createCleanupJob(runtime), 1)
+    (0, import_shared4.createWorker)(import_shared4.QUEUE_NAMES.summary, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSummaryJob(runtime), env.JOB_CONCURRENCY_SUMMARIES),
+    (0, import_shared4.createWorker)(import_shared4.QUEUE_NAMES.profile, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createProfileJob(runtime), env.JOB_CONCURRENCY_PROFILES),
+    (0, import_shared4.createWorker)(import_shared4.QUEUE_NAMES.embedding, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createEmbeddingJob(runtime), env.JOB_CONCURRENCY_EMBEDDINGS),
+    (0, import_shared4.createWorker)(import_shared4.QUEUE_NAMES.searchCache, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSearchCacheCleanupJob(runtime), 1),
+    (0, import_shared4.createWorker)(import_shared4.QUEUE_NAMES.cleanup, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createCleanupJob(runtime), 1)
   ];
   await Promise.all([
     queues.cleanup.add("cleanup", { kind: "logs" }, { jobId: "cleanup:logs", repeat: { every: 24 * 60 * 60 * 1e3 } }),

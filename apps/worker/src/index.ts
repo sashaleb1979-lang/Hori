@@ -4,7 +4,18 @@ import { EmbeddingAdapter, OllamaClient } from "@hori/llm";
 import type { LlmClient } from "@hori/llm";
 import { ProfileService, RetrievalService, SummaryService } from "@hori/memory";
 import { SearchCacheService } from "@hori/search";
-import { createAppQueues, createLogger, createPrismaClient, createRedisClient, createWorker, ensureInfrastructureReady, loadPersistedOllamaBaseUrl, QUEUE_NAMES } from "@hori/shared";
+import {
+  createAppQueues,
+  createLogger,
+  createPrismaClient,
+  createRedisClient,
+  createWorker,
+  ensureInfrastructureReady,
+  loadPersistedOllamaBaseUrl,
+  QUEUE_NAMES,
+  shouldAutoSyncOllamaBaseUrl,
+  startOllamaBaseUrlSync
+} from "@hori/shared";
 
 import { createCleanupJob } from "./jobs/cleanup";
 import { createEmbeddingJob } from "./jobs/embeddings";
@@ -48,8 +59,12 @@ async function main() {
     const persistedOllamaUrl = await loadPersistedOllamaBaseUrl(prisma, logger);
 
     if (persistedOllamaUrl) {
-      (env as Record<string, unknown>).OLLAMA_BASE_URL = persistedOllamaUrl;
+      env.OLLAMA_BASE_URL = persistedOllamaUrl;
     }
+  }
+
+  if (shouldAutoSyncOllamaBaseUrl()) {
+    startOllamaBaseUrlSync({ env, prisma, logger });
   }
 
   const queues = createAppQueues(env.REDIS_URL, env.JOB_QUEUE_PREFIX);

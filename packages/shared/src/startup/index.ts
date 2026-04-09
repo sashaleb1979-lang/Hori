@@ -89,6 +89,7 @@ export async function ensureInfrastructureReady(options: {
   prisma: AppPrismaClient;
   redis: IORedis;
   logger: AppLogger;
+  allowRedisFailure?: boolean;
 }) {
   assertProcessMode(options.role, options.nodeEnv);
   assertInfrastructureUrl("Postgres", options.databaseUrl, options.nodeEnv);
@@ -102,6 +103,8 @@ export async function ensureInfrastructureReady(options: {
     throw new Error(`Postgres is not reachable at ${formatTarget(options.databaseUrl)}: ${asErrorMessage(error)}`);
   }
 
+  let redisReady = true;
+
   try {
     if (options.redis.status === "wait" || options.redis.status === "end") {
       await options.redis.connect();
@@ -109,8 +112,24 @@ export async function ensureInfrastructureReady(options: {
 
     await options.redis.ping();
   } catch (error) {
-    throw new Error(`Redis is not reachable at ${formatTarget(options.redisUrl)}: ${asErrorMessage(error)}`);
+    const message = `Redis is not reachable at ${formatTarget(options.redisUrl)}: ${asErrorMessage(error)}`;
+
+    if (!options.allowRedisFailure || options.nodeEnv === "production") {
+      throw new Error(message);
+    }
+
+    redisReady = false;
+    options.logger.warn(
+      { role: options.role, error: message },
+      "redis unavailable, continuing in degraded local mode"
+    );
+
+    try {
+      options.redis.disconnect();
+    } catch {}
   }
 
-  options.logger.info({ role: options.role }, "infrastructure ready");
+  options.logger.info({ role: options.role, redisReady }, "infrastructure ready");
+
+  return { redisReady };
 }

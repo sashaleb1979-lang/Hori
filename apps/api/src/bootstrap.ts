@@ -35,7 +35,8 @@ export async function bootstrapApi() {
     redisUrl: env.REDIS_URL,
     prisma,
     redis,
-    logger
+    logger,
+    allowRedisFailure: env.NODE_ENV !== "production"
   });
   const analytics = new AnalyticsQueryService(prisma);
   const app = Fastify({ logger: false });

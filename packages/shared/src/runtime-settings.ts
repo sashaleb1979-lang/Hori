@@ -31,3 +31,30 @@ export async function persistOllamaBaseUrl(prisma: AppPrismaClient, url: string,
     updatedBy ?? null
   );
 }
+
+export function shouldAutoSyncOllamaBaseUrl(raw: NodeJS.ProcessEnv = process.env) {
+  return !raw.OLLAMA_BASE_URL && !raw.AI_URL;
+}
+
+export function startOllamaBaseUrlSync(options: {
+  env: { OLLAMA_BASE_URL?: string };
+  prisma: AppPrismaClient;
+  logger: AppLogger;
+  intervalMs?: number;
+}) {
+  const intervalMs = options.intervalMs ?? 15000;
+
+  const timer = setInterval(async () => {
+    const persistedUrl = await loadPersistedOllamaBaseUrl(options.prisma, options.logger);
+
+    if (!persistedUrl || persistedUrl === options.env.OLLAMA_BASE_URL) {
+      return;
+    }
+
+    options.env.OLLAMA_BASE_URL = persistedUrl;
+    options.logger.info({ url: persistedUrl }, "updated ollama url from runtime settings");
+  }, intervalMs);
+
+  timer.unref?.();
+  return timer;
+}
