@@ -52,6 +52,27 @@ export async function bootstrapBot() {
   const runtimeConfig = new RuntimeConfigService(prisma, env);
   const contextService = new ContextService(prisma, summaryService, profileService, relationshipService, retrievalService);
   const llmClient = new OllamaClient(env, logger);
+
+  // --- Ollama health check: сразу видно в логах, жива ли нейронка ---
+  if (env.OLLAMA_BASE_URL) {
+    try {
+      const probe = await fetch(new URL("/api/tags", env.OLLAMA_BASE_URL), {
+        signal: AbortSignal.timeout(5000)
+      });
+      if (probe.ok) {
+        const data = (await probe.json()) as { models?: { name: string }[] };
+        const models = data.models?.map((m) => m.name) ?? [];
+        logger.info({ url: env.OLLAMA_BASE_URL, models }, "ollama reachable");
+      } else {
+        logger.warn({ url: env.OLLAMA_BASE_URL, status: probe.status }, "ollama responded with error — fallback replies until fixed");
+      }
+    } catch (error) {
+      logger.warn({ url: env.OLLAMA_BASE_URL, error: String(error) }, "ollama unreachable — bot will use fallback replies. Run start-tunnel.ps1 and /bot-ai-url");
+    }
+  } else {
+    logger.warn("OLLAMA_BASE_URL not set — bot will use fallback replies for all LLM calls");
+  }
+
   const modelRouter = new ModelRouter(env);
   const embeddingAdapter = new EmbeddingAdapter(llmClient, env);
   const searchCache = new SearchCacheService(prisma, redis);
