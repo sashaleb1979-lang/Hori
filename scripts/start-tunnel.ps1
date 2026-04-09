@@ -3,6 +3,29 @@
 
 $ErrorActionPreference = "Stop"
 
+function Wait-HttpReady {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Url,
+    [int]$Attempts = 30,
+    [int]$DelaySeconds = 2,
+    [int]$TimeoutSeconds = 10
+  )
+
+  for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+    try {
+      $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSeconds
+      if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) {
+        return $true
+      }
+    } catch {}
+
+    Start-Sleep -Seconds $DelaySeconds
+  }
+
+  return $false
+}
+
 $cloudflared = "C:\Program Files (x86)\cloudflared\cloudflared.exe"
 if (-not (Test-Path $cloudflared)) {
   $cloudflared = (Get-Command cloudflared -ErrorAction SilentlyContinue).Source
@@ -27,14 +50,7 @@ $ollamaProcess = Start-Process -FilePath "ollama" -ArgumentList "serve" `
   -Environment @{ OLLAMA_ORIGINS = "*"; OLLAMA_HOST = "0.0.0.0:11434" }
 
 # Подождать пока Ollama запустится
-$ready = $false
-for ($i = 0; $i -lt 15; $i++) {
-  try {
-    $r = Invoke-WebRequest -Uri "http://localhost:11434" -UseBasicParsing -TimeoutSec 2
-    if ($r.StatusCode -eq 200) { $ready = $true; break }
-  } catch {}
-  Start-Sleep -Seconds 1
-}
+$ready = Wait-HttpReady -Url "http://localhost:11434" -Attempts 15 -DelaySeconds 1 -TimeoutSeconds 2
 
 if (-not $ready) {
   Write-Host "[!] Ollama не отвечает на localhost:11434" -ForegroundColor Red
@@ -71,13 +87,22 @@ if (-not $tunnelUrl) {
 }
 
 # --- 4. Проверить что туннель работает ---
-try {
-  $check = Invoke-WebRequest -Uri $tunnelUrl -UseBasicParsing -TimeoutSec 10
-  if ($check.StatusCode -ne 200) { throw "bad status" }
-} catch {
+$tunnelReady = Wait-HttpReady -Url "$tunnelUrl/api/tags" -Attempts 20 -DelaySeconds 2 -TimeoutSeconds 10
+if (-not $tunnelReady) {
+  $tunnelReady = Wait-HttpReady -Url $tunnelUrl -Attempts 10 -DelaySeconds 2 -TimeoutSeconds 10
+}
+
+if (-not $tunnelReady) {
   Write-Host "[!] Туннель не отвечает: $tunnelUrl" -ForegroundColor Red
+  if (Test-Path $tunnelLogFile) {
+    Write-Host "[i] Последние строки cloudflared:" -ForegroundColor DarkGray
+    Get-Content $tunnelLogFile -Tail 8 -ErrorAction SilentlyContinue | ForEach-Object {
+      Write-Host "    $_" -ForegroundColor DarkGray
+    }
+  }
   exit 1
 }
+Write-Host "[+] Соединение подтверждено" -ForegroundColor Green
 
 # --- 5. Вывести результат ---
 Write-Host ""
