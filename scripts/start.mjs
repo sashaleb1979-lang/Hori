@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -17,6 +18,31 @@ for (let i = 1; i < parts.length; i++) {
       process.env[key] = value;
     }
   }
+}
+
+// Resolve DATABASE_URL from alias before Prisma CLI runs
+if (!process.env.DATABASE_URL && process.env.DB_URL) {
+  process.env.DATABASE_URL = process.env.DB_URL;
+}
+
+// Auto-apply database migrations and seed on first start.
+// Safe to run repeatedly: prisma migrate deploy is idempotent.
+try {
+  console.log("[start] applying database migrations...");
+  execSync("pnpm exec prisma migrate deploy", { stdio: "inherit", cwd: process.cwd() });
+  console.log("[start] migrations applied");
+} catch (error) {
+  console.error("[start] migration failed:", error.message);
+  process.exit(1);
+}
+
+try {
+  console.log("[start] seeding database...");
+  execSync("pnpm exec tsx prisma/seed.ts", { stdio: "inherit", cwd: process.cwd() });
+  console.log("[start] seed complete");
+} catch (error) {
+  // Seed failure is non-fatal — tables exist, flags will use defaults
+  console.warn("[start] seed skipped:", error.message);
 }
 
 const entries = {
