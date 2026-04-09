@@ -79,4 +79,13 @@ describe("loadEnv", () => {
 
     expect(env.OLLAMA_BASE_URL).toBeUndefined();
   });
+
+  it("throws a clearer error for unresolved Railway database references", () => {
+    expect(() =>
+      loadEnv({
+        DATABASE_URL: "${{Postgres.DATABASE_URL}}",
+        REDIS_URL: "redis://localhost:6379"
+      })
+    ).toThrow(/Railway reference/);
+  });
 });

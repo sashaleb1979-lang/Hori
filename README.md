@@ -115,6 +115,7 @@ Notes:
 - The app still accepts legacy long names like `DISCORD_TOKEN` and `DATABASE_URL`.
 - Prisma-based scripts use the alias bridge automatically, so `DB_URL` is enough if you run the provided `pnpm prisma:*` and `pnpm seed` scripts.
 - API-only deployments can skip `AI_URL`; bot and worker still require it.
+- In Railway, prefer using the built-in managed database variable names directly for service references: `DATABASE_URL=${{Postgres.DATABASE_URL}}` and `REDIS_URL=${{Redis.REDIS_URL}}`.
 
 ## Slash Commands
 - `/bot-help`

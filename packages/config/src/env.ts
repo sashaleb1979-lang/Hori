@@ -341,9 +341,45 @@ function removeUndefined<T extends Record<string, unknown>>(input: T): Partial<T
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as Partial<T>;
 }
 
+function formatUrlEnvError(key: string, value: unknown): string {
+  if (value === undefined || value === null || value === "") {
+    return `Missing required env ${key}.`;
+  }
+
+  const text = String(value).trim();
+
+  if (text.startsWith("${{") && text.endsWith("}}")) {
+    return `Invalid ${key}: Railway reference "${text}" was not resolved. Check the referenced service name and variable key.`;
+  }
+
+  if (text.includes("localhost") || text.includes("127.0.0.1") || text.includes("::1")) {
+    return `Invalid ${key}: loopback address "${text}" is not usable in Railway production.`;
+  }
+
+  return `Invalid ${key}: expected a full URL, got "${text}".`;
+}
+
 export function loadEnv(raw: NodeJS.ProcessEnv = process.env): AppEnv {
   const normalizedRaw = raw === process.env ? applyEnvAliases(raw) : applyEnvAliases({ ...raw });
-  const core = coreEnvSchema.parse(mapCoreAliases(normalizedRaw));
+  const mappedCore = mapCoreAliases(normalizedRaw);
+  const parsedCore = coreEnvSchema.safeParse(mappedCore);
+
+  if (!parsedCore.success) {
+    const urlIssue = parsedCore.error.issues.find((issue) =>
+      issue.code === "invalid_string" &&
+      issue.validation === "url" &&
+      typeof issue.path[0] === "string"
+    );
+
+    if (urlIssue) {
+      const key = String(urlIssue.path[0]);
+      throw new Error(formatUrlEnvError(key, mappedCore[key as keyof typeof mappedCore]));
+    }
+
+    throw parsedCore.error;
+  }
+
+  const core = parsedCore.data;
   const compactOverrides = parseCompactConfig(core.CFG);
   const legacyOverrides = legacyAdvancedSchema.parse(normalizedRaw);
 
