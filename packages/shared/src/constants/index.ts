@@ -7,7 +7,7 @@ export const QUEUE_NAMES = {
 } as const;
 
 export const CONTEXT_ACTIONS = {
-  explain: "Хори: объяснить",
+  explain: "Хори: объясни",
   summarize: "Хори: кратко",
   tone: "Хори: оценить тон"
 } as const;
