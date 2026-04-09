@@ -1,6 +1,6 @@
 import type { Job } from "bullmq";
 
-import { toVectorLiteral, type EmbeddingJobPayload } from "@hori/shared";
+import { asErrorMessage, toVectorLiteral, type EmbeddingJobPayload } from "@hori/shared";
 
 import type { WorkerRuntime } from "../index";
 
@@ -15,7 +15,14 @@ export function createEmbeddingJob(runtime: WorkerRuntime) {
         return { skipped: true, reason: "message not eligible" };
       }
 
-      const vector = await runtime.embeddingAdapter.embedOne(message.content);
+      let vector: number[];
+
+      try {
+        vector = await runtime.embeddingAdapter.embedOne(message.content);
+      } catch (error) {
+        runtime.logger.warn({ entityId: message.id, error: asErrorMessage(error), jobId: job.id }, "embedding skipped because ollama is unavailable");
+        return { skipped: true, reason: "ollama unavailable" };
+      }
 
       await runtime.prisma.messageEmbedding.upsert({
         where: { messageId: message.id },
@@ -56,7 +63,15 @@ export function createEmbeddingJob(runtime: WorkerRuntime) {
     }
 
     const value = "value" in source ? source.value : "";
-    const vector = await runtime.embeddingAdapter.embedOne(value);
+    let vector: number[];
+
+    try {
+      vector = await runtime.embeddingAdapter.embedOne(value);
+    } catch (error) {
+      runtime.logger.warn({ entityId: job.data.entityId, error: asErrorMessage(error), jobId: job.id }, "embedding skipped because ollama is unavailable");
+      return { skipped: true, reason: "ollama unavailable" };
+    }
+
     await runtime.retrievalService.setEmbedding(job.data.entityType, job.data.entityId, toVectorLiteral(vector));
 
     return { skipped: false, entityType: job.data.entityType };

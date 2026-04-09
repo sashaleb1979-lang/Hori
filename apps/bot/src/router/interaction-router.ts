@@ -5,7 +5,7 @@ import {
   PermissionFlagsBits
 } from "discord.js";
 
-import { CONTEXT_ACTIONS } from "@hori/shared";
+import { CONTEXT_ACTIONS, asErrorMessage, persistOllamaBaseUrl } from "@hori/shared";
 
 import type { BotRuntime } from "../bootstrap";
 
@@ -49,24 +49,35 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
         }
 
         const oldUrl = runtime.env.OLLAMA_BASE_URL ?? "(не задан)";
-        (runtime.env as Record<string, unknown>).OLLAMA_BASE_URL = newUrl;
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         let status = "⏳ проверяю...";
+        let appliedUrl = oldUrl;
         try {
           const probe = await fetch(new URL("/api/tags", newUrl), { signal: AbortSignal.timeout(5000) });
           if (probe.ok) {
             const data = (await probe.json()) as { models?: { name: string }[] };
             const models = data.models?.map((m) => m.name).join(", ") ?? "?";
+            (runtime.env as Record<string, unknown>).OLLAMA_BASE_URL = newUrl;
+            appliedUrl = newUrl;
             status = `✅ Ollama доступен (модели: ${models})`;
+
+            try {
+              await persistOllamaBaseUrl(runtime.prisma, newUrl, interaction.user.id);
+              status += "\n💾 URL сохранён и переживёт рестарт.";
+            } catch (error) {
+              runtime.logger.warn({ error: asErrorMessage(error), url: newUrl }, "failed to persist ollama url");
+              status += "\n⚠️ URL применён только в памяти процесса. После рестарта понадобится задать его снова.";
+            }
           } else {
-            status = `⚠️ Ollama вернул ${probe.status}`;
+            status = `❌ URL не применён: Ollama вернул ${probe.status}`;
           }
         } catch (err) {
-          status = `❌ Ollama недоступен: ${err instanceof Error ? err.message : "unknown"}`;
+          status = `❌ URL не применён: ${err instanceof Error ? err.message : "unknown"}`;
         }
 
-        await interaction.reply({
-          content: `AI URL обновлён\n\`${oldUrl}\` → \`${newUrl}\`\n\n${status}`,
+        await interaction.editReply({
+          content: `AI URL ${appliedUrl === newUrl ? "обновлён" : "не изменён"}\nТекущий: \`${appliedUrl}\`\nПроверяли: \`${newUrl}\`\n\n${status}`,
           flags: MessageFlags.Ephemeral
         });
         return;

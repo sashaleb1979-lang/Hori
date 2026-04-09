@@ -6,7 +6,7 @@ import { createChatOrchestrator, RuntimeConfigService, SlashAdminService } from 
 import { EmbeddingAdapter, ModelRouter, OllamaClient, ToolOrchestrator } from "@hori/llm";
 import { ContextService, ProfileService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
 import { BraveSearchClient, SearchCacheService } from "@hori/search";
-import { createLogger, createPrismaClient, createRedisClient, createAppQueues, ensureInfrastructureReady } from "@hori/shared";
+import { createLogger, createPrismaClient, createRedisClient, createAppQueues, ensureInfrastructureReady, loadPersistedOllamaBaseUrl } from "@hori/shared";
 
 import { createDiscordClient } from "./gateway/create-discord-client";
 import { registerEvents } from "./events/register-events";
@@ -41,6 +41,15 @@ export async function bootstrapBot() {
     redis,
     logger
   });
+
+  if (!env.OLLAMA_BASE_URL) {
+    const persistedOllamaUrl = await loadPersistedOllamaBaseUrl(prisma, logger);
+
+    if (persistedOllamaUrl) {
+      (env as Record<string, unknown>).OLLAMA_BASE_URL = persistedOllamaUrl;
+    }
+  }
+
   const queues = createAppQueues(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
   const client = createDiscordClient();
 

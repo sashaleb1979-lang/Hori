@@ -1,7 +1,7 @@
 import type { Job } from "bullmq";
 
 import { buildUserProfilePrompt } from "@hori/llm";
-import type { ProfileJobPayload } from "@hori/shared";
+import { asErrorMessage, type ProfileJobPayload } from "@hori/shared";
 
 import type { WorkerRuntime } from "../index";
 
@@ -27,25 +27,39 @@ export function createProfileJob(runtime: WorkerRuntime) {
     }
 
     const messages = await runtime.profileService.getRecentMessagesForProfile(job.data.guildId, job.data.userId, 50);
-    const response = await runtime.llmClient.chat({
-      model: runtime.env.OLLAMA_SMART_MODEL,
-      messages: buildUserProfilePrompt(
-        [
-          `Статистика: totalMessages=${stats.totalMessages}, avgMessageLength=${stats.avgMessageLength}, totalReplies=${stats.totalReplies}, totalMentions=${stats.totalMentions}.`,
-          "Сообщения:",
-          ...messages.map((message) => `- ${message.content}`)
-        ].join("\n")
-      ),
-      format: "json",
-      temperature: 0.2
-    });
+    const prompt = buildUserProfilePrompt(
+      [
+        `Статистика: totalMessages=${stats.totalMessages}, avgMessageLength=${stats.avgMessageLength}, totalReplies=${stats.totalReplies}, totalMentions=${stats.totalMentions}.`,
+        "Сообщения:",
+        ...messages.map((message) => `- ${message.content}`)
+      ].join("\n")
+    );
 
-    const parsed = JSON.parse(response.message.content) as {
+    let parsed: {
       summaryShort?: string;
       styleTags?: string[];
       topicTags?: string[];
       confidenceScore?: number;
     };
+
+    try {
+      const response = await runtime.llmClient.chat({
+        model: runtime.env.OLLAMA_SMART_MODEL,
+        messages: prompt,
+        format: "json",
+        temperature: 0.2
+      });
+
+      parsed = JSON.parse(response.message.content) as {
+        summaryShort?: string;
+        styleTags?: string[];
+        topicTags?: string[];
+        confidenceScore?: number;
+      };
+    } catch (error) {
+      runtime.logger.warn({ error: asErrorMessage(error), guildId: job.data.guildId, jobId: job.id, userId: job.data.userId }, "profile refresh skipped because ollama is unavailable or returned invalid json");
+      return { skipped: true, reason: "ollama unavailable" };
+    }
 
     await runtime.profileService.upsertProfile({
       guildId: job.data.guildId,

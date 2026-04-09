@@ -1,7 +1,7 @@
 import type { Job } from "bullmq";
 
 import { buildSummaryPrompt } from "@hori/llm";
-import type { SummaryJobPayload } from "@hori/shared";
+import { asErrorMessage, type SummaryJobPayload } from "@hori/shared";
 
 import type { WorkerRuntime } from "../index";
 
@@ -22,10 +22,17 @@ export function createSummaryJob(runtime: WorkerRuntime) {
       "Сделай краткую и длинную сводку. В первой строке коротко, дальше подробнее."
     );
 
-    const response = await runtime.llmClient.chat({
-      model: runtime.env.OLLAMA_SMART_MODEL,
-      messages: prompt
-    });
+    let response: Awaited<ReturnType<WorkerRuntime["llmClient"]["chat"]>>;
+
+    try {
+      response = await runtime.llmClient.chat({
+        model: runtime.env.OLLAMA_SMART_MODEL,
+        messages: prompt
+      });
+    } catch (error) {
+      runtime.logger.warn({ channelId: job.data.channelId, error: asErrorMessage(error), guildId: job.data.guildId, jobId: job.id }, "summary skipped because ollama is unavailable");
+      return { skipped: true, reason: "ollama unavailable" };
+    }
 
     const [summaryShort, ...rest] = response.message.content.split("\n");
 
