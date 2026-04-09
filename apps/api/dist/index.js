@@ -90,18 +90,26 @@ async function registerDebugRoutes(app) {
 // src/routes/health.ts
 async function registerHealthRoutes(app) {
   app.get("/health/live", async () => ({ status: "ok" }));
-  app.get("/health/ready", async () => {
-    const [dbResult, redisResult] = await Promise.all([
-      app.runtime.prisma.$queryRaw`SELECT 1`,
-      app.runtime.redis.ping()
-    ]);
-    return {
-      status: "ready",
-      checks: {
-        database: Array.isArray(dbResult) ? "ok" : "ok",
-        redis: redisResult
-      }
-    };
+  app.get("/health/ready", async (_, reply) => {
+    try {
+      const [dbResult, redisResult] = await Promise.all([
+        app.runtime.prisma.$queryRaw`SELECT 1`,
+        app.runtime.redis.ping()
+      ]);
+      return {
+        status: "ready",
+        checks: {
+          database: Array.isArray(dbResult) ? "ok" : "ok",
+          redis: redisResult
+        }
+      };
+    } catch (error) {
+      reply.code(503);
+      return {
+        status: "not_ready",
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
   });
 }
 
@@ -121,6 +129,15 @@ async function bootstrapApi() {
   const logger = (0, import_shared2.createLogger)(env.LOG_LEVEL);
   const prisma = (0, import_shared2.createPrismaClient)();
   const redis = (0, import_shared2.createRedisClient)(env.REDIS_URL);
+  await (0, import_shared2.ensureInfrastructureReady)({
+    role: "api",
+    nodeEnv: env.NODE_ENV,
+    databaseUrl: env.DATABASE_URL,
+    redisUrl: env.REDIS_URL,
+    prisma,
+    redis,
+    logger
+  });
   const analytics = new import_analytics.AnalyticsQueryService(prisma);
   const app = (0, import_fastify.default)({ logger: false });
   app.decorate("runtime", {

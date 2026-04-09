@@ -3,7 +3,7 @@ import { assertEnvForRole, loadEnv } from "@hori/config";
 import { EmbeddingAdapter, OllamaClient } from "@hori/llm";
 import { ProfileService, RetrievalService, SummaryService } from "@hori/memory";
 import { SearchCacheService } from "@hori/search";
-import { createAppQueues, createLogger, createPrismaClient, createRedisClient, createWorker, QUEUE_NAMES } from "@hori/shared";
+import { createAppQueues, createLogger, createPrismaClient, createRedisClient, createWorker, ensureInfrastructureReady, QUEUE_NAMES } from "@hori/shared";
 
 import { createCleanupJob } from "./jobs/cleanup";
 import { createEmbeddingJob } from "./jobs/embeddings";
@@ -33,6 +33,15 @@ async function main() {
   const logger = createLogger(env.LOG_LEVEL);
   const prisma = createPrismaClient();
   const redis = createRedisClient(env.REDIS_URL);
+  await ensureInfrastructureReady({
+    role: "worker",
+    nodeEnv: env.NODE_ENV,
+    databaseUrl: env.DATABASE_URL,
+    redisUrl: env.REDIS_URL,
+    prisma,
+    redis,
+    logger
+  });
   const queues = createAppQueues(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
   const analytics = new AnalyticsQueryService(prisma);
   const summaryService = new SummaryService(prisma);

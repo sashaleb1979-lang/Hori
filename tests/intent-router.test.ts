@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { IntentRouter } from "@hori/core";
+import { IntentRouter } from "../packages/core/src/intents/intent-router";
 import type { MessageEnvelope } from "@hori/shared";
 
 const baseMessage: MessageEnvelope = {

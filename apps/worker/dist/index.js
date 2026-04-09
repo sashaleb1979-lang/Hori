@@ -182,6 +182,15 @@ async function main() {
   const logger = (0, import_shared2.createLogger)(env.LOG_LEVEL);
   const prisma = (0, import_shared2.createPrismaClient)();
   const redis = (0, import_shared2.createRedisClient)(env.REDIS_URL);
+  await (0, import_shared2.ensureInfrastructureReady)({
+    role: "worker",
+    nodeEnv: env.NODE_ENV,
+    databaseUrl: env.DATABASE_URL,
+    redisUrl: env.REDIS_URL,
+    prisma,
+    redis,
+    logger
+  });
   const queues = (0, import_shared2.createAppQueues)(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
   const analytics = new import_analytics.AnalyticsQueryService(prisma);
   const summaryService = new import_memory.SummaryService(prisma);

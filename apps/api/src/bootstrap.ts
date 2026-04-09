@@ -2,7 +2,7 @@ import Fastify from "fastify";
 
 import { AnalyticsQueryService } from "@hori/analytics";
 import { assertEnvForRole, loadEnv } from "@hori/config";
-import { createLogger, createPrismaClient, createRedisClient } from "@hori/shared";
+import { createLogger, createPrismaClient, createRedisClient, ensureInfrastructureReady } from "@hori/shared";
 
 import { registerAdminRoutes } from "./routes/admin";
 import { registerDebugRoutes } from "./routes/debug";
@@ -28,6 +28,15 @@ export async function bootstrapApi() {
   const logger = createLogger(env.LOG_LEVEL);
   const prisma = createPrismaClient();
   const redis = createRedisClient(env.REDIS_URL);
+  await ensureInfrastructureReady({
+    role: "api",
+    nodeEnv: env.NODE_ENV,
+    databaseUrl: env.DATABASE_URL,
+    redisUrl: env.REDIS_URL,
+    prisma,
+    redis,
+    logger
+  });
   const analytics = new AnalyticsQueryService(prisma);
   const app = Fastify({ logger: false });
 

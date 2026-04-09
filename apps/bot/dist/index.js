@@ -404,6 +404,15 @@ async function bootstrapBot() {
   const logger = (0, import_shared4.createLogger)(env.LOG_LEVEL);
   const prisma = (0, import_shared4.createPrismaClient)();
   const redis = (0, import_shared4.createRedisClient)(env.REDIS_URL);
+  await (0, import_shared4.ensureInfrastructureReady)({
+    role: "bot",
+    nodeEnv: env.NODE_ENV,
+    databaseUrl: env.DATABASE_URL,
+    redisUrl: env.REDIS_URL,
+    prisma,
+    redis,
+    logger
+  });
   const queues = (0, import_shared4.createAppQueues)(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
   const client = createDiscordClient();
   const analytics = new import_analytics2.AnalyticsQueryService(prisma);

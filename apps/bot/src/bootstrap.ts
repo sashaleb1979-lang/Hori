@@ -6,7 +6,7 @@ import { createChatOrchestrator, RuntimeConfigService, SlashAdminService } from 
 import { EmbeddingAdapter, ModelRouter, OllamaClient, ToolOrchestrator } from "@hori/llm";
 import { ContextService, ProfileService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
 import { BraveSearchClient, SearchCacheService } from "@hori/search";
-import { createLogger, createPrismaClient, createRedisClient, createAppQueues } from "@hori/shared";
+import { createLogger, createPrismaClient, createRedisClient, createAppQueues, ensureInfrastructureReady } from "@hori/shared";
 
 import { createDiscordClient } from "./gateway/create-discord-client";
 import { registerEvents } from "./events/register-events";
@@ -32,6 +32,15 @@ export async function bootstrapBot() {
   const logger = createLogger(env.LOG_LEVEL);
   const prisma = createPrismaClient();
   const redis = createRedisClient(env.REDIS_URL);
+  await ensureInfrastructureReady({
+    role: "bot",
+    nodeEnv: env.NODE_ENV,
+    databaseUrl: env.DATABASE_URL,
+    redisUrl: env.REDIS_URL,
+    prisma,
+    redis,
+    logger
+  });
   const queues = createAppQueues(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
   const client = createDiscordClient();
 

@@ -146,10 +146,22 @@ Recommended setup: three Railway services from the same repo and Dockerfile.
 - `hori-bot`: set `APP_ROLE=bot`
 - `hori-worker`: set `APP_ROLE=worker`
 
+Leave the Railway custom start command empty to use the Docker `CMD`, or set it explicitly to:
+```bash
+node scripts/start.mjs
+```
+
+Do not use `pnpm dev`, `tsx watch`, or workspace-local dev commands in Railway.
+
 ### Infra
 - Attach a managed PostgreSQL instance.
 - Attach a managed Redis instance.
 - Keep Ollama outside Railway and provide `AI_URL` in short mode or `OLLAMA_BASE_URL` in legacy mode.
+- Link database and Redis variables with Railway references, for example:
+```env
+DB_URL=${{Postgres.DATABASE_URL}}
+KV_URL=${{Redis.REDIS_URL}}
+```
 
 ### Steps
 1. Push this repo to GitHub.
@@ -163,6 +175,8 @@ pnpm prisma:deploy
 pnpm seed
 ```
 7. Point your health checks to the API service only.
+
+If a service logs `localhost:5432` or `127.0.0.1:6379` in Railway, it is still using example local values instead of Railway service references.
 
 ## API Endpoints
 - `GET /health/live`

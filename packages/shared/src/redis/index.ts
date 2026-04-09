@@ -8,6 +8,7 @@ declare global {
 export function createRedisClient(redisUrl: string) {
   if (!global.__horiRedis__) {
     global.__horiRedis__ = new IORedis(redisUrl, {
+      lazyConnect: true,
       maxRetriesPerRequest: null,
       enableAutoPipelining: true
     });

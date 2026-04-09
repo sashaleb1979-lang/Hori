@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ResponseGuard } from "@hori/core";
+import { ResponseGuard } from "../packages/core/src/safety/response-guard";
 
 describe("ResponseGuard", () => {
   it("redacts forbidden words", () => {
