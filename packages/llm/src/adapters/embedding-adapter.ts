@@ -1,10 +1,10 @@
 import type { AppEnv } from "@hori/config";
 
-import { OllamaClient } from "../client/ollama-client";
+import type { LlmClient } from "../client/llm-client";
 
 export class EmbeddingAdapter {
   constructor(
-    private readonly client: OllamaClient,
+    private readonly client: LlmClient,
     private readonly env: AppEnv
   ) {}
 

@@ -1,15 +1,15 @@
 import type { AppLogger, ChatRunResult, LlmChatMessage, ToolExecutionResult } from "@hori/shared";
 
-import type { OllamaClient, OllamaToolDefinition } from "../client/ollama-client";
+import type { LlmClient, LlmToolDefinition } from "../client/llm-client";
 
 export interface ExecutableTool {
-  definition: OllamaToolDefinition;
+  definition: LlmToolDefinition;
   execute: (args: Record<string, unknown>) => Promise<unknown>;
 }
 
 export class ToolOrchestrator {
   constructor(
-    private readonly client: OllamaClient,
+    private readonly client: LlmClient,
     private readonly logger: AppLogger
   ) {}
 

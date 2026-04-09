@@ -2,7 +2,8 @@ import type { AppEnv } from "@hori/config";
 import type { AppLogger, AppPrismaClient, BotTrace, MessageEnvelope, SearchHit } from "@hori/shared";
 import { botLatencyHistogram, botRepliesCounter, buildMemoryKey, clamp, normalizeWhitespace } from "@hori/shared";
 
-import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, EmbeddingAdapter, ModelRouter, OllamaClient, ToolOrchestrator, defaultToolSet } from "@hori/llm";
+import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet } from "@hori/llm";
+import type { LlmClient } from "@hori/llm";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
 import { ContextService, RetrievalService } from "@hori/memory";
 import { BraveSearchClient, buildSourceDigest, fetchWebPage } from "@hori/search";
@@ -22,7 +23,7 @@ interface OrchestratorDeps {
   analytics: AnalyticsQueryService;
   contextService: ContextService;
   retrieval: RetrievalService;
-  llmClient: OllamaClient;
+  llmClient: LlmClient;
   modelRouter: ModelRouter;
   toolOrchestrator: ToolOrchestrator;
   searchClient: BraveSearchClient;
@@ -127,44 +128,50 @@ export class ChatOrchestrator {
 
     let reply = "";
 
-    switch (intent.intent) {
-      case "help":
-        reply = HELP_TEXT;
-        break;
-      case "analytics":
-        reply = await this.handleAnalytics(message.guildId, intent.cleanedContent, systemPrompt);
-        break;
-      case "summary":
-        reply = await this.handleSummary(intent.cleanedContent, systemPrompt, contextText);
-        break;
-      case "search": {
-        const result = runtimeConfig.featureFlags.webSearch
-          ? await this.handleSearch(message, intent.cleanedContent, systemPrompt)
-          : { text: "Поиск сейчас выключен.", toolNames: [], usedSearch: false };
-        reply = result.text;
-        trace.usedSearch = result.usedSearch;
-        trace.toolNames = result.toolNames;
-        break;
+    try {
+      switch (intent.intent) {
+        case "help":
+          reply = HELP_TEXT;
+          break;
+        case "analytics":
+          reply = await this.handleAnalytics(message.guildId, intent.cleanedContent, systemPrompt);
+          break;
+        case "summary":
+          reply = await this.handleSummary(intent.cleanedContent, systemPrompt, contextText);
+          break;
+        case "search": {
+          const result = runtimeConfig.featureFlags.webSearch
+            ? await this.handleSearch(message, intent.cleanedContent, systemPrompt)
+            : { text: "Поиск сейчас выключен.", toolNames: [], usedSearch: false };
+          reply = result.text;
+          trace.usedSearch = result.usedSearch;
+          trace.toolNames = result.toolNames;
+          break;
+        }
+        case "memory_write":
+          reply = await this.handleMemoryWrite(message, intent.cleanedContent);
+          break;
+        case "memory_forget":
+          reply = await this.handleMemoryForget(message, intent.cleanedContent);
+          break;
+        case "rewrite":
+          reply = await this.handleRewrite(message, intent.cleanedContent, systemPrompt);
+          break;
+        case "profile":
+          reply = runtimeConfig.featureFlags.userProfiles ? await this.handleProfile(message) : "Профили сейчас выключены.";
+          break;
+        case "moderation_style_request":
+          reply = message.isModerator ? "Для такого лучше slash-команду. Так чище." : "Это только для модеров.";
+          break;
+        case "chat":
+        default:
+          reply = await this.handleChat(intent.cleanedContent, systemPrompt, contextText);
+          break;
       }
-      case "memory_write":
-        reply = await this.handleMemoryWrite(message, intent.cleanedContent);
-        break;
-      case "memory_forget":
-        reply = await this.handleMemoryForget(message, intent.cleanedContent);
-        break;
-      case "rewrite":
-        reply = await this.handleRewrite(message, intent.cleanedContent, systemPrompt);
-        break;
-      case "profile":
-        reply = runtimeConfig.featureFlags.userProfiles ? await this.handleProfile(message) : "Профили сейчас выключены.";
-        break;
-      case "moderation_style_request":
-        reply = message.isModerator ? "Для такого лучше slash-команду. Так чище." : "Это только для модеров.";
-        break;
-      case "chat":
-      default:
-        reply = await this.handleChat(intent.cleanedContent, systemPrompt, contextText);
-        break;
+    } catch (error) {
+      this.deps.logger.error({ error, intent: intent.intent, model: this.deps.modelRouter.pickModel(intent.intent) }, "llm call failed, sending fallback");
+      reply = "Сейчас не могу ответить — мозги перегрелись. Попробуй чуть позже.";
+      trace.routeReason = "llm_unavailable";
     }
 
     reply = this.responseGuard.enforce(reply, {

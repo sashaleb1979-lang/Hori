@@ -1,6 +1,6 @@
-import type { OllamaToolDefinition } from "../client/ollama-client";
+import type { LlmToolDefinition } from "../client/llm-client";
 
-export const webSearchTool: OllamaToolDefinition = {
+export const webSearchTool: LlmToolDefinition = {
   type: "function",
   function: {
     name: "web_search",
@@ -17,7 +17,7 @@ export const webSearchTool: OllamaToolDefinition = {
   }
 };
 
-export const webFetchTool: OllamaToolDefinition = {
+export const webFetchTool: LlmToolDefinition = {
   type: "function",
   function: {
     name: "web_fetch",
@@ -32,7 +32,7 @@ export const webFetchTool: OllamaToolDefinition = {
   }
 };
 
-export const summarizeSourcesTool: OllamaToolDefinition = {
+export const summarizeSourcesTool: LlmToolDefinition = {
   type: "function",
   function: {
     name: "summarize_sources",

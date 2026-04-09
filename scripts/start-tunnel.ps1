@@ -5,19 +5,17 @@ $ErrorActionPreference = "Stop"
 
 function Wait-HttpReady {
   param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory)]
     [string]$Url,
     [int]$Attempts = 30,
     [int]$DelaySeconds = 2,
-    [int]$TimeoutSeconds = 10
+    [int]$TimeoutSeconds = 5
   )
 
-  for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+  for ($i = 1; $i -le $Attempts; $i++) {
     try {
-      $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSeconds
-      if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) {
-        return $true
-      }
+      $null = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSeconds
+      return $true
     } catch {}
 
     Start-Sleep -Seconds $DelaySeconds
@@ -26,31 +24,56 @@ function Wait-HttpReady {
   return $false
 }
 
-$cloudflared = "C:\Program Files (x86)\cloudflared\cloudflared.exe"
-if (-not (Test-Path $cloudflared)) {
-  $cloudflared = (Get-Command cloudflared -ErrorAction SilentlyContinue).Source
-  if (-not $cloudflared) {
-    Write-Host "[!] cloudflared не найден. Установи: winget install cloudflare.cloudflared" -ForegroundColor Red
-    exit 1
+function Find-Executable {
+  param([string]$Name, [string[]]$Paths)
+
+  foreach ($p in $Paths) {
+    if (Test-Path $p) { return $p }
   }
+
+  $found = (Get-Command $Name -ErrorAction SilentlyContinue).Source
+  if ($found) { return $found }
+
+  return $null
+}
+
+# --- 0. Найти зависимости ---
+$cloudflared = Find-Executable "cloudflared" @(
+  "C:\Program Files (x86)\cloudflared\cloudflared.exe",
+  "C:\Program Files\cloudflared\cloudflared.exe",
+  "$env:LOCALAPPDATA\cloudflared\cloudflared.exe"
+)
+
+if (-not $cloudflared) {
+  Write-Host "[!] cloudflared не найден. Установи: winget install cloudflare.cloudflared" -ForegroundColor Red
+  exit 1
+}
+
+$ollama = Find-Executable "ollama" @(
+  "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe",
+  "C:\Program Files\Ollama\ollama.exe"
+)
+
+if (-not $ollama) {
+  Write-Host "[!] ollama не найден. Установи: https://ollama.com/download" -ForegroundColor Red
+  exit 1
 }
 
 # --- 1. Убить старые процессы ---
-Get-Process ollama -ErrorAction SilentlyContinue | Stop-Process -Force
-Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force
+foreach ($proc in @("ollama", "cloudflared")) {
+  Get-Process $proc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+}
 Start-Sleep -Seconds 1
 
-# --- 2. Запустить Ollama ---
+# --- 2. Запустить Ollama (env-переменные наследуются от процесса) ---
 $env:OLLAMA_ORIGINS = "*"
 $env:OLLAMA_HOST = "0.0.0.0:11434"
 
 Write-Host "[*] Запускаю Ollama..." -ForegroundColor Cyan
-$ollamaProcess = Start-Process -FilePath "ollama" -ArgumentList "serve" `
-  -PassThru -WindowStyle Hidden `
-  -Environment @{ OLLAMA_ORIGINS = "*"; OLLAMA_HOST = "0.0.0.0:11434" }
+$ollamaProcess = Start-Process -FilePath $ollama -ArgumentList "serve" `
+  -PassThru -WindowStyle Hidden
 
-# Подождать пока Ollama запустится
-$ready = Wait-HttpReady -Url "http://localhost:11434" -Attempts 15 -DelaySeconds 1 -TimeoutSeconds 2
+$ready = Wait-HttpReady -Url "http://localhost:11434" -Attempts 20 -DelaySeconds 1 -TimeoutSeconds 2
 
 if (-not $ready) {
   Write-Host "[!] Ollama не отвечает на localhost:11434" -ForegroundColor Red
@@ -58,7 +81,7 @@ if (-not $ready) {
 }
 Write-Host "[+] Ollama запущена" -ForegroundColor Green
 
-# --- 3. Запустить Cloudflare Tunnel и поймать URL ---
+# --- 3. Запустить Cloudflare Tunnel ---
 Write-Host "[*] Запускаю туннель..." -ForegroundColor Cyan
 
 $tunnelLogFile = Join-Path $env:TEMP "cloudflared-tunnel.log"
@@ -82,29 +105,27 @@ for ($i = 0; $i -lt 30; $i++) {
 }
 
 if (-not $tunnelUrl) {
-  Write-Host "[!] Не удалось получить URL туннеля. Проверь лог: $tunnelLogFile" -ForegroundColor Red
-  exit 1
-}
-
-# --- 4. Проверить что туннель работает ---
-$tunnelReady = Wait-HttpReady -Url "$tunnelUrl/api/tags" -Attempts 20 -DelaySeconds 2 -TimeoutSeconds 10
-if (-not $tunnelReady) {
-  $tunnelReady = Wait-HttpReady -Url $tunnelUrl -Attempts 10 -DelaySeconds 2 -TimeoutSeconds 10
-}
-
-if (-not $tunnelReady) {
-  Write-Host "[!] Туннель не отвечает: $tunnelUrl" -ForegroundColor Red
+  Write-Host "[!] Не удалось получить URL туннеля" -ForegroundColor Red
   if (Test-Path $tunnelLogFile) {
-    Write-Host "[i] Последние строки cloudflared:" -ForegroundColor DarkGray
-    Get-Content $tunnelLogFile -Tail 8 -ErrorAction SilentlyContinue | ForEach-Object {
+    Get-Content $tunnelLogFile -Tail 5 -ErrorAction SilentlyContinue | ForEach-Object {
       Write-Host "    $_" -ForegroundColor DarkGray
     }
   }
   exit 1
 }
-Write-Host "[+] Соединение подтверждено" -ForegroundColor Green
 
-# --- 5. Вывести результат ---
+# --- 4. Проверить что туннель живой ---
+$tunnelReady = Wait-HttpReady -Url "$tunnelUrl/api/tags" -Attempts 15 -DelaySeconds 2 -TimeoutSeconds 5
+if (-not $tunnelReady) {
+  $tunnelReady = Wait-HttpReady -Url $tunnelUrl -Attempts 5 -DelaySeconds 2 -TimeoutSeconds 5
+}
+
+if (-not $tunnelReady) {
+  Write-Host "[!] Туннель не отвечает: $tunnelUrl" -ForegroundColor Red
+  exit 1
+}
+
+# --- 5. Результат ---
 Write-Host ""
 Write-Host "=============================================" -ForegroundColor Green
 Write-Host "  Туннель готов!" -ForegroundColor Green
@@ -115,16 +136,12 @@ Write-Host ""
 Write-Host "  В Discord введи:" -ForegroundColor White
 Write-Host "  /bot-ai-url url:$tunnelUrl" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Чтобы остановить: Ctrl+C" -ForegroundColor DarkGray
+Write-Host "  Ctrl+C чтобы остановить" -ForegroundColor DarkGray
 Write-Host "=============================================" -ForegroundColor Green
 
-# --- 6. Скопировать в буфер обмена ---
-try {
-  $tunnelUrl | Set-Clipboard
-  Write-Host "  (URL скопирован в буфер обмена)" -ForegroundColor DarkGray
-} catch {}
+try { $tunnelUrl | Set-Clipboard; Write-Host "  (URL скопирован)" -ForegroundColor DarkGray } catch {}
 
-# --- 7. Держать скрипт живым, пока не нажмут Ctrl+C ---
+# --- 6. Держать живым ---
 try {
   while ($true) {
     if ($ollamaProcess.HasExited -or $tunnelProcess.HasExited) {
