@@ -31,6 +31,32 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
       case "bot-help":
         await interaction.reply({ content: await runtime.slashAdmin.handleHelp(), flags: MessageFlags.Ephemeral });
         return;
+      case "bot-ai-url": {
+        const isOwner = runtime.env.DISCORD_OWNER_IDS.includes(interaction.user.id);
+
+        if (!isOwner) {
+          await interaction.reply({ content: "Эта команда только для владельца бота.", flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        const newUrl = interaction.options.getString("url", true).trim();
+
+        try {
+          new URL(newUrl);
+        } catch {
+          await interaction.reply({ content: `Невалидный URL: ${newUrl}`, flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        const oldUrl = runtime.env.OLLAMA_BASE_URL ?? "(не задан)";
+        (runtime.env as Record<string, unknown>).OLLAMA_BASE_URL = newUrl;
+
+        await interaction.reply({
+          content: `✅ AI URL обновлён\n\`${oldUrl}\` → \`${newUrl}\``,
+          flags: MessageFlags.Ephemeral
+        });
+        return;
+      }
       case "bot-style":
         await interaction.reply({
           content: await runtime.slashAdmin.updateStyle(interaction.guildId, {

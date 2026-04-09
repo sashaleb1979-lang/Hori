@@ -105,7 +105,11 @@ export const slashCommandDefinitions = [
         .addChannelTypes(ChannelType.GuildText, ChannelType.PublicThread, ChannelType.PrivateThread)
         .setRequired(true)
     ),
-  new SlashCommandBuilder().setName("bot-stats").setDescription("Показать недельную статистику")
+  new SlashCommandBuilder().setName("bot-stats").setDescription("Показать недельную статистику"),
+  new SlashCommandBuilder()
+    .setName("bot-ai-url")
+    .setDescription("Сменить Ollama URL (только владелец бота)")
+    .addStringOption((option) => option.setName("url").setDescription("Новый URL (https://...)").setRequired(true))
 ].map((command) => command.toJSON());
 
 export const contextMenuDefinitions = [
