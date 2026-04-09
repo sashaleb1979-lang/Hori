@@ -1,6 +1,7 @@
 import {
   ChatInputCommandInteraction,
   ContextMenuCommandInteraction,
+  MessageFlags,
   PermissionFlagsBits
 } from "discord.js";
 
@@ -15,20 +16,20 @@ function ensureModerator(interaction: ChatInputCommandInteraction | ContextMenuC
 export async function routeInteraction(runtime: BotRuntime, interaction: ChatInputCommandInteraction | ContextMenuCommandInteraction) {
   if (interaction.isChatInputCommand()) {
     if (!interaction.guildId) {
-      await interaction.reply({ content: "Только внутри сервера.", ephemeral: true });
+      await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
       return;
     }
 
     const isModerator = ensureModerator(interaction);
 
     if (!isModerator && interaction.commandName !== "bot-help") {
-      await interaction.reply({ content: "Это только для модеров.", ephemeral: true });
+      await interaction.reply({ content: "Это только для модеров.", flags: MessageFlags.Ephemeral });
       return;
     }
 
     switch (interaction.commandName) {
       case "bot-help":
-        await interaction.reply({ content: await runtime.slashAdmin.handleHelp(), ephemeral: true });
+        await interaction.reply({ content: await runtime.slashAdmin.handleHelp(), flags: MessageFlags.Ephemeral });
         return;
       case "bot-style":
         await interaction.reply({
@@ -42,7 +43,7 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
             forbiddenWords: interaction.options.getString("forbidden-words"),
             forbiddenTopics: interaction.options.getString("forbidden-topics")
           }),
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       case "bot-memory": {
@@ -59,7 +60,7 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
               )
             : await runtime.slashAdmin.forget(interaction.guildId, key);
 
-        await interaction.reply({ content, ephemeral: true });
+        await interaction.reply({ content, flags: MessageFlags.Ephemeral });
         return;
       }
       case "bot-relationship":
@@ -81,7 +82,7 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
                 .filter(Boolean)
             }
           ),
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       case "bot-feature":
@@ -91,19 +92,19 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
             interaction.options.getString("key", true),
             interaction.options.getBoolean("enabled", true)
           ),
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       case "bot-debug":
         await interaction.reply({
           content: await runtime.slashAdmin.debugTrace(interaction.options.getString("message-id", true)),
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       case "bot-profile":
         await interaction.reply({
           content: await runtime.slashAdmin.profile(interaction.guildId, interaction.options.getUser("user", true).id),
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       case "bot-channel":
@@ -118,20 +119,20 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
               topicInterestTags: interaction.options.getString("topic-interest-tags")
             }
           ),
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       case "bot-summary":
         await interaction.reply({
           content: await runtime.slashAdmin.summary(interaction.guildId, interaction.options.getChannel("channel", true).id),
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       case "bot-stats":
-        await interaction.reply({ content: await runtime.slashAdmin.stats(interaction.guildId), ephemeral: true });
+        await interaction.reply({ content: await runtime.slashAdmin.stats(interaction.guildId), flags: MessageFlags.Ephemeral });
         return;
       default:
-        await interaction.reply({ content: "Не знаю такую команду.", ephemeral: true });
+        await interaction.reply({ content: "Не знаю такую команду.", flags: MessageFlags.Ephemeral });
         return;
     }
   }
@@ -143,7 +144,7 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
   const featureFlags = await runtime.runtimeConfig.getFeatureFlags(interaction.guildId);
 
   if (!featureFlags.contextActions) {
-    await interaction.reply({ content: "Контекстные действия выключены.", ephemeral: true });
+    await interaction.reply({ content: "Контекстные действия выключены.", flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -163,5 +164,5 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
     sourceMessageId: interaction.targetId
   });
 
-  await interaction.reply({ content: result, ephemeral: true });
+  await interaction.reply({ content: result, flags: MessageFlags.Ephemeral });
 }

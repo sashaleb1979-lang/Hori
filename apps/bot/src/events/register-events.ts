@@ -1,4 +1,4 @@
-import { REST, Routes } from "discord.js";
+import { MessageFlags, REST, Routes } from "discord.js";
 
 import type { BotRuntime } from "../bootstrap";
 import { slashCommandDefinitions, contextMenuDefinitions } from "../commands/definitions";
@@ -23,7 +23,7 @@ async function syncCommands(runtime: BotRuntime) {
 }
 
 export function registerEvents(runtime: BotRuntime) {
-  runtime.client.once("ready", async () => {
+  runtime.client.once("clientReady", async () => {
     runtime.logger.info({ user: runtime.client.user?.tag }, "discord client ready");
     await syncCommands(runtime);
   });
@@ -44,7 +44,7 @@ export function registerEvents(runtime: BotRuntime) {
     } catch (error) {
       runtime.logger.error({ error }, "interaction handler failed");
       if (interaction.isRepliable() && !interaction.replied) {
-        await interaction.reply({ content: "Что-то сломалось.", ephemeral: true });
+        await interaction.reply({ content: "Что-то сломалось.", flags: MessageFlags.Ephemeral });
       }
     }
   });
