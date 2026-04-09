@@ -16,6 +16,28 @@ function preserveMissing(value: unknown) {
   return value;
 }
 
+function normalizeStringValue(value: unknown) {
+  const next = preserveMissing(value);
+
+  if (next === undefined) {
+    return undefined;
+  }
+
+  if (typeof next !== "string") {
+    return next;
+  }
+
+  const trimmed = next.trim();
+  const hasDoubleQuotes = trimmed.startsWith("\"") && trimmed.endsWith("\"");
+  const hasSingleQuotes = trimmed.startsWith("'") && trimmed.endsWith("'");
+
+  if (hasDoubleQuotes || hasSingleQuotes) {
+    return trimmed.slice(1, -1).trim();
+  }
+
+  return trimmed;
+}
+
 const boolish = z.preprocess((value) => {
   const next = preserveMissing(value);
 
@@ -70,6 +92,8 @@ const csvish = z.preprocess((value) => {
   return parseCsv(typeof next === "string" ? next : undefined);
 }, z.array(z.string()));
 
+const urlish = z.preprocess((value) => normalizeStringValue(value), z.string().url());
+
 const coreEnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   LOG_LEVEL: z.string().default("info"),
@@ -86,10 +110,10 @@ const coreEnvSchema = z.object({
   API_PORT: intish.default(3000),
   API_ADMIN_TOKEN: z.string().default("change-me"),
 
-  DATABASE_URL: z.string().url(),
-  REDIS_URL: z.string().url(),
+  DATABASE_URL: urlish,
+  REDIS_URL: urlish,
 
-  OLLAMA_BASE_URL: z.string().url().optional(),
+  OLLAMA_BASE_URL: urlish.optional(),
   OLLAMA_FAST_MODEL: z.string().default("qwen3:4b"),
   OLLAMA_SMART_MODEL: z.string().default("gemma3:12b"),
   OLLAMA_EMBED_MODEL: z.string().default("nomic-embed-text"),

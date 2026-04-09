@@ -71,6 +71,18 @@ describe("loadEnv", () => {
     expect(env.SEARCH_MAX_PAGES_PER_RESPONSE).toBe(2);
   });
 
+  it("normalizes quoted URL env values", () => {
+    const env = loadEnv({
+      DATABASE_URL: "\"postgresql://postgres:postgres@localhost:5432/hori\"",
+      REDIS_URL: "'redis://localhost:6379'",
+      OLLAMA_BASE_URL: "  \"http://localhost:11434\"  "
+    });
+
+    expect(env.DATABASE_URL).toBe("postgresql://postgres:postgres@localhost:5432/hori");
+    expect(env.REDIS_URL).toBe("redis://localhost:6379");
+    expect(env.OLLAMA_BASE_URL).toBe("http://localhost:11434");
+  });
+
   it("allows API-only config without Ollama URL", () => {
     const env = loadEnv({
       DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
