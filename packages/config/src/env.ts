@@ -446,6 +446,6 @@ export function assertEnvForRole(env: AppEnv, role: AppRole) {
   }
 
   if ((role === "bot" || role === "worker") && !env.OLLAMA_BASE_URL) {
-    throw new Error("Missing Ollama URL: set AI_URL or OLLAMA_BASE_URL");
+    console.warn("[config] OLLAMA_BASE_URL not set \u2014 LLM features will use fallback replies until configured via /bot-ai-url or env");
   }
 }

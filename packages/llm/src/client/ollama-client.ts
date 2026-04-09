@@ -11,7 +11,10 @@ export class OllamaClient implements LlmClient {
   ) {}
 
   async chat(options: LlmChatOptions): Promise<LlmChatResponse> {
-    const baseUrl = this.env.OLLAMA_BASE_URL!;
+    const baseUrl = this.env.OLLAMA_BASE_URL;
+    if (!baseUrl) {
+      throw new Error("OLLAMA_BASE_URL not configured \u2014 use /bot-ai-url to set it");
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.env.OLLAMA_TIMEOUT_MS);
 
@@ -46,7 +49,10 @@ export class OllamaClient implements LlmClient {
   }
 
   async embed(model: string, input: string | string[]): Promise<number[][]> {
-    const baseUrl = this.env.OLLAMA_BASE_URL!;
+    const baseUrl = this.env.OLLAMA_BASE_URL;
+    if (!baseUrl) {
+      throw new Error("OLLAMA_BASE_URL not configured \u2014 use /bot-ai-url to set it");
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.env.OLLAMA_TIMEOUT_MS);
 
