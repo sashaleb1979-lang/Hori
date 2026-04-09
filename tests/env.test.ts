@@ -100,4 +100,12 @@ describe("loadEnv", () => {
       })
     ).toThrow(/Railway reference/);
   });
+
+  it("throws a clearer error when database env is missing entirely", () => {
+    expect(() =>
+      loadEnv({
+        REDIS_URL: "redis://localhost:6379"
+      })
+    ).toThrow(/Set one of: DATABASE_URL, DB_URL/);
+  });
 });

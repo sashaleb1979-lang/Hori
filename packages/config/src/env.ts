@@ -271,6 +271,12 @@ const envAliasMap = {
   HORI_CONFIG_JSON: "CFG"
 } as const satisfies Record<string, string>;
 
+const canonicalEnvHints = {
+  DATABASE_URL: ["DATABASE_URL", "DB_URL"],
+  REDIS_URL: ["REDIS_URL", "KV_URL"],
+  OLLAMA_BASE_URL: ["OLLAMA_BASE_URL", "AI_URL"]
+} as const satisfies Partial<Record<keyof z.infer<typeof coreEnvSchema>, readonly string[]>>;
+
 export function applyEnvAliases(raw: NodeJS.ProcessEnv = process.env) {
   for (const [alias, canonical] of Object.entries(envAliasMap)) {
     const aliasValue = raw[alias];
@@ -366,8 +372,12 @@ function removeUndefined<T extends Record<string, unknown>>(input: T): Partial<T
 }
 
 function formatUrlEnvError(key: string, value: unknown): string {
+  const hint = canonicalEnvHints[key as keyof typeof canonicalEnvHints];
+
   if (value === undefined || value === null || value === "") {
-    return `Missing required env ${key}.`;
+    return hint
+      ? `Missing required env ${key}. Set one of: ${hint.join(", ")}.`
+      : `Missing required env ${key}.`;
   }
 
   const text = String(value).trim();
@@ -389,11 +399,17 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): AppEnv {
   const parsedCore = coreEnvSchema.safeParse(mappedCore);
 
   if (!parsedCore.success) {
-    const urlIssue = parsedCore.error.issues.find((issue) =>
-      issue.code === "invalid_string" &&
-      issue.validation === "url" &&
-      typeof issue.path[0] === "string"
-    );
+    const urlIssue = parsedCore.error.issues.find((issue) => {
+      if (typeof issue.path[0] !== "string") {
+        return false;
+      }
+
+      if (issue.code === "invalid_string" && issue.validation === "url") {
+        return true;
+      }
+
+      return issue.code === "invalid_type" && issue.expected === "string";
+    });
 
     if (urlIssue) {
       const key = String(urlIssue.path[0]);
