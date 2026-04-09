@@ -41,7 +41,8 @@ export class OllamaClient implements LlmClient {
 
       return (await response.json()) as LlmChatResponse;
     } catch (error) {
-      this.logger.error({ error: asErrorMessage(error), model: options.model, url: baseUrl }, "ollama chat request failed");
+      const errorText = asErrorMessage(error);
+      this.logger.error({ error: errorText, model: options.model, url: baseUrl }, `ollama chat request failed: url=${baseUrl} model=${options.model} error=${errorText}`);
       throw error;
     } finally {
       clearTimeout(timeout);
@@ -83,7 +84,8 @@ export class OllamaClient implements LlmClient {
 
       return [];
     } catch (error) {
-      this.logger.error({ error: asErrorMessage(error), model, url: baseUrl }, "ollama embed request failed");
+      const errorText = asErrorMessage(error);
+      this.logger.error({ error: errorText, model, url: baseUrl }, `ollama embed request failed: url=${baseUrl} model=${model} error=${errorText}`);
       throw error;
     } finally {
       clearTimeout(timeout);

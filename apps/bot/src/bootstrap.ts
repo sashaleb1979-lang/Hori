@@ -71,12 +71,13 @@ export async function bootstrapBot() {
       if (probe.ok) {
         const data = (await probe.json()) as { models?: { name: string }[] };
         const models = data.models?.map((m) => m.name) ?? [];
-        logger.info({ url: env.OLLAMA_BASE_URL, models }, "ollama reachable");
+        logger.info({ url: env.OLLAMA_BASE_URL, models }, `ollama reachable: url=${env.OLLAMA_BASE_URL} models=${models.join(",")}`);
       } else {
-        logger.warn({ url: env.OLLAMA_BASE_URL, status: probe.status }, "ollama responded with error — fallback replies until fixed");
+        logger.warn({ url: env.OLLAMA_BASE_URL, status: probe.status }, `ollama responded with error: url=${env.OLLAMA_BASE_URL} status=${probe.status} — fallback replies until fixed`);
       }
     } catch (error) {
-      logger.warn({ url: env.OLLAMA_BASE_URL, error: String(error) }, "ollama unreachable — bot will use fallback replies. Run start-tunnel.ps1 and /bot-ai-url");
+      const errorText = error instanceof Error ? error.message : String(error);
+      logger.warn({ url: env.OLLAMA_BASE_URL, error: errorText }, `ollama unreachable: url=${env.OLLAMA_BASE_URL} error=${errorText} — bot will use fallback replies. Run start-tunnel.ps1 and /bot-ai-url`);
     }
   } else {
     logger.warn("OLLAMA_BASE_URL not set — bot will use fallback replies for all LLM calls");

@@ -24,6 +24,43 @@ function Wait-HttpReady {
   return $false
 }
 
+function Get-TunnelUrlFromLog {
+  param([string]$LogPath)
+
+  if (-not (Test-Path $LogPath)) {
+    return $null
+  }
+
+  $content = Get-Content $LogPath -Raw -ErrorAction SilentlyContinue
+
+  if ($content -match 'https://[a-z0-9-]+\.trycloudflare\.com') {
+    return $Matches[0]
+  }
+
+  if ($content -match 'https://[a-z0-9-]+\.loca\.lt') {
+    return $Matches[0]
+  }
+
+  return $null
+}
+
+function Show-LogTail {
+  param(
+    [string]$LogPath,
+    [string]$Title,
+    [int]$Lines = 12
+  )
+
+  if (-not (Test-Path $LogPath)) {
+    return
+  }
+
+  Write-Host "[i] $Title" -ForegroundColor DarkGray
+  Get-Content $LogPath -Tail $Lines -ErrorAction SilentlyContinue | ForEach-Object {
+    Write-Host "    $_" -ForegroundColor DarkGray
+  }
+}
+
 function Find-Executable {
   param([string]$Name, [string[]]$Paths)
 
@@ -59,27 +96,45 @@ if (-not $ollama) {
   exit 1
 }
 
+$npx = Find-Executable "npx" @()
+
 # --- 1. Убить старые процессы ---
-foreach ($proc in @("ollama", "cloudflared")) {
-  Get-Process $proc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-}
+Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
 
-# --- 2. Запустить Ollama (env-переменные наследуются от процесса) ---
+# --- 2. Проверить или запустить Ollama ---
 $env:OLLAMA_ORIGINS = "*"
 $env:OLLAMA_HOST = "0.0.0.0:11434"
 
-Write-Host "[*] Запускаю Ollama..." -ForegroundColor Cyan
-$ollamaProcess = Start-Process -FilePath $ollama -ArgumentList "serve" `
-  -PassThru -WindowStyle Hidden
+$ollamaHealthUrl = "http://localhost:11434/api/tags"
+$ollamaStdOutLog = Join-Path $env:TEMP "ollama-serve.out.log"
+$ollamaStdErrLog = Join-Path $env:TEMP "ollama-serve.err.log"
+$ollamaProcess = $null
 
-$ready = Wait-HttpReady -Url "http://localhost:11434" -Attempts 20 -DelaySeconds 1 -TimeoutSeconds 2
+if (Wait-HttpReady -Url $ollamaHealthUrl -Attempts 2 -DelaySeconds 1 -TimeoutSeconds 2) {
+  Write-Host "[+] Ollama уже отвечает на localhost:11434" -ForegroundColor Green
+} else {
+  Get-Process ollama -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  if (Test-Path $ollamaStdOutLog) { Remove-Item $ollamaStdOutLog -Force }
+  if (Test-Path $ollamaStdErrLog) { Remove-Item $ollamaStdErrLog -Force }
 
-if (-not $ready) {
-  Write-Host "[!] Ollama не отвечает на localhost:11434" -ForegroundColor Red
-  exit 1
+  Write-Host "[*] Запускаю Ollama..." -ForegroundColor Cyan
+  $ollamaProcess = Start-Process -FilePath $ollama -ArgumentList "serve" `
+    -PassThru -WindowStyle Hidden `
+    -RedirectStandardOutput $ollamaStdOutLog `
+    -RedirectStandardError $ollamaStdErrLog
+
+  $ready = Wait-HttpReady -Url $ollamaHealthUrl -Attempts 20 -DelaySeconds 1 -TimeoutSeconds 2
+
+  if (-not $ready) {
+    Write-Host "[!] Ollama не отвечает на localhost:11434/api/tags" -ForegroundColor Red
+    Show-LogTail -LogPath $ollamaStdErrLog -Title "ollama stderr"
+    Show-LogTail -LogPath $ollamaStdOutLog -Title "ollama stdout"
+    exit 1
+  }
+
+  Write-Host "[+] Ollama запущена" -ForegroundColor Green
 }
-Write-Host "[+] Ollama запущена" -ForegroundColor Green
 
 # --- 3. Запустить Cloudflare Tunnel ---
 Write-Host "[*] Запускаю туннель..." -ForegroundColor Cyan
@@ -95,23 +150,52 @@ $tunnelProcess = Start-Process -FilePath $cloudflared `
 $tunnelUrl = $null
 for ($i = 0; $i -lt 30; $i++) {
   Start-Sleep -Seconds 1
-  if (Test-Path $tunnelLogFile) {
-    $content = Get-Content $tunnelLogFile -Raw -ErrorAction SilentlyContinue
-    if ($content -match 'https://[a-z0-9-]+\.trycloudflare\.com') {
-      $tunnelUrl = $Matches[0]
-      break
-    }
+  if ($tunnelProcess.HasExited) {
+    break
+  }
+
+  $tunnelUrl = Get-TunnelUrlFromLog -LogPath $tunnelLogFile
+  if ($tunnelUrl) {
+    break
   }
 }
 
 if (-not $tunnelUrl) {
-  Write-Host "[!] Не удалось получить URL туннеля" -ForegroundColor Red
-  if (Test-Path $tunnelLogFile) {
-    Get-Content $tunnelLogFile -Tail 5 -ErrorAction SilentlyContinue | ForEach-Object {
-      Write-Host "    $_" -ForegroundColor DarkGray
+  Write-Host "[!] Не удалось получить URL cloudflared tunnel" -ForegroundColor Red
+  Show-LogTail -LogPath $tunnelLogFile -Title "cloudflared log"
+
+  if ($npx) {
+    Write-Host "[*] Пробую fallback через localtunnel..." -ForegroundColor Yellow
+    $localTunnelLogFile = Join-Path $env:TEMP "localtunnel.log"
+    if (Test-Path $localTunnelLogFile) { Remove-Item $localTunnelLogFile -Force }
+
+    $tunnelProcess = Start-Process -FilePath $npx `
+      -ArgumentList "-y","localtunnel","--port","11434" `
+      -PassThru -WindowStyle Hidden `
+      -RedirectStandardOutput $localTunnelLogFile `
+      -RedirectStandardError $localTunnelLogFile
+
+    $tunnelLogFile = $localTunnelLogFile
+    for ($i = 0; $i -lt 30; $i++) {
+      Start-Sleep -Seconds 1
+      if ($tunnelProcess.HasExited) {
+        break
+      }
+
+      $tunnelUrl = Get-TunnelUrlFromLog -LogPath $tunnelLogFile
+      if ($tunnelUrl) {
+        break
+      }
     }
+
+    if (-not $tunnelUrl) {
+      Write-Host "[!] Localtunnel тоже не дал URL" -ForegroundColor Red
+      Show-LogTail -LogPath $tunnelLogFile -Title "localtunnel log"
+      exit 1
+    }
+  } else {
+    exit 1
   }
-  exit 1
 }
 
 # --- 4. Проверить что туннель живой ---
@@ -122,6 +206,7 @@ if (-not $tunnelReady) {
 
 if (-not $tunnelReady) {
   Write-Host "[!] Туннель не отвечает: $tunnelUrl" -ForegroundColor Red
+  Show-LogTail -LogPath $tunnelLogFile -Title "tunnel log"
   exit 1
 }
 
@@ -144,8 +229,15 @@ try { $tunnelUrl | Set-Clipboard; Write-Host "  (URL скопирован)" -For
 # --- 6. Держать живым ---
 try {
   while ($true) {
-    if ($ollamaProcess.HasExited -or $tunnelProcess.HasExited) {
+    $ollamaExited = $ollamaProcess -and $ollamaProcess.HasExited
+    if ($ollamaExited -or $tunnelProcess.HasExited) {
       Write-Host "[!] Один из процессов завершился" -ForegroundColor Red
+      if ($ollamaExited) {
+        Show-LogTail -LogPath $ollamaStdErrLog -Title "ollama stderr"
+      }
+      if ($tunnelProcess.HasExited) {
+        Show-LogTail -LogPath $tunnelLogFile -Title "tunnel log"
+      }
       break
     }
     Start-Sleep -Seconds 5
@@ -153,5 +245,7 @@ try {
 } finally {
   Write-Host "[*] Завершение..." -ForegroundColor Cyan
   Stop-Process -Id $tunnelProcess.Id -Force -ErrorAction SilentlyContinue
-  Stop-Process -Id $ollamaProcess.Id -Force -ErrorAction SilentlyContinue
+  if ($ollamaProcess) {
+    Stop-Process -Id $ollamaProcess.Id -Force -ErrorAction SilentlyContinue
+  }
 }
