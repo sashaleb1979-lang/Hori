@@ -2,7 +2,7 @@ import type { AppEnv } from "@hori/config";
 import type { AppLogger } from "@hori/shared";
 import { asErrorMessage } from "@hori/shared";
 
-import type { LlmChatOptions, LlmChatResponse, LlmClient } from "./llm-client";
+import type { LlmChatOptions, LlmChatResponse, LlmClient, LlmToolCall } from "./llm-client";
 
 interface OllamaTagsResponse {
   models?: Array<{ name?: string }>;
@@ -17,6 +17,19 @@ interface ModelDescriptor {
   sizeValue?: number;
   isEmbedding: boolean;
 }
+
+interface OllamaChatChunk {
+  error?: string;
+  done?: boolean;
+  message?: {
+    role?: "assistant";
+    content?: string;
+    tool_calls?: LlmToolCall[];
+  };
+}
+
+const MIN_OLLAMA_CHAT_TIMEOUT_MS = 240_000;
+const MIN_OLLAMA_EMBED_TIMEOUT_MS = 180_000;
 
 function normalizeModelPart(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -129,6 +142,67 @@ export function pickClosestInstalledModel(requestedModel: string, availableModel
   return best.model.name;
 }
 
+export function parseOllamaChatResponseBody(bodyText: string): LlmChatResponse {
+  const trimmedBody = bodyText.trim();
+  if (!trimmedBody) {
+    return {
+      message: {
+        role: "assistant",
+        content: ""
+      }
+    };
+  }
+
+  const lines = trimmedBody
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const payloads = lines.map((line) => JSON.parse(line) as OllamaChatChunk);
+
+  if (payloads.length === 1 && payloads[0]?.message?.content !== undefined && !trimmedBody.includes("\n")) {
+    const message = payloads[0].message;
+
+    return {
+      message: {
+        role: message?.role ?? "assistant",
+        content: message?.content ?? "",
+        ...(message?.tool_calls ? { tool_calls: message.tool_calls } : {})
+      }
+    };
+  }
+
+  let role: "assistant" = "assistant";
+  let content = "";
+  let toolCalls: LlmToolCall[] | undefined;
+
+  for (const payload of payloads) {
+    if (payload.error) {
+      throw new Error(`Ollama chat failed: ${payload.error}`);
+    }
+
+    if (payload.message?.role) {
+      role = payload.message.role;
+    }
+
+    if (payload.message?.content) {
+      content += payload.message.content;
+    }
+
+    if (payload.message?.tool_calls?.length) {
+      toolCalls = payload.message.tool_calls;
+    }
+  }
+
+  return {
+    message: {
+      role,
+      content,
+      ...(toolCalls ? { tool_calls: toolCalls } : {})
+    }
+  };
+}
+
 export class OllamaClient implements LlmClient {
   private readonly resolvedModelAliases = new Map<string, string>();
 
@@ -148,34 +222,34 @@ export class OllamaClient implements LlmClient {
       const resolvedModel = await this.resolveModelAlias(baseUrl, requestedModel);
       let response = await this.postJson(new URL("/api/chat", baseUrl), {
         model: resolvedModel,
-        stream: false,
+        stream: true,
         format: options.format,
         options: {
           temperature: options.temperature ?? 0.5
         },
         messages: options.messages,
         tools: options.tools
-      });
+      }, Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS));
 
       if (response.ok) {
-        return (await response.json()) as LlmChatResponse;
+        return await this.readChatResponse(response);
       }
 
       const fallbackModel = await this.tryResolveMissingModel(baseUrl, requestedModel, response, "chat");
       if (fallbackModel) {
         response = await this.postJson(new URL("/api/chat", baseUrl), {
           model: fallbackModel,
-          stream: false,
+          stream: true,
           format: options.format,
           options: {
             temperature: options.temperature ?? 0.5
           },
           messages: options.messages,
           tools: options.tools
-        });
+        }, Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS));
 
         if (response.ok) {
-          return (await response.json()) as LlmChatResponse;
+          return await this.readChatResponse(response);
         }
       }
 
@@ -199,7 +273,7 @@ export class OllamaClient implements LlmClient {
       let response = await this.postJson(new URL("/api/embed", baseUrl), {
         model: resolvedModel,
         input
-      });
+      }, Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_EMBED_TIMEOUT_MS));
 
       if (!response.ok) {
         const fallbackModel = await this.tryResolveMissingModel(baseUrl, requestedModel, response, "embed");
@@ -207,7 +281,7 @@ export class OllamaClient implements LlmClient {
           response = await this.postJson(new URL("/api/embed", baseUrl), {
             model: fallbackModel,
             input
-          });
+          }, Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_EMBED_TIMEOUT_MS));
         }
       }
 
@@ -233,9 +307,13 @@ export class OllamaClient implements LlmClient {
     }
   }
 
-  private async postJson(url: URL, payload: unknown) {
+  private async readChatResponse(response: Response) {
+    return parseOllamaChatResponseBody(await response.text());
+  }
+
+  private async postJson(url: URL, payload: unknown, timeoutMs = this.env.OLLAMA_TIMEOUT_MS) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.env.OLLAMA_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       return await fetch(url, {
