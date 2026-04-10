@@ -52,6 +52,26 @@ export class MessageIngestService {
     const tokenEstimate = estimateTokenCount(input.content);
 
     await this.prisma.$transaction(async (tx) => {
+      let persistedReplyToMessageId: string | undefined;
+      if (input.replyToMessageId) {
+        const repliedMessage = await tx.message.findUnique({
+          where: { id: input.replyToMessageId },
+          select: { id: true }
+        });
+
+        if (repliedMessage) {
+          persistedReplyToMessageId = repliedMessage.id;
+        } else {
+          this.logger.warn(
+            {
+              messageId: input.messageId,
+              replyToMessageId: input.replyToMessageId
+            },
+            "reply target is missing in analytics store, saving message without relation"
+          );
+        }
+      }
+
       await tx.guild.upsert({
         where: { id: input.guildId },
         update: {
@@ -114,7 +134,7 @@ export class MessageIngestService {
           userId: input.userId,
           content: input.content,
           createdAt: input.createdAt,
-          replyToMessageId: input.replyToMessageId ?? undefined,
+          replyToMessageId: persistedReplyToMessageId,
           mentionCount: input.mentionCount,
           charCount,
           tokenEstimate,
