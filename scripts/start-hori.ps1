@@ -23,6 +23,8 @@ $script:OllamaStdErrLog = Join-Path $script:LogsRoot "ollama-serve.err.log"
 $script:CloudflaredLog = Join-Path $script:LogsRoot "cloudflared-tunnel.log"
 $script:LocalTunnelLog = Join-Path $script:LogsRoot "localtunnel.log"
 $script:LocalTunnelErrLog = Join-Path $script:LogsRoot "localtunnel.err.log"
+$script:TunnelCommandFile = Join-Path ([Environment]::GetFolderPath("Desktop")) "Хори URL.txt"
+$script:LocalTunnelSubdomainFile = Join-Path $script:StateRoot "localtunnel-subdomain.txt"
 $script:OllamaBaseUrl = "http://localhost:$OllamaPort"
 $script:OllamaTagsUrl = "$($script:OllamaBaseUrl)/api/tags"
 $script:ManagedTunnelProcess = $null
@@ -30,6 +32,9 @@ $script:ManagedOllamaProcess = $null
 $script:StartedOllamaHere = $false
 $script:MutexAcquired = $false
 $script:LauncherMutex = $null
+$script:TunnelHealthCheckIntervalSeconds = 20
+$script:TunnelHealthTimeoutSeconds = 12
+$script:TunnelHealthFailuresBeforeRestart = 2
 
 function Write-Banner {
   Write-Host ""
@@ -292,6 +297,120 @@ function Wait-DnsReady {
   return $false
 }
 
+function Get-ErrorSummary {
+  param([System.Management.Automation.ErrorRecord]$ErrorRecord)
+
+  if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) {
+    return $ErrorRecord.ErrorDetails.Message.Trim()
+  }
+
+  if ($ErrorRecord.Exception -and $ErrorRecord.Exception.Message) {
+    return $ErrorRecord.Exception.Message.Trim()
+  }
+
+  return ($ErrorRecord | Out-String).Trim()
+}
+
+function Normalize-SubdomainPart {
+  param([string]$Value)
+
+  $sourceValue = if ($null -ne $Value) { $Value } else { "" }
+  $normalized = $sourceValue.ToLowerInvariant() -replace '[^a-z0-9-]+', '-'
+  $normalized = $normalized.Trim('-')
+
+  if (-not $normalized) {
+    return "hori"
+  }
+
+  return $normalized
+}
+
+function Get-LocalTunnelSubdomain {
+  if (Test-Path $script:LocalTunnelSubdomainFile) {
+    $stored = (Get-Content $script:LocalTunnelSubdomainFile -Raw -ErrorAction SilentlyContinue).Trim().ToLowerInvariant()
+    if ($stored -match '^[a-z0-9-]{4,63}$') {
+      return $stored
+    }
+  }
+
+  $computer = Normalize-SubdomainPart -Value $env:COMPUTERNAME
+  $user = Normalize-SubdomainPart -Value $env:USERNAME
+  $subdomain = "hori-$computer-$user"
+
+  if ($subdomain.Length -gt 63) {
+    $subdomain = $subdomain.Substring(0, 63).TrimEnd('-')
+  }
+
+  if ($subdomain.Length -lt 4) {
+    $subdomain = "hori-$([System.Guid]::NewGuid().ToString('N').Substring(0, 8))"
+  }
+
+  Set-Content -Path $script:LocalTunnelSubdomainFile -Value $subdomain -Encoding ASCII
+  return $subdomain
+}
+
+function Get-TunnelHealth {
+  param(
+    [Parameter(Mandatory)]
+    [string]$TunnelUrl,
+    [int]$TimeoutSeconds = 12,
+    [switch]$AllowRootFallback
+  )
+
+  $status = [ordered]@{
+    Healthy = $false
+    CheckedUrl = "$TunnelUrl/api/tags"
+    Error = ""
+  }
+
+  try {
+    $response = Invoke-RestMethod -Uri "$TunnelUrl/api/tags" -TimeoutSec $TimeoutSeconds
+    $status.Healthy = $true
+    $status.Models = @($response.models | ForEach-Object { $_.name })
+    return [pscustomobject]$status
+  } catch {
+    $status.Error = Get-ErrorSummary -ErrorRecord $_
+  }
+
+  if ($AllowRootFallback) {
+    try {
+      $null = Invoke-WebRequest -Uri $TunnelUrl -UseBasicParsing -TimeoutSec ([Math]::Min($TimeoutSeconds, 8))
+      $status.Healthy = $true
+      $status.CheckedUrl = $TunnelUrl
+      $status.Error = ""
+      return [pscustomobject]$status
+    } catch {
+      $status.CheckedUrl = $TunnelUrl
+      $status.Error = Get-ErrorSummary -ErrorRecord $_
+    }
+  }
+
+  return [pscustomobject]$status
+}
+
+function Wait-TunnelReady {
+  param(
+    [Parameter(Mandatory)]
+    [string]$TunnelUrl,
+    [Parameter(Mandatory)]
+    [string]$Provider
+  )
+
+  $attempts = if ($Provider -eq "cloudflared") { 30 } else { 20 }
+  $timeoutSeconds = if ($Provider -eq "cloudflared") { 12 } else { 10 }
+
+  for ($i = 1; $i -le $attempts; $i++) {
+    $health = Get-TunnelHealth -TunnelUrl $TunnelUrl -TimeoutSeconds $timeoutSeconds -AllowRootFallback
+    if ($health.Healthy) {
+      return $health
+    }
+
+    Start-Sleep -Seconds 2
+  }
+
+  return $null
+}
+
 function Get-TunnelUrlFromLog {
   param([string]$LogPath)
 
@@ -310,6 +429,26 @@ function Get-TunnelUrlFromLog {
   }
 
   return $null
+}
+
+function Update-TunnelCommandFile {
+  param(
+    [string]$TunnelUrl,
+    [string]$TunnelProvider
+  )
+
+  $content = @(
+    "Хори: текущий туннель",
+    "",
+    "Время: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))",
+    "Провайдер: $TunnelProvider",
+    "URL: $TunnelUrl",
+    "",
+    "Команда для Discord:",
+    "/bot-ai-url url:$TunnelUrl"
+  ) -join [Environment]::NewLine
+
+  Set-Content -Path $script:TunnelCommandFile -Value $content -Encoding UTF8
 }
 
 function Show-LogTail {
@@ -452,71 +591,101 @@ function Start-TunnelProvider {
 
   Write-Step "Запускаю туннель через $Provider..."
 
+  $launchAttempts = @()
   if ($Provider -eq "cloudflared") {
-    $process = Start-Process -FilePath $ExecutablePath `
-      -ArgumentList "tunnel","--url",$script:OllamaBaseUrl,"--logfile",$logPath `
-      -PassThru -WindowStyle Hidden
+    $launchAttempts += [pscustomobject]@{
+      Label = "default"
+      Args = @("tunnel", "--url", $script:OllamaBaseUrl, "--logfile", $logPath)
+      PreferredUrl = $null
+    }
   } else {
-    $process = Start-Process -FilePath $ExecutablePath `
-      -ArgumentList "-y","localtunnel","--port",$OllamaPort `
-      -PassThru -WindowStyle Hidden `
-      -RedirectStandardOutput $logPath `
-      -RedirectStandardError $script:LocalTunnelErrLog
-  }
-
-  $url = $null
-  for ($i = 0; $i -lt 45; $i++) {
-    Start-Sleep -Seconds 1
-    if ($process.HasExited) {
-      break
+    $preferredSubdomain = Get-LocalTunnelSubdomain
+    $launchAttempts += [pscustomobject]@{
+      Label = "preferred-subdomain"
+      Args = @("-y", "localtunnel", "--port", "$OllamaPort", "--subdomain", $preferredSubdomain)
+      PreferredUrl = "https://$preferredSubdomain.loca.lt"
     }
-
-    $url = Get-TunnelUrlFromLog -LogPath $logPath
-    if ($url) {
-      break
+    $launchAttempts += [pscustomobject]@{
+      Label = "random-subdomain"
+      Args = @("-y", "localtunnel", "--port", "$OllamaPort")
+      PreferredUrl = $null
     }
   }
 
-  if (-not $url) {
-    Write-WarnLine "$Provider не выдал URL"
-    Show-LogTail -LogPath $logPath -Title "$Provider log"
+  foreach ($launchAttempt in $launchAttempts) {
+    if ($Provider -eq "localtunnel" -and $launchAttempt.Label -eq "preferred-subdomain") {
+      Write-Host ("    Пробую сохранить стабильный адрес: {0}" -f $launchAttempt.PreferredUrl) -ForegroundColor DarkGray
+    }
+
     if ($Provider -eq "localtunnel") {
-      Show-LogTail -LogPath $script:LocalTunnelErrLog -Title "$Provider stderr"
+      $process = Start-Process -FilePath $ExecutablePath `
+        -ArgumentList $launchAttempt.Args `
+        -PassThru -WindowStyle Hidden `
+        -RedirectStandardOutput $logPath `
+        -RedirectStandardError $script:LocalTunnelErrLog
+    } else {
+      $process = Start-Process -FilePath $ExecutablePath `
+        -ArgumentList $launchAttempt.Args `
+        -PassThru -WindowStyle Hidden
     }
-    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-    return $null
-  }
 
-  if ($Provider -eq "cloudflared" -and -not (Wait-DnsReady -Url $url -Attempts 12 -DelaySeconds 2)) {
-    Write-WarnLine "Cloudflare URL не резолвится через DNS: $url"
-    Show-LogTail -LogPath $logPath -Title "$Provider log"
-    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-    return $null
-  }
+    $url = $null
+    for ($i = 0; $i -lt 45; $i++) {
+      Start-Sleep -Seconds 1
+      if ($process.HasExited) {
+        break
+      }
 
-  $httpReady = Wait-HttpReady -Url "$url/api/tags" -Attempts 15 -DelaySeconds 2 -TimeoutSeconds 5
-  if (-not $httpReady) {
-    $httpReady = Wait-HttpReady -Url $url -Attempts 5 -DelaySeconds 2 -TimeoutSeconds 5
-  }
-
-  if (-not $httpReady) {
-    Write-WarnLine "$Provider дал URL, но он не отвечает: $url"
-    Show-LogTail -LogPath $logPath -Title "$Provider log"
-    if ($Provider -eq "localtunnel") {
-      Show-LogTail -LogPath $script:LocalTunnelErrLog -Title "$Provider stderr"
+      $url = Get-TunnelUrlFromLog -LogPath $logPath
+      if ($url) {
+        break
+      }
     }
-    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-    return $null
+
+    if (-not $url -and $launchAttempt.PreferredUrl -and -not $process.HasExited) {
+      $url = $launchAttempt.PreferredUrl
+    }
+
+    if (-not $url) {
+      Write-WarnLine "$Provider не выдал URL"
+      Show-LogTail -LogPath $logPath -Title "$Provider log"
+      if ($Provider -eq "localtunnel") {
+        Show-LogTail -LogPath $script:LocalTunnelErrLog -Title "$Provider stderr"
+      }
+      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+      continue
+    }
+
+    if ($Provider -eq "cloudflared" -and -not (Wait-DnsReady -Url $url -Attempts 30 -DelaySeconds 2)) {
+      Write-WarnLine "Cloudflare URL не резолвится через DNS: $url"
+      Show-LogTail -LogPath $logPath -Title "$Provider log"
+      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+      continue
+    }
+
+    $health = Wait-TunnelReady -TunnelUrl $url -Provider $Provider
+    if (-not $health) {
+      Write-WarnLine "$Provider дал URL, но он не отвечает: $url"
+      Show-LogTail -LogPath $logPath -Title "$Provider log"
+      if ($Provider -eq "localtunnel") {
+        Show-LogTail -LogPath $script:LocalTunnelErrLog -Title "$Provider stderr"
+      }
+      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+      continue
+    }
+
+    Write-PidFile -Path $script:TunnelPidFile -ProcessId $process.Id
+
+    return [pscustomobject]@{
+      Provider = $Provider
+      Url = $url
+      Process = $process
+      LogPath = $logPath
+      Health = $health
+    }
   }
 
-  Write-PidFile -Path $script:TunnelPidFile -ProcessId $process.Id
-
-  return [pscustomobject]@{
-    Provider = $Provider
-    Url = $url
-    Process = $process
-    LogPath = $logPath
-  }
+  return $null
 }
 
 function Ensure-TunnelReady {
@@ -596,6 +765,7 @@ function Show-ReadySummary {
   Write-Host ("  Логи Ollama:  {0}" -f $script:OllamaStdErrLog) -ForegroundColor DarkGray
   Write-Host ("  Логи Tunnel:  {0}" -f $TunnelInfo.LogPath) -ForegroundColor DarkGray
 
+  Update-TunnelCommandFile -TunnelUrl $TunnelInfo.Url -TunnelProvider $TunnelInfo.Provider
   Copy-TunnelCommand -TunnelUrl $TunnelInfo.Url
 }
 
@@ -631,9 +801,12 @@ function Invoke-MonitorLoop {
 
   $ollamaInfo = $CurrentOllamaInfo
   $tunnelInfo = $CurrentTunnelInfo
+  $secondsSinceTunnelHealthCheck = 0
+  $consecutiveTunnelHealthFailures = 0
 
   while ($true) {
     Start-Sleep -Seconds 5
+    $secondsSinceTunnelHealthCheck += 5
 
     $tunnelExited = $script:ManagedTunnelProcess -and $script:ManagedTunnelProcess.HasExited
     $ollamaExited = $script:StartedOllamaHere -and $script:ManagedOllamaProcess -and $script:ManagedOllamaProcess.HasExited
@@ -642,14 +815,50 @@ function Invoke-MonitorLoop {
       Write-WarnLine "Ollama завершилась. Пробую перезапустить..."
       $ollamaInfo = Ensure-OllamaReady -OllamaPath $OllamaPath
       $tunnelInfo = Ensure-TunnelReady -CloudflaredPath $CloudflaredPath -NpxPath $NpxPath
+      $secondsSinceTunnelHealthCheck = 0
+      $consecutiveTunnelHealthFailures = 0
       Show-ReadySummary -OllamaInfo $ollamaInfo -TunnelInfo $tunnelInfo
       continue
     }
 
     if ($tunnelExited) {
       Write-WarnLine "Туннель завершился. Пробую поднять новый..."
+      $oldTunnelUrl = if ($tunnelInfo) { $tunnelInfo.Url } else { $null }
       $tunnelInfo = Ensure-TunnelReady -CloudflaredPath $CloudflaredPath -NpxPath $NpxPath
+      $secondsSinceTunnelHealthCheck = 0
+      $consecutiveTunnelHealthFailures = 0
       Show-ReadySummary -OllamaInfo $ollamaInfo -TunnelInfo $tunnelInfo
+      if ($oldTunnelUrl -and $oldTunnelUrl -ne $tunnelInfo.Url) {
+        Write-WarnLine "URL изменился. В Discord снова введи: /bot-ai-url url:$($tunnelInfo.Url)"
+      }
+      continue
+    }
+
+    if ($tunnelInfo -and $secondsSinceTunnelHealthCheck -ge $script:TunnelHealthCheckIntervalSeconds) {
+      $secondsSinceTunnelHealthCheck = 0
+      $health = Get-TunnelHealth -TunnelUrl $tunnelInfo.Url -TimeoutSeconds $script:TunnelHealthTimeoutSeconds
+
+      if ($health.Healthy) {
+        $consecutiveTunnelHealthFailures = 0
+        continue
+      }
+
+      $consecutiveTunnelHealthFailures += 1
+      Write-WarnLine "Туннель не отвечает ($consecutiveTunnelHealthFailures/$script:TunnelHealthFailuresBeforeRestart): $($health.Error)"
+
+      if ($consecutiveTunnelHealthFailures -lt $script:TunnelHealthFailuresBeforeRestart) {
+        continue
+      }
+
+      Write-WarnLine "Туннель снаружи умер. Поднимаю новый..."
+      $oldTunnelUrl = $tunnelInfo.Url
+      $tunnelInfo = Ensure-TunnelReady -CloudflaredPath $CloudflaredPath -NpxPath $NpxPath
+      $secondsSinceTunnelHealthCheck = 0
+      $consecutiveTunnelHealthFailures = 0
+      Show-ReadySummary -OllamaInfo $ollamaInfo -TunnelInfo $tunnelInfo
+      if ($oldTunnelUrl -ne $tunnelInfo.Url) {
+        Write-WarnLine "URL изменился. В Discord снова введи: /bot-ai-url url:$($tunnelInfo.Url)"
+      }
     }
   }
 }
