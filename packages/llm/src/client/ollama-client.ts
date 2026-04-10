@@ -4,7 +4,134 @@ import { asErrorMessage } from "@hori/shared";
 
 import type { LlmChatOptions, LlmChatResponse, LlmClient } from "./llm-client";
 
+interface OllamaTagsResponse {
+  models?: Array<{ name?: string }>;
+}
+
+interface ModelDescriptor {
+  name: string;
+  normalized: string;
+  family: string;
+  familyNormalized: string;
+  sizeLabel?: string;
+  sizeValue?: number;
+  isEmbedding: boolean;
+}
+
+function normalizeModelPart(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function parseModelSize(sizeLabel?: string) {
+  if (!sizeLabel) {
+    return undefined;
+  }
+
+  const match = sizeLabel.toLowerCase().match(/(\d+(?:\.\d+)?)/);
+  if (!match) {
+    return undefined;
+  }
+
+  return Number(match[1]);
+}
+
+function describeModel(name: string): ModelDescriptor {
+  const [family, sizeLabel] = name.split(":", 2);
+  const lowerName = name.toLowerCase();
+
+  return {
+    name,
+    normalized: normalizeModelPart(name),
+    family,
+    familyNormalized: normalizeModelPart(family),
+    sizeLabel,
+    sizeValue: parseModelSize(sizeLabel),
+    isEmbedding: lowerName.includes("embed") || lowerName.includes("embedding")
+  };
+}
+
+function sharedPrefixLength(left: string, right: string) {
+  const limit = Math.min(left.length, right.length);
+  let index = 0;
+
+  while (index < limit && left[index] === right[index]) {
+    index += 1;
+  }
+
+  return index;
+}
+
+export function pickClosestInstalledModel(requestedModel: string, availableModels: string[]) {
+  if (!availableModels.length) {
+    return null;
+  }
+
+  const requested = describeModel(requestedModel);
+  const candidates = availableModels.map(describeModel);
+  const typedCandidates = requested.isEmbedding ? candidates.filter((model) => model.isEmbedding) : candidates.filter((model) => !model.isEmbedding);
+  const pool = typedCandidates.length ? typedCandidates : candidates;
+
+  let best: { model: ModelDescriptor; score: number } | null = null;
+
+  for (const candidate of pool) {
+    let score = 0;
+
+    if (candidate.name === requested.name) {
+      score += 1000;
+    }
+
+    if (candidate.normalized === requested.normalized) {
+      score += 500;
+    }
+
+    if (candidate.familyNormalized === requested.familyNormalized) {
+      score += 250;
+    }
+
+    if (
+      candidate.familyNormalized.startsWith(requested.familyNormalized) ||
+      requested.familyNormalized.startsWith(candidate.familyNormalized)
+    ) {
+      score += 180;
+    }
+
+    score += sharedPrefixLength(candidate.familyNormalized, requested.familyNormalized) * 10;
+
+    if (requested.sizeLabel && candidate.sizeLabel) {
+      if (requested.sizeLabel.toLowerCase() === candidate.sizeLabel.toLowerCase()) {
+        score += 120;
+      } else if (requested.sizeValue !== undefined && candidate.sizeValue !== undefined) {
+        score += Math.max(0, 60 - Math.abs(requested.sizeValue - candidate.sizeValue) * 8);
+      }
+    }
+
+    if (!candidate.isEmbedding) {
+      score += 20;
+    }
+
+    if (!requested.isEmbedding && candidate.isEmbedding) {
+      score -= 300;
+    }
+
+    if (requested.isEmbedding && !candidate.isEmbedding) {
+      score -= 300;
+    }
+
+    if (!best || score > best.score) {
+      best = { model: candidate, score };
+    }
+  }
+
+  if (!best || best.score < 25) {
+    return null;
+  }
+
+  return best.model.name;
+}
+
 export class OllamaClient implements LlmClient {
+  private readonly resolvedModelAliases = new Map<string, string>();
+
   constructor(
     private readonly env: AppEnv,
     private readonly logger: AppLogger
@@ -15,16 +142,29 @@ export class OllamaClient implements LlmClient {
     if (!baseUrl) {
       throw new Error("OLLAMA_BASE_URL not configured \u2014 use /bot-ai-url to set it");
     }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.env.OLLAMA_TIMEOUT_MS);
+    const requestedModel = options.model;
 
     try {
-      const response = await fetch(new URL("/api/chat", baseUrl), {
-        method: "POST",
-        signal: controller.signal,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: options.model,
+      const resolvedModel = await this.resolveModelAlias(baseUrl, requestedModel);
+      let response = await this.postJson(new URL("/api/chat", baseUrl), {
+        model: resolvedModel,
+        stream: false,
+        format: options.format,
+        options: {
+          temperature: options.temperature ?? 0.5
+        },
+        messages: options.messages,
+        tools: options.tools
+      });
+
+      if (response.ok) {
+        return (await response.json()) as LlmChatResponse;
+      }
+
+      const fallbackModel = await this.tryResolveMissingModel(baseUrl, requestedModel, response, "chat");
+      if (fallbackModel) {
+        response = await this.postJson(new URL("/api/chat", baseUrl), {
+          model: fallbackModel,
           stream: false,
           format: options.format,
           options: {
@@ -32,20 +172,18 @@ export class OllamaClient implements LlmClient {
           },
           messages: options.messages,
           tools: options.tools
-        })
-      });
+        });
 
-      if (!response.ok) {
-        throw new Error(`Ollama chat failed with status ${response.status}`);
+        if (response.ok) {
+          return (await response.json()) as LlmChatResponse;
+        }
       }
 
-      return (await response.json()) as LlmChatResponse;
+      throw new Error(`Ollama chat failed with status ${response.status}`);
     } catch (error) {
       const errorText = asErrorMessage(error);
-      this.logger.error({ error: errorText, model: options.model, url: baseUrl }, `ollama chat request failed: url=${baseUrl} model=${options.model} error=${errorText}`);
+      this.logger.error({ error: errorText, model: requestedModel, url: baseUrl }, `ollama chat request failed: url=${baseUrl} model=${requestedModel} error=${errorText}`);
       throw error;
-    } finally {
-      clearTimeout(timeout);
     }
   }
 
@@ -54,19 +192,24 @@ export class OllamaClient implements LlmClient {
     if (!baseUrl) {
       throw new Error("OLLAMA_BASE_URL not configured \u2014 use /bot-ai-url to set it");
     }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.env.OLLAMA_TIMEOUT_MS);
+    const requestedModel = model;
 
     try {
-      const response = await fetch(new URL("/api/embed", baseUrl), {
-        method: "POST",
-        signal: controller.signal,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          input
-        })
+      const resolvedModel = await this.resolveModelAlias(baseUrl, requestedModel);
+      let response = await this.postJson(new URL("/api/embed", baseUrl), {
+        model: resolvedModel,
+        input
       });
+
+      if (!response.ok) {
+        const fallbackModel = await this.tryResolveMissingModel(baseUrl, requestedModel, response, "embed");
+        if (fallbackModel) {
+          response = await this.postJson(new URL("/api/embed", baseUrl), {
+            model: fallbackModel,
+            input
+          });
+        }
+      }
 
       if (!response.ok) {
         throw new Error(`Ollama embed failed with status ${response.status}`);
@@ -85,10 +228,117 @@ export class OllamaClient implements LlmClient {
       return [];
     } catch (error) {
       const errorText = asErrorMessage(error);
-      this.logger.error({ error: errorText, model, url: baseUrl }, `ollama embed request failed: url=${baseUrl} model=${model} error=${errorText}`);
+      this.logger.error({ error: errorText, model: requestedModel, url: baseUrl }, `ollama embed request failed: url=${baseUrl} model=${requestedModel} error=${errorText}`);
       throw error;
+    }
+  }
+
+  private async postJson(url: URL, payload: unknown) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.env.OLLAMA_TIMEOUT_MS);
+
+    try {
+      return await fetch(url, {
+        method: "POST",
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  private async fetchInstalledModels(baseUrl: string) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), Math.min(this.env.OLLAMA_TIMEOUT_MS, 10000));
+
+    try {
+      const response = await fetch(new URL("/api/tags", baseUrl), {
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        return [];
+      }
+
+      const payload = (await response.json()) as OllamaTagsResponse;
+      return (payload.models ?? []).map((model) => model.name?.trim()).filter((model): model is string => Boolean(model));
+    } catch {
+      return [];
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async resolveModelAlias(baseUrl: string, requestedModel: string) {
+    const cached = this.resolvedModelAliases.get(requestedModel);
+    if (cached) {
+      return cached;
+    }
+
+    const availableModels = await this.fetchInstalledModels(baseUrl);
+    if (!availableModels.length || availableModels.includes(requestedModel)) {
+      return requestedModel;
+    }
+
+    const fallbackModel = pickClosestInstalledModel(requestedModel, availableModels);
+    if (!fallbackModel || fallbackModel === requestedModel) {
+      return requestedModel;
+    }
+
+    this.rememberResolvedModel(requestedModel, fallbackModel, availableModels, "preflight");
+    return fallbackModel;
+  }
+
+  private async tryResolveMissingModel(baseUrl: string, requestedModel: string, response: Response, operation: "chat" | "embed") {
+    if (response.status !== 404) {
+      return null;
+    }
+
+    const errorText = await response.text();
+    if (!/model .* not found/i.test(errorText)) {
+      return null;
+    }
+
+    const availableModels = await this.fetchInstalledModels(baseUrl);
+    const fallbackModel = pickClosestInstalledModel(requestedModel, availableModels);
+    if (!fallbackModel || fallbackModel === requestedModel) {
+      return null;
+    }
+
+    this.rememberResolvedModel(requestedModel, fallbackModel, availableModels, operation);
+    return fallbackModel;
+  }
+
+  private rememberResolvedModel(
+    requestedModel: string,
+    fallbackModel: string,
+    availableModels: string[],
+    operation: "chat" | "embed" | "preflight"
+  ) {
+    this.resolvedModelAliases.set(requestedModel, fallbackModel);
+
+    if (this.env.OLLAMA_FAST_MODEL === requestedModel) {
+      this.env.OLLAMA_FAST_MODEL = fallbackModel;
+    }
+
+    if (this.env.OLLAMA_SMART_MODEL === requestedModel) {
+      this.env.OLLAMA_SMART_MODEL = fallbackModel;
+    }
+
+    if (this.env.OLLAMA_EMBED_MODEL === requestedModel) {
+      this.env.OLLAMA_EMBED_MODEL = fallbackModel;
+    }
+
+    this.logger.warn(
+      {
+        requestedModel,
+        fallbackModel,
+        availableModels,
+        operation
+      },
+      "requested ollama model is missing, using closest installed model instead"
+    );
   }
 }
