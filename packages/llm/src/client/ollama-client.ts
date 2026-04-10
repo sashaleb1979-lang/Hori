@@ -35,6 +35,11 @@ function normalizeModelPart(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+function shouldDisableThinking(model: string) {
+  const normalized = normalizeModelPart(model);
+  return normalized.startsWith("qwen3") || normalized.startsWith("qwen35");
+}
+
 function parseModelSize(sizeLabel?: string) {
   if (!sizeLabel) {
     return undefined;
@@ -142,6 +147,21 @@ export function pickClosestInstalledModel(requestedModel: string, availableModel
   return best.model.name;
 }
 
+function buildChatPayload(options: LlmChatOptions, model: string, maxTokens: number) {
+  return {
+    model,
+    stream: true,
+    ...(shouldDisableThinking(model) ? { think: false } : {}),
+    format: options.format,
+    options: {
+      temperature: options.temperature ?? 0.5,
+      num_predict: maxTokens
+    },
+    messages: options.messages,
+    tools: options.tools
+  };
+}
+
 export function parseOllamaChatResponseBody(bodyText: string): LlmChatResponse {
   const trimmedBody = bodyText.trim();
   if (!trimmedBody) {
@@ -217,19 +237,15 @@ export class OllamaClient implements LlmClient {
       throw new Error("OLLAMA_BASE_URL not configured \u2014 use /bot-ai-url to set it");
     }
     const requestedModel = options.model;
+    const maxTokens = Math.max(32, this.env.LLM_REPLY_MAX_TOKENS);
 
     try {
       const resolvedModel = await this.resolveModelAlias(baseUrl, requestedModel);
-      let response = await this.postJson(new URL("/api/chat", baseUrl), {
-        model: resolvedModel,
-        stream: true,
-        format: options.format,
-        options: {
-          temperature: options.temperature ?? 0.5
-        },
-        messages: options.messages,
-        tools: options.tools
-      }, Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS));
+      let response = await this.postJson(
+        new URL("/api/chat", baseUrl),
+        buildChatPayload(options, resolvedModel, maxTokens),
+        Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS)
+      );
 
       if (response.ok) {
         return await this.readChatResponse(response);
@@ -237,16 +253,11 @@ export class OllamaClient implements LlmClient {
 
       const fallbackModel = await this.tryResolveMissingModel(baseUrl, requestedModel, response, "chat");
       if (fallbackModel) {
-        response = await this.postJson(new URL("/api/chat", baseUrl), {
-          model: fallbackModel,
-          stream: true,
-          format: options.format,
-          options: {
-            temperature: options.temperature ?? 0.5
-          },
-          messages: options.messages,
-          tools: options.tools
-        }, Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS));
+        response = await this.postJson(
+          new URL("/api/chat", baseUrl),
+          buildChatPayload(options, fallbackModel, maxTokens),
+          Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS)
+        );
 
         if (response.ok) {
           return await this.readChatResponse(response);

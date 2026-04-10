@@ -21,6 +21,10 @@ $script:TunnelPidFile = Join-Path $script:StateRoot "tunnel.pid"
 $script:OllamaStdOutLog = Join-Path $script:LogsRoot "ollama-serve.out.log"
 $script:OllamaStdErrLog = Join-Path $script:LogsRoot "ollama-serve.err.log"
 $script:CloudflaredLog = Join-Path $script:LogsRoot "cloudflared-tunnel.log"
+$script:NgrokLog = Join-Path $script:LogsRoot "ngrok-tunnel.log"
+$script:NgrokErrLog = Join-Path $script:LogsRoot "ngrok-tunnel.err.log"
+$script:LocalhostRunLog = Join-Path $script:LogsRoot "localhostrun-tunnel.log"
+$script:LocalhostRunErrLog = Join-Path $script:LogsRoot "localhostrun-tunnel.err.log"
 $script:LocalTunnelLog = Join-Path $script:LogsRoot "localtunnel.log"
 $script:LocalTunnelErrLog = Join-Path $script:LogsRoot "localtunnel.err.log"
 $script:TunnelCommandFile = Join-Path ([Environment]::GetFolderPath("Desktop")) "Хори URL.txt"
@@ -248,6 +252,39 @@ function Get-ExecutableVersion {
   }
 }
 
+function Get-NgrokConfigPaths {
+  return @(
+    (Join-Path $env:LOCALAPPDATA "ngrok\ngrok.yml"),
+    (Join-Path $env:USERPROFILE ".config\ngrok\ngrok.yml"),
+    (Join-Path $env:APPDATA "ngrok\ngrok.yml")
+  )
+}
+
+function Get-NgrokAuthToken {
+  if ($env:NGROK_AUTHTOKEN) {
+    return $env:NGROK_AUTHTOKEN.Trim()
+  }
+
+  foreach ($path in Get-NgrokConfigPaths) {
+    if (-not (Test-Path $path)) {
+      continue
+    }
+
+    try {
+      $content = Get-Content $path -Raw -ErrorAction Stop
+      if ($content -match '(?m)^\s*authtoken\s*:\s*(\S+)') {
+        return $Matches[1].Trim()
+      }
+    } catch {}
+  }
+
+  return $null
+}
+
+function Test-NgrokConfigured {
+  return -not [string]::IsNullOrWhiteSpace((Get-NgrokAuthToken))
+}
+
 function Wait-HttpReady {
   param(
     [Parameter(Mandatory)]
@@ -428,7 +465,21 @@ function Get-TunnelUrlFromLog {
     return $Matches[0]
   }
 
+  if ($content -match 'https://[a-z0-9.-]+\.lhr\.life') {
+    return $Matches[0]
+  }
+
   return $null
+}
+
+function Get-NgrokTunnelUrl {
+  try {
+    $payload = Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -TimeoutSec 3
+    $publicUrls = @($payload.tunnels | ForEach-Object { $_.public_url }) | Where-Object { $_ -like "https://*" }
+    return $publicUrls | Select-Object -First 1
+  } catch {
+    return $null
+  }
 }
 
 function Update-TunnelCommandFile {
@@ -481,12 +532,16 @@ function Show-DependencySummary {
   param(
     [string]$OllamaPath,
     [string]$CloudflaredPath,
+    [string]$NgrokPath,
+    [string]$SshPath,
     [string]$NpxPath
   )
 
   Write-Section "Зависимости"
   Write-Host ("  Ollama:      {0}" -f $OllamaPath) -ForegroundColor DarkGray
   Write-Host ("  Cloudflared: {0}" -f $(if ($CloudflaredPath) { $CloudflaredPath } else { "<не найден>" })) -ForegroundColor DarkGray
+  Write-Host ("  Ngrok:       {0}" -f $(if ($NgrokPath) { $NgrokPath } else { "<не найден>" })) -ForegroundColor DarkGray
+  Write-Host ("  SSH tunnel:  {0}" -f $(if ($SshPath) { $SshPath } else { "<не найден>" })) -ForegroundColor DarkGray
   Write-Host ("  npx:         {0}" -f $(if ($NpxPath) { $NpxPath } else { "<не найден>" })) -ForegroundColor DarkGray
 
   $ollamaVersion = Get-ExecutableVersion -Path $OllamaPath
@@ -500,6 +555,19 @@ function Show-DependencySummary {
       Write-Host ("  Версия Cloudflared: {0}" -f $cloudflaredVersion) -ForegroundColor DarkGray
     }
   }
+
+  if ($NgrokPath) {
+    $ngrokVersion = Get-ExecutableVersion -Path $NgrokPath
+    if ($ngrokVersion) {
+      Write-Host ("  Версия Ngrok: {0}" -f $ngrokVersion) -ForegroundColor DarkGray
+    }
+
+    if (Test-NgrokConfigured) {
+      Write-Host "  Ngrok auth:  настроен" -ForegroundColor DarkGray
+    } else {
+      Write-WarnLine "Ngrok установлен, но не настроен. После 'ngrok config add-authtoken <token>' launcher сможет использовать его автоматически."
+    }
+  }
 }
 
 function Stop-LegacyQuickTunnels {
@@ -508,6 +576,16 @@ function Stop-LegacyQuickTunnels {
 
   foreach ($legacy in $legacyProcesses) {
     Write-WarnLine "Найден старый quick tunnel от прошлого запуска (PID $($legacy.ProcessId)). Останавливаю."
+    Stop-Process -Id $legacy.ProcessId -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Stop-LegacySshTunnels {
+  $legacyProcesses = Get-CimInstance Win32_Process -Filter "Name = 'ssh.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -match 'localhost.run' -and $_.CommandLine -match '11434' }
+
+  foreach ($legacy in $legacyProcesses) {
+    Write-WarnLine "Найден старый localhost.run туннель (PID $($legacy.ProcessId)). Останавливаю."
     Stop-Process -Id $legacy.ProcessId -Force -ErrorAction SilentlyContinue
   }
 }
@@ -578,15 +656,27 @@ function Stop-PreviousManagedTunnel {
 
 function Start-TunnelProvider {
   param(
-    [ValidateSet("cloudflared", "localtunnel")]
+    [ValidateSet("cloudflared", "ngrok", "localhostrun", "localtunnel")]
     [string]$Provider,
     [string]$ExecutablePath
   )
 
-  $logPath = if ($Provider -eq "cloudflared") { $script:CloudflaredLog } else { $script:LocalTunnelLog }
+  $logPath = if ($Provider -eq "cloudflared") {
+    $script:CloudflaredLog
+  } elseif ($Provider -eq "ngrok") {
+    $script:NgrokLog
+  } elseif ($Provider -eq "localhostrun") {
+    $script:LocalhostRunLog
+  } else {
+    $script:LocalTunnelLog
+  }
   Remove-FileIfExists -Path $logPath
   if ($Provider -eq "localtunnel") {
     Remove-FileIfExists -Path $script:LocalTunnelErrLog
+  } elseif ($Provider -eq "ngrok") {
+    Remove-FileIfExists -Path $script:NgrokErrLog
+  } elseif ($Provider -eq "localhostrun") {
+    Remove-FileIfExists -Path $script:LocalhostRunErrLog
   }
 
   Write-Step "Запускаю туннель через $Provider..."
@@ -596,6 +686,24 @@ function Start-TunnelProvider {
     $launchAttempts += [pscustomobject]@{
       Label = "default"
       Args = @("tunnel", "--url", $script:OllamaBaseUrl, "--logfile", $logPath)
+      PreferredUrl = $null
+    }
+  } elseif ($Provider -eq "ngrok") {
+    $ngrokAuthToken = Get-NgrokAuthToken
+    if (-not $ngrokAuthToken) {
+      Write-WarnLine "Ngrok пропускаю: нет authtoken."
+      return $null
+    }
+
+    $launchAttempts += [pscustomobject]@{
+      Label = "default"
+      Args = @("http", $script:OllamaBaseUrl, "--authtoken", $ngrokAuthToken, "--log", "stdout", "--log-format", "json")
+      PreferredUrl = $null
+    }
+  } elseif ($Provider -eq "localhostrun") {
+    $launchAttempts += [pscustomobject]@{
+      Label = "anonymous"
+      Args = @("-T", "-o", "StrictHostKeyChecking=no", "-o", "ServerAliveInterval=30", "-o", "ExitOnForwardFailure=yes", "-R", "80:localhost:$OllamaPort", "nokey@localhost.run")
       PreferredUrl = $null
     }
   } else {
@@ -623,6 +731,18 @@ function Start-TunnelProvider {
         -PassThru -WindowStyle Hidden `
         -RedirectStandardOutput $logPath `
         -RedirectStandardError $script:LocalTunnelErrLog
+    } elseif ($Provider -eq "ngrok") {
+      $process = Start-Process -FilePath $ExecutablePath `
+        -ArgumentList $launchAttempt.Args `
+        -PassThru -WindowStyle Hidden `
+        -RedirectStandardOutput $logPath `
+        -RedirectStandardError $script:NgrokErrLog
+    } elseif ($Provider -eq "localhostrun") {
+      $process = Start-Process -FilePath $ExecutablePath `
+        -ArgumentList $launchAttempt.Args `
+        -PassThru -WindowStyle Hidden `
+        -RedirectStandardOutput $logPath `
+        -RedirectStandardError $script:LocalhostRunErrLog
     } else {
       $process = Start-Process -FilePath $ExecutablePath `
         -ArgumentList $launchAttempt.Args `
@@ -636,7 +756,7 @@ function Start-TunnelProvider {
         break
       }
 
-      $url = Get-TunnelUrlFromLog -LogPath $logPath
+      $url = if ($Provider -eq "ngrok") { Get-NgrokTunnelUrl } else { Get-TunnelUrlFromLog -LogPath $logPath }
       if ($url) {
         break
       }
@@ -651,6 +771,10 @@ function Start-TunnelProvider {
       Show-LogTail -LogPath $logPath -Title "$Provider log"
       if ($Provider -eq "localtunnel") {
         Show-LogTail -LogPath $script:LocalTunnelErrLog -Title "$Provider stderr"
+      } elseif ($Provider -eq "ngrok") {
+        Show-LogTail -LogPath $script:NgrokErrLog -Title "$Provider stderr"
+      } elseif ($Provider -eq "localhostrun") {
+        Show-LogTail -LogPath $script:LocalhostRunErrLog -Title "$Provider stderr"
       }
       Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
       continue
@@ -669,6 +793,10 @@ function Start-TunnelProvider {
       Show-LogTail -LogPath $logPath -Title "$Provider log"
       if ($Provider -eq "localtunnel") {
         Show-LogTail -LogPath $script:LocalTunnelErrLog -Title "$Provider stderr"
+      } elseif ($Provider -eq "ngrok") {
+        Show-LogTail -LogPath $script:NgrokErrLog -Title "$Provider stderr"
+      } elseif ($Provider -eq "localhostrun") {
+        Show-LogTail -LogPath $script:LocalhostRunErrLog -Title "$Provider stderr"
       }
       Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
       continue
@@ -691,6 +819,8 @@ function Start-TunnelProvider {
 function Ensure-TunnelReady {
   param(
     [string]$CloudflaredPath,
+    [string]$NgrokPath,
+    [string]$SshPath,
     [string]$NpxPath
   )
 
@@ -698,8 +828,15 @@ function Ensure-TunnelReady {
 
   Stop-PreviousManagedTunnel
   Stop-LegacyQuickTunnels
+  Stop-LegacySshTunnels
 
   $providers = @()
+  if ($NgrokPath) {
+    $providers += [pscustomobject]@{ Name = "ngrok"; Path = $NgrokPath }
+  }
+  if ($SshPath) {
+    $providers += [pscustomobject]@{ Name = "localhostrun"; Path = $SshPath }
+  }
   if ($CloudflaredPath) {
     $providers += [pscustomobject]@{ Name = "cloudflared"; Path = $CloudflaredPath }
   }
@@ -794,6 +931,8 @@ function Invoke-MonitorLoop {
   param(
     [string]$OllamaPath,
     [string]$CloudflaredPath,
+    [string]$NgrokPath,
+    [string]$SshPath,
     [string]$NpxPath,
     [object]$CurrentOllamaInfo,
     [object]$CurrentTunnelInfo
@@ -814,7 +953,7 @@ function Invoke-MonitorLoop {
     if ($ollamaExited) {
       Write-WarnLine "Ollama завершилась. Пробую перезапустить..."
       $ollamaInfo = Ensure-OllamaReady -OllamaPath $OllamaPath
-      $tunnelInfo = Ensure-TunnelReady -CloudflaredPath $CloudflaredPath -NpxPath $NpxPath
+      $tunnelInfo = Ensure-TunnelReady -CloudflaredPath $CloudflaredPath -NgrokPath $NgrokPath -SshPath $SshPath -NpxPath $NpxPath
       $secondsSinceTunnelHealthCheck = 0
       $consecutiveTunnelHealthFailures = 0
       Show-ReadySummary -OllamaInfo $ollamaInfo -TunnelInfo $tunnelInfo
@@ -824,7 +963,7 @@ function Invoke-MonitorLoop {
     if ($tunnelExited) {
       Write-WarnLine "Туннель завершился. Пробую поднять новый..."
       $oldTunnelUrl = if ($tunnelInfo) { $tunnelInfo.Url } else { $null }
-      $tunnelInfo = Ensure-TunnelReady -CloudflaredPath $CloudflaredPath -NpxPath $NpxPath
+      $tunnelInfo = Ensure-TunnelReady -CloudflaredPath $CloudflaredPath -NgrokPath $NgrokPath -SshPath $SshPath -NpxPath $NpxPath
       $secondsSinceTunnelHealthCheck = 0
       $consecutiveTunnelHealthFailures = 0
       Show-ReadySummary -OllamaInfo $ollamaInfo -TunnelInfo $tunnelInfo
@@ -852,7 +991,7 @@ function Invoke-MonitorLoop {
 
       Write-WarnLine "Туннель снаружи умер. Поднимаю новый..."
       $oldTunnelUrl = $tunnelInfo.Url
-      $tunnelInfo = Ensure-TunnelReady -CloudflaredPath $CloudflaredPath -NpxPath $NpxPath
+      $tunnelInfo = Ensure-TunnelReady -CloudflaredPath $CloudflaredPath -NgrokPath $NgrokPath -SshPath $SshPath -NpxPath $NpxPath
       $secondsSinceTunnelHealthCheck = 0
       $consecutiveTunnelHealthFailures = 0
       Show-ReadySummary -OllamaInfo $ollamaInfo -TunnelInfo $tunnelInfo
@@ -890,20 +1029,27 @@ try {
     "C:\Program Files\cloudflared\cloudflared.exe",
     "$env:LOCALAPPDATA\cloudflared\cloudflared.exe"
   )
+  $ngrok = Resolve-Executable "ngrok" @(
+    "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Ngrok.Ngrok_Microsoft.Winget.Source_8wekyb3d8bbwe\ngrok.exe",
+    "$env:ProgramFiles\ngrok\ngrok.exe"
+  )
+  $ssh = Resolve-Executable "ssh" @(
+    "C:\WINDOWS\System32\OpenSSH\ssh.exe"
+  )
   $npx = Resolve-Executable "npx" @(
     "C:\Program Files\nodejs\npx.cmd",
     "$env:ProgramFiles\nodejs\npx.cmd"
   ) -PreferCmdWrapper
 
-  if (-not $cloudflared -and -not $npx) {
-    Write-Fail "Не найден ни cloudflared, ни npx/localtunnel. Установи cloudflared или Node.js."
+  if (-not $cloudflared -and -not $ngrok -and -not $ssh -and -not $npx) {
+    Write-Fail "Не найден ни cloudflared, ни ngrok, ни ssh localhost.run, ни npx/localtunnel. Установи хотя бы один туннельный клиент."
     exit 1
   }
 
-  Show-DependencySummary -OllamaPath $ollama -CloudflaredPath $cloudflared -NpxPath $npx
+  Show-DependencySummary -OllamaPath $ollama -CloudflaredPath $cloudflared -NgrokPath $ngrok -SshPath $ssh -NpxPath $npx
 
   $ollamaInfo = Ensure-OllamaReady -OllamaPath $ollama
-  $tunnelInfo = Ensure-TunnelReady -CloudflaredPath $cloudflared -NpxPath $npx
+  $tunnelInfo = Ensure-TunnelReady -CloudflaredPath $cloudflared -NgrokPath $ngrok -SshPath $ssh -NpxPath $npx
   Show-ReadySummary -OllamaInfo $ollamaInfo -TunnelInfo $tunnelInfo
 
   if ($ExitAfterReady) {
@@ -912,7 +1058,7 @@ try {
     exit 0
   }
 
-  Invoke-MonitorLoop -OllamaPath $ollama -CloudflaredPath $cloudflared -NpxPath $npx -CurrentOllamaInfo $ollamaInfo -CurrentTunnelInfo $tunnelInfo
+  Invoke-MonitorLoop -OllamaPath $ollama -CloudflaredPath $cloudflared -NgrokPath $ngrok -SshPath $ssh -NpxPath $npx -CurrentOllamaInfo $ollamaInfo -CurrentTunnelInfo $tunnelInfo
 } finally {
   $Host.UI.RawUI.WindowTitle = $oldWindowTitle
   Cleanup-Launcher

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { parseOllamaChatResponseBody, pickClosestInstalledModel } from "@hori/llm";
+import { OllamaClient, parseOllamaChatResponseBody, pickClosestInstalledModel } from "@hori/llm";
 
 describe("pickClosestInstalledModel", () => {
   it("prefers the nearest qwen replacement when the requested model is missing", () => {
@@ -56,5 +56,68 @@ describe("parseOllamaChatResponseBody", () => {
         }
       }
     ]);
+  });
+});
+
+describe("OllamaClient", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("disables thinking and caps reply length for qwen chat models", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/tags")) {
+        return new Response(
+          JSON.stringify({
+            models: [{ name: "qwen3.5:4b" }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      expect(url.endsWith("/api/chat")).toBe(true);
+      const payload = JSON.parse(String(init?.body)) as {
+        think?: boolean;
+        options?: { num_predict?: number; temperature?: number };
+      };
+
+      expect(payload.think).toBe(false);
+      expect(payload.options?.num_predict).toBe(96);
+      expect(payload.options?.temperature).toBe(0.2);
+
+      return new Response(
+        ['{"message":{"role":"assistant","content":"Привет"}}', '{"done":true}'].join("\n"),
+        { status: 200, headers: { "Content-Type": "application/x-ndjson" } }
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OllamaClient(
+      {
+        OLLAMA_BASE_URL: "http://localhost:11434",
+        OLLAMA_TIMEOUT_MS: 5_000,
+        OLLAMA_FAST_MODEL: "qwen3.5:4b",
+        OLLAMA_SMART_MODEL: "qwen3.5:4b",
+        OLLAMA_EMBED_MODEL: "nomic-embed-text",
+        LLM_REPLY_MAX_TOKENS: 96
+      } as never,
+      {
+        error: vi.fn(),
+        warn: vi.fn(),
+        info: vi.fn(),
+        debug: vi.fn()
+      } as never
+    );
+
+    const response = await client.chat({
+      model: "qwen3.5:4b",
+      temperature: 0.2,
+      messages: [{ role: "user", content: "Привет" }]
+    });
+
+    expect(response.message.content).toBe("Привет");
   });
 });
