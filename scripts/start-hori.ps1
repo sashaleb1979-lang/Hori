@@ -27,11 +27,22 @@ $script:LocalhostRunLog = Join-Path $script:LogsRoot "localhostrun-tunnel.log"
 $script:LocalhostRunErrLog = Join-Path $script:LogsRoot "localhostrun-tunnel.err.log"
 $script:LocalTunnelLog = Join-Path $script:LogsRoot "localtunnel.log"
 $script:LocalTunnelErrLog = Join-Path $script:LogsRoot "localtunnel.err.log"
+$script:TailscaleLog = Join-Path $script:LogsRoot "tailscale-tunnel.log"
+$script:TailscaleProxyStdOutLog = Join-Path $script:LogsRoot "tailscale-ollama-proxy.out.log"
+$script:TailscaleProxyStdErrLog = Join-Path $script:LogsRoot "tailscale-ollama-proxy.err.log"
+$script:TailscaleProxyPidFile = Join-Path $script:StateRoot "tailscale-ollama-proxy.pid"
+$script:TailscaleProxyScript = Join-Path $PSScriptRoot "ollama-host-proxy.mjs"
 $script:TunnelCommandFile = Join-Path ([Environment]::GetFolderPath("Desktop")) "Хори URL.txt"
+$script:TailscaleLoginFile = Join-Path ([Environment]::GetFolderPath("Desktop")) "Хори Tailscale.txt"
+$script:NgrokTokenFile = Join-Path ([Environment]::GetFolderPath("Desktop")) "Хори NGROK.txt"
 $script:LocalTunnelSubdomainFile = Join-Path $script:StateRoot "localtunnel-subdomain.txt"
 $script:OllamaBaseUrl = "http://localhost:$OllamaPort"
 $script:OllamaTagsUrl = "$($script:OllamaBaseUrl)/api/tags"
+$script:TailscaleProxyPort = $OllamaPort + 1
+$script:TailscaleProxyUrl = "http://127.0.0.1:$($script:TailscaleProxyPort)"
 $script:ManagedTunnelProcess = $null
+$script:ManagedTunnelProvider = ""
+$script:ManagedTailscaleProxyProcess = $null
 $script:ManagedOllamaProcess = $null
 $script:StartedOllamaHere = $false
 $script:MutexAcquired = $false
@@ -252,6 +263,18 @@ function Get-ExecutableVersion {
   }
 }
 
+function Get-LauncherStateObject {
+  if (-not (Test-Path $script:StateFile)) {
+    return $null
+  }
+
+  try {
+    return Get-Content $script:StateFile -Raw | ConvertFrom-Json
+  } catch {
+    return $null
+  }
+}
+
 function Get-NgrokConfigPaths {
   return @(
     (Join-Path $env:LOCALAPPDATA "ngrok\ngrok.yml"),
@@ -260,9 +283,55 @@ function Get-NgrokConfigPaths {
   )
 }
 
+function Ensure-NgrokTokenTemplate {
+  if (Test-Path $script:NgrokTokenFile) {
+    return
+  }
+
+  $content = @(
+    "# Вставь сюда токен ngrok и сохрани файл.",
+    "# Где взять: https://dashboard.ngrok.com/get-started/your-authtoken",
+    "# Формат: NGROK_AUTHTOKEN=твоя_длинная_строка",
+    "NGROK_AUTHTOKEN="
+  ) -join [Environment]::NewLine
+
+  Set-Content -Path $script:NgrokTokenFile -Value $content -Encoding UTF8
+}
+
+function Get-NgrokAuthTokenFromFile {
+  if (-not (Test-Path $script:NgrokTokenFile)) {
+    return $null
+  }
+
+  foreach ($line in Get-Content $script:NgrokTokenFile -ErrorAction SilentlyContinue) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#") -or $trimmed.StartsWith(";")) {
+      continue
+    }
+
+    if ($trimmed -match '^(?:NGROK_AUTHTOKEN|AUTHTOKEN)\s*=\s*(.+)$') {
+      $value = $Matches[1].Trim()
+      if ($value) {
+        return $value
+      }
+    }
+
+    if ($trimmed -notmatch '=') {
+      return $trimmed
+    }
+  }
+
+  return $null
+}
+
 function Get-NgrokAuthToken {
   if ($env:NGROK_AUTHTOKEN) {
     return $env:NGROK_AUTHTOKEN.Trim()
+  }
+
+  $fileToken = Get-NgrokAuthTokenFromFile
+  if ($fileToken) {
+    return $fileToken
   }
 
   foreach ($path in Get-NgrokConfigPaths) {
@@ -283,6 +352,111 @@ function Get-NgrokAuthToken {
 
 function Test-NgrokConfigured {
   return -not [string]::IsNullOrWhiteSpace((Get-NgrokAuthToken))
+}
+
+function Get-TailscaleStatusJson {
+  param([string]$ExecutablePath)
+
+  try {
+    return (& $ExecutablePath status --json | ConvertFrom-Json)
+  } catch {
+    return $null
+  }
+}
+
+function Get-TailscaleHostName {
+  param([string]$ExecutablePath)
+
+  $status = Get-TailscaleStatusJson -ExecutablePath $ExecutablePath
+  if (-not $status) {
+    return $null
+  }
+
+  $dnsName = $status.Self.DNSName
+  if ($dnsName) {
+    return $dnsName.TrimEnd(".")
+  }
+
+  $certDomain = @($status.CertDomains)[0]
+  if ($certDomain) {
+    return [string]$certDomain
+  }
+
+  return $null
+}
+
+function Test-TailscaleLoggedIn {
+  param([string]$ExecutablePath)
+
+  $status = Get-TailscaleStatusJson -ExecutablePath $ExecutablePath
+  if (-not $status) {
+    return $false
+  }
+
+  return $status.BackendState -eq "Running" -and -not [string]::IsNullOrWhiteSpace((Get-TailscaleHostName -ExecutablePath $ExecutablePath))
+}
+
+function Get-TailscaleFunnelUrl {
+  param([string]$ExecutablePath)
+
+  try {
+    $funnelStatus = (& $ExecutablePath funnel status 2>&1 | Out-String)
+    if ($funnelStatus -match 'https://[a-z0-9.-]+') {
+      return $Matches[0]
+    }
+
+    if ($funnelStatus -match 'No serve config') {
+      return $null
+    }
+  } catch {
+    return $null
+  }
+
+  $hostName = Get-TailscaleHostName -ExecutablePath $ExecutablePath
+  if ($hostName) {
+    return "https://$hostName"
+  }
+
+  return $null
+}
+
+function Request-TailscaleLogin {
+  param([string]$ExecutablePath)
+
+  $loginOutput = ""
+  try {
+    $loginOutput = (& $ExecutablePath login --qr --timeout 10s 2>&1 | Out-String)
+  } catch {
+    $loginOutput = ($_ | Out-String)
+  }
+
+  $loginUrl = [regex]::Match($loginOutput, 'https://login\.tailscale\.com/a/[A-Za-z0-9]+').Value
+  $content = @(
+    "Tailscale login",
+    ""
+  )
+
+  if ($loginUrl) {
+    $content += $loginUrl
+    $content += ""
+    $content += "1. Открой ссылку"
+    $content += "2. Войди в Tailscale"
+    $content += "3. После входа снова запусти Хори.cmd"
+    Set-Content -Path $script:TailscaleLoginFile -Value $content -Encoding UTF8
+
+    try {
+      Start-Process $loginUrl | Out-Null
+    } catch {}
+
+    Write-WarnLine "Tailscale требует вход. Открой: $script:TailscaleLoginFile"
+    return
+  }
+
+  $content += "Tailscale не выдал ссылку автоматически."
+  $content += ""
+  $content += ($loginOutput.Trim())
+  Set-Content -Path $script:TailscaleLoginFile -Value $content -Encoding UTF8
+  Write-WarnLine "Tailscale требует вход. Открой окно Tailscale или файл: $script:TailscaleLoginFile"
 }
 
 function Wait-HttpReady {
@@ -433,8 +607,21 @@ function Wait-TunnelReady {
     [string]$Provider
   )
 
-  $attempts = if ($Provider -eq "cloudflared") { 30 } else { 20 }
-  $timeoutSeconds = if ($Provider -eq "cloudflared") { 12 } else { 10 }
+  $attempts = if ($Provider -eq "cloudflared") {
+    30
+  } elseif ($Provider -eq "tailscale") {
+    12
+  } else {
+    20
+  }
+
+  $timeoutSeconds = if ($Provider -eq "cloudflared") {
+    12
+  } elseif ($Provider -eq "tailscale") {
+    6
+  } else {
+    10
+  }
 
   for ($i = 1; $i -le $attempts; $i++) {
     $health = Get-TunnelHealth -TunnelUrl $TunnelUrl -TimeoutSeconds $timeoutSeconds -AllowRootFallback
@@ -466,6 +653,10 @@ function Get-TunnelUrlFromLog {
   }
 
   if ($content -match 'https://[a-z0-9.-]+\.lhr\.life') {
+    return $Matches[0]
+  }
+
+  if ($content -match 'https://[a-z0-9.-]+\.ts\.net') {
     return $Matches[0]
   }
 
@@ -531,6 +722,7 @@ function Get-OllamaModels {
 function Show-DependencySummary {
   param(
     [string]$OllamaPath,
+    [string]$TailscalePath,
     [string]$CloudflaredPath,
     [string]$NgrokPath,
     [string]$SshPath,
@@ -539,6 +731,7 @@ function Show-DependencySummary {
 
   Write-Section "Зависимости"
   Write-Host ("  Ollama:      {0}" -f $OllamaPath) -ForegroundColor DarkGray
+  Write-Host ("  Tailscale:   {0}" -f $(if ($TailscalePath) { $TailscalePath } else { "<не найден>" })) -ForegroundColor DarkGray
   Write-Host ("  Cloudflared: {0}" -f $(if ($CloudflaredPath) { $CloudflaredPath } else { "<не найден>" })) -ForegroundColor DarkGray
   Write-Host ("  Ngrok:       {0}" -f $(if ($NgrokPath) { $NgrokPath } else { "<не найден>" })) -ForegroundColor DarkGray
   Write-Host ("  SSH tunnel:  {0}" -f $(if ($SshPath) { $SshPath } else { "<не найден>" })) -ForegroundColor DarkGray
@@ -556,6 +749,20 @@ function Show-DependencySummary {
     }
   }
 
+  if ($TailscalePath) {
+    $tailscaleVersion = Get-ExecutableVersion -Path $TailscalePath
+    if ($tailscaleVersion) {
+      Write-Host ("  Версия Tailscale: {0}" -f $tailscaleVersion) -ForegroundColor DarkGray
+    }
+
+    if (Test-TailscaleLoggedIn -ExecutablePath $TailscalePath) {
+      $tailscaleHost = Get-TailscaleHostName -ExecutablePath $TailscalePath
+      Write-Host ("  Tailscale:    готов ({0})" -f $tailscaleHost) -ForegroundColor DarkGray
+    } else {
+      Write-WarnLine "Tailscale установлен, но не подключён. Логин-файл: $script:TailscaleLoginFile"
+    }
+  }
+
   if ($NgrokPath) {
     $ngrokVersion = Get-ExecutableVersion -Path $NgrokPath
     if ($ngrokVersion) {
@@ -565,7 +772,8 @@ function Show-DependencySummary {
     if (Test-NgrokConfigured) {
       Write-Host "  Ngrok auth:  настроен" -ForegroundColor DarkGray
     } else {
-      Write-WarnLine "Ngrok установлен, но не настроен. После 'ngrok config add-authtoken <token>' launcher сможет использовать его автоматически."
+      Ensure-NgrokTokenTemplate
+      Write-WarnLine "Ngrok установлен, но не настроен. Вставь токен в файл: $script:NgrokTokenFile"
     }
   }
 }
@@ -588,6 +796,24 @@ function Stop-LegacySshTunnels {
     Write-WarnLine "Найден старый localhost.run туннель (PID $($legacy.ProcessId)). Останавливаю."
     Stop-Process -Id $legacy.ProcessId -Force -ErrorAction SilentlyContinue
   }
+}
+
+function Stop-LegacyTailscaleFunnel {
+  param([string]$TailscalePath)
+
+  if (-not $TailscalePath) {
+    return
+  }
+
+  $state = Get-LauncherStateObject
+  if (-not $state -or $state.tunnelProvider -ne "tailscale") {
+    return
+  }
+
+  try {
+    Write-WarnLine "Сбрасываю предыдущий Tailscale Funnel от прошлого запуска."
+    & $TailscalePath funnel reset *> $null
+  } catch {}
 }
 
 function Ensure-OllamaReady {
@@ -646,6 +872,96 @@ function Ensure-OllamaReady {
   }
 }
 
+function Restore-EnvValue {
+  param(
+    [string]$Name,
+    [AllowNull()]
+    [string]$Value
+  )
+
+  if ($null -eq $Value) {
+    Remove-Item "Env:$Name" -ErrorAction SilentlyContinue
+    return
+  }
+
+  Set-Item "Env:$Name" -Value $Value
+}
+
+function Stop-TailscaleOllamaProxy {
+  $proxyPid = Read-PidFile -Path $script:TailscaleProxyPidFile
+  if ($proxyPid) {
+    Stop-ProcessTreeSafe -ProcessId $proxyPid -Label "локальный Ollama proxy для Tailscale"
+  } elseif ($script:ManagedTailscaleProxyProcess) {
+    Stop-ProcessTreeSafe -ProcessId $script:ManagedTailscaleProxyProcess.Id -Label "локальный Ollama proxy для Tailscale"
+  }
+
+  $script:ManagedTailscaleProxyProcess = $null
+  Remove-FileIfExists -Path $script:TailscaleProxyPidFile
+}
+
+function Ensure-TailscaleOllamaProxyReady {
+  $nodePath = Resolve-Executable "node" @(
+    "C:\Program Files\nodejs\node.exe",
+    "$env:ProgramFiles\nodejs\node.exe"
+  )
+
+  if (-not $nodePath) {
+    Write-WarnLine "Tailscale proxy пропускаю: node.exe не найден."
+    return $null
+  }
+
+  if (-not (Test-Path $script:TailscaleProxyScript)) {
+    Write-WarnLine "Tailscale proxy пропускаю: не найден $script:TailscaleProxyScript"
+    return $null
+  }
+
+  Stop-TailscaleOllamaProxy
+  Remove-FileIfExists -Path $script:TailscaleProxyStdOutLog
+  Remove-FileIfExists -Path $script:TailscaleProxyStdErrLog
+
+  $previousProxyHost = $env:HORI_PROXY_HOST
+  $previousProxyPort = $env:HORI_PROXY_PORT
+  $previousOllamaHost = $env:HORI_OLLAMA_HOST
+  $previousOllamaPort = $env:HORI_OLLAMA_PORT
+
+  try {
+    $env:HORI_PROXY_HOST = "127.0.0.1"
+    $env:HORI_PROXY_PORT = "$($script:TailscaleProxyPort)"
+    $env:HORI_OLLAMA_HOST = "127.0.0.1"
+    $env:HORI_OLLAMA_PORT = "$OllamaPort"
+
+    Write-Step "Запускаю локальный proxy для Tailscale на $script:TailscaleProxyUrl..."
+    $proxyProcess = Start-Process -FilePath $nodePath -ArgumentList @($script:TailscaleProxyScript) `
+      -PassThru -WindowStyle Hidden `
+      -RedirectStandardOutput $script:TailscaleProxyStdOutLog `
+      -RedirectStandardError $script:TailscaleProxyStdErrLog
+
+    $script:ManagedTailscaleProxyProcess = $proxyProcess
+    Write-PidFile -Path $script:TailscaleProxyPidFile -ProcessId $proxyProcess.Id
+  } finally {
+    Restore-EnvValue -Name "HORI_PROXY_HOST" -Value $previousProxyHost
+    Restore-EnvValue -Name "HORI_PROXY_PORT" -Value $previousProxyPort
+    Restore-EnvValue -Name "HORI_OLLAMA_HOST" -Value $previousOllamaHost
+    Restore-EnvValue -Name "HORI_OLLAMA_PORT" -Value $previousOllamaPort
+  }
+
+  if (-not (Wait-HttpReady -Url "$($script:TailscaleProxyUrl)/api/tags" -Attempts 15 -DelaySeconds 1 -TimeoutSeconds 3)) {
+    Write-WarnLine "Локальный Tailscale proxy не отвечает на /api/tags"
+    Show-LogTail -LogPath $script:TailscaleProxyStdOutLog -Title "tailscale proxy stdout"
+    Show-LogTail -LogPath $script:TailscaleProxyStdErrLog -Title "tailscale proxy stderr"
+    Stop-TailscaleOllamaProxy
+    return $null
+  }
+
+  Write-Ok "Локальный Tailscale proxy готов"
+  return [pscustomobject]@{
+    Url = $script:TailscaleProxyUrl
+    Port = $script:TailscaleProxyPort
+    Process = $script:ManagedTailscaleProxyProcess
+    LogPath = $script:TailscaleProxyStdErrLog
+  }
+}
+
 function Stop-PreviousManagedTunnel {
   $tunnelPid = Read-PidFile -Path $script:TunnelPidFile
   if ($tunnelPid) {
@@ -656,12 +972,14 @@ function Stop-PreviousManagedTunnel {
 
 function Start-TunnelProvider {
   param(
-    [ValidateSet("cloudflared", "ngrok", "localhostrun", "localtunnel")]
+    [ValidateSet("tailscale", "cloudflared", "ngrok", "localhostrun", "localtunnel")]
     [string]$Provider,
     [string]$ExecutablePath
   )
 
-  $logPath = if ($Provider -eq "cloudflared") {
+  $logPath = if ($Provider -eq "tailscale") {
+    $script:TailscaleLog
+  } elseif ($Provider -eq "cloudflared") {
     $script:CloudflaredLog
   } elseif ($Provider -eq "ngrok") {
     $script:NgrokLog
@@ -680,6 +998,140 @@ function Start-TunnelProvider {
   }
 
   Write-Step "Запускаю туннель через $Provider..."
+
+  if ($Provider -eq "tailscale") {
+    Remove-FileIfExists -Path $logPath
+
+    if (-not (Test-TailscaleLoggedIn -ExecutablePath $ExecutablePath)) {
+      Request-TailscaleLogin -ExecutablePath $ExecutablePath
+      return $null
+    }
+
+    $proxyInfo = Ensure-TailscaleOllamaProxyReady
+    if (-not $proxyInfo) {
+      return $null
+    }
+
+    try {
+      $resetOutLog = Join-Path $script:LogsRoot "tailscale-funnel-reset.out.log"
+      $resetErrLog = Join-Path $script:LogsRoot "tailscale-funnel-reset.err.log"
+      Remove-FileIfExists -Path $resetOutLog
+      Remove-FileIfExists -Path $resetErrLog
+
+      $resetProcess = Start-Process -FilePath $ExecutablePath -ArgumentList @("funnel", "reset") `
+        -PassThru -WindowStyle Hidden `
+        -RedirectStandardOutput $resetOutLog `
+        -RedirectStandardError $resetErrLog
+      $resetExited = $resetProcess.WaitForExit(10000)
+      if (-not $resetExited) {
+        Stop-Process -Id $resetProcess.Id -Force -ErrorAction SilentlyContinue
+        "tailscale funnel reset timed out" | Add-Content -Path $logPath -Encoding UTF8
+      }
+
+      if (Test-Path $resetOutLog) {
+        Get-Content $resetOutLog -Raw -ErrorAction SilentlyContinue | Add-Content -Path $logPath -Encoding UTF8
+      }
+
+      if (Test-Path $resetErrLog) {
+        Get-Content $resetErrLog -Raw -ErrorAction SilentlyContinue | Add-Content -Path $logPath -Encoding UTF8
+      }
+    } catch {
+      "tailscale funnel reset failed: $(Get-ErrorSummary -ErrorRecord $_)" | Add-Content -Path $logPath -Encoding UTF8
+    }
+
+    $startOutLog = Join-Path $script:LogsRoot "tailscale-funnel-start.out.log"
+    $startErrLog = Join-Path $script:LogsRoot "tailscale-funnel-start.err.log"
+    Remove-FileIfExists -Path $startOutLog
+    Remove-FileIfExists -Path $startErrLog
+
+    $startProcess = Start-Process -FilePath $ExecutablePath -ArgumentList @("funnel", "--bg", "--yes", "$($proxyInfo.Port)") `
+      -PassThru -WindowStyle Hidden `
+      -RedirectStandardOutput $startOutLog `
+      -RedirectStandardError $startErrLog
+    $startExited = $startProcess.WaitForExit(25000)
+
+    if (-not $startExited) {
+      Stop-Process -Id $startProcess.Id -Force -ErrorAction SilentlyContinue
+      "tailscale funnel start timed out. Funnel may require browser approval." | Add-Content -Path $logPath -Encoding UTF8
+    }
+
+    if (Test-Path $startOutLog) {
+      Get-Content $startOutLog -Raw -ErrorAction SilentlyContinue | Add-Content -Path $logPath -Encoding UTF8
+    }
+
+    if (Test-Path $startErrLog) {
+      Get-Content $startErrLog -Raw -ErrorAction SilentlyContinue | Add-Content -Path $logPath -Encoding UTF8
+    }
+
+    $tailscaleStartLog = if (Test-Path $logPath) { Get-Content $logPath -Raw -ErrorAction SilentlyContinue } else { "" }
+    $funnelEnableUrl = [regex]::Match($tailscaleStartLog, 'https://login\.tailscale\.com/f/funnel\?node=[A-Za-z0-9]+').Value
+    $serveEnableUrl = [regex]::Match($tailscaleStartLog, 'https://login\.tailscale\.com/f/serve\?node=[A-Za-z0-9]+').Value
+    if ($funnelEnableUrl -or $serveEnableUrl) {
+      $content = @(
+        "Tailscale Funnel",
+        "",
+        "Включи доступы для этого компьютера:"
+      ) -join [Environment]::NewLine
+      if ($funnelEnableUrl) {
+        $content += [Environment]::NewLine + [Environment]::NewLine + "Funnel:" + [Environment]::NewLine + $funnelEnableUrl
+      }
+      if ($serveEnableUrl) {
+        $content += [Environment]::NewLine + [Environment]::NewLine + "Serve:" + [Environment]::NewLine + $serveEnableUrl
+      }
+      $content += [Environment]::NewLine + [Environment]::NewLine + "После включения снова запусти Хори.cmd."
+      Set-Content -Path $script:TailscaleLoginFile -Value $content -Encoding UTF8
+      try {
+        if ($funnelEnableUrl) {
+          Start-Process $funnelEnableUrl | Out-Null
+        }
+        if ($serveEnableUrl) {
+          Start-Process $serveEnableUrl | Out-Null
+        }
+      } catch {}
+      Write-WarnLine "Tailscale Funnel ещё не включён. Открыл ссылку и записал её в: $script:TailscaleLoginFile"
+      Stop-TailscaleOllamaProxy
+      return $null
+    }
+
+    $url = $null
+    for ($i = 0; $i -lt 20; $i++) {
+      Start-Sleep -Seconds 1
+      $url = Get-TailscaleFunnelUrl -ExecutablePath $ExecutablePath
+      if ($url) {
+        break
+      }
+    }
+
+    if (-not $url) {
+      Write-WarnLine "Tailscale не выдал публичный URL"
+      Show-LogTail -LogPath $logPath -Title "tailscale log"
+      try {
+        & $ExecutablePath funnel status | Out-Null
+      } catch {}
+      Stop-TailscaleOllamaProxy
+      return $null
+    }
+
+    $health = Wait-TunnelReady -TunnelUrl $url -Provider $Provider
+    if (-not $health) {
+      Write-WarnLine "Tailscale дал URL, но локальная проверка с этого ПК пока не отвечает: $url"
+      Write-WarnLine "Funnel подтверждён самим Tailscale, поэтому оставляю его основным и не сбрасываю."
+      Show-LogTail -LogPath $logPath -Title "tailscale log"
+      $health = [pscustomobject]@{
+        Healthy = $true
+        CheckedUrl = $url
+        Error = "Local health check failed; trusted tailscale funnel status."
+      }
+    }
+
+    return [pscustomobject]@{
+      Provider = $Provider
+      Url = $url
+      Process = $null
+      LogPath = $logPath
+      Health = $health
+    }
+  }
 
   $launchAttempts = @()
   if ($Provider -eq "cloudflared") {
@@ -818,6 +1270,7 @@ function Start-TunnelProvider {
 
 function Ensure-TunnelReady {
   param(
+    [string]$TailscalePath,
     [string]$CloudflaredPath,
     [string]$NgrokPath,
     [string]$SshPath,
@@ -827,10 +1280,14 @@ function Ensure-TunnelReady {
   Write-Section "Туннель"
 
   Stop-PreviousManagedTunnel
+  Stop-LegacyTailscaleFunnel -TailscalePath $TailscalePath
   Stop-LegacyQuickTunnels
   Stop-LegacySshTunnels
 
   $providers = @()
+  if ($TailscalePath) {
+    $providers += [pscustomobject]@{ Name = "tailscale"; Path = $TailscalePath }
+  }
   if ($NgrokPath) {
     $providers += [pscustomobject]@{ Name = "ngrok"; Path = $NgrokPath }
   }
@@ -848,6 +1305,7 @@ function Ensure-TunnelReady {
     $result = Start-TunnelProvider -Provider $provider.Name -ExecutablePath $provider.Path
     if ($result) {
       $script:ManagedTunnelProcess = $result.Process
+      $script:ManagedTunnelProvider = $result.Provider
       Save-LauncherState -Status "ready" -TunnelUrl $result.Url -TunnelProvider $result.Provider -TunnelLog $result.LogPath
       Write-Ok "Туннель готов через $($result.Provider)"
       Write-Host ("  URL:  {0}" -f $result.Url) -ForegroundColor DarkGray
@@ -907,12 +1365,19 @@ function Show-ReadySummary {
 }
 
 function Cleanup-Launcher {
-  if ($script:ManagedTunnelProcess) {
+  if ($script:ManagedTunnelProvider -eq "tailscale") {
+    try {
+      & "C:\Program Files\Tailscale\tailscale.exe" funnel reset *> $null
+    } catch {}
+  } elseif ($script:ManagedTunnelProcess) {
     & taskkill /PID $script:ManagedTunnelProcess.Id /T /F *> $null
     $script:ManagedTunnelProcess = $null
   }
 
+  Stop-TailscaleOllamaProxy
+
   Remove-FileIfExists -Path $script:TunnelPidFile
+  $script:ManagedTunnelProvider = ""
 
   if ($script:StartedOllamaHere -and $script:ManagedOllamaProcess) {
     & taskkill /PID $script:ManagedOllamaProcess.Id /T /F *> $null
@@ -930,6 +1395,7 @@ function Cleanup-Launcher {
 function Invoke-MonitorLoop {
   param(
     [string]$OllamaPath,
+    [string]$TailscalePath,
     [string]$CloudflaredPath,
     [string]$NgrokPath,
     [string]$SshPath,
@@ -953,7 +1419,7 @@ function Invoke-MonitorLoop {
     if ($ollamaExited) {
       Write-WarnLine "Ollama завершилась. Пробую перезапустить..."
       $ollamaInfo = Ensure-OllamaReady -OllamaPath $OllamaPath
-      $tunnelInfo = Ensure-TunnelReady -CloudflaredPath $CloudflaredPath -NgrokPath $NgrokPath -SshPath $SshPath -NpxPath $NpxPath
+      $tunnelInfo = Ensure-TunnelReady -TailscalePath $TailscalePath -CloudflaredPath $CloudflaredPath -NgrokPath $NgrokPath -SshPath $SshPath -NpxPath $NpxPath
       $secondsSinceTunnelHealthCheck = 0
       $consecutiveTunnelHealthFailures = 0
       Show-ReadySummary -OllamaInfo $ollamaInfo -TunnelInfo $tunnelInfo
@@ -963,7 +1429,7 @@ function Invoke-MonitorLoop {
     if ($tunnelExited) {
       Write-WarnLine "Туннель завершился. Пробую поднять новый..."
       $oldTunnelUrl = if ($tunnelInfo) { $tunnelInfo.Url } else { $null }
-      $tunnelInfo = Ensure-TunnelReady -CloudflaredPath $CloudflaredPath -NgrokPath $NgrokPath -SshPath $SshPath -NpxPath $NpxPath
+      $tunnelInfo = Ensure-TunnelReady -TailscalePath $TailscalePath -CloudflaredPath $CloudflaredPath -NgrokPath $NgrokPath -SshPath $SshPath -NpxPath $NpxPath
       $secondsSinceTunnelHealthCheck = 0
       $consecutiveTunnelHealthFailures = 0
       Show-ReadySummary -OllamaInfo $ollamaInfo -TunnelInfo $tunnelInfo
@@ -991,7 +1457,7 @@ function Invoke-MonitorLoop {
 
       Write-WarnLine "Туннель снаружи умер. Поднимаю новый..."
       $oldTunnelUrl = $tunnelInfo.Url
-      $tunnelInfo = Ensure-TunnelReady -CloudflaredPath $CloudflaredPath -NgrokPath $NgrokPath -SshPath $SshPath -NpxPath $NpxPath
+      $tunnelInfo = Ensure-TunnelReady -TailscalePath $TailscalePath -CloudflaredPath $CloudflaredPath -NgrokPath $NgrokPath -SshPath $SshPath -NpxPath $NpxPath
       $secondsSinceTunnelHealthCheck = 0
       $consecutiveTunnelHealthFailures = 0
       Show-ReadySummary -OllamaInfo $ollamaInfo -TunnelInfo $tunnelInfo
@@ -1029,7 +1495,11 @@ try {
     "C:\Program Files\cloudflared\cloudflared.exe",
     "$env:LOCALAPPDATA\cloudflared\cloudflared.exe"
   )
+  $tailscale = Resolve-Executable "tailscale" @(
+    "C:\Program Files\Tailscale\tailscale.exe"
+  )
   $ngrok = Resolve-Executable "ngrok" @(
+    "$env:LOCALAPPDATA\ngrok\ngrok.exe",
     "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Ngrok.Ngrok_Microsoft.Winget.Source_8wekyb3d8bbwe\ngrok.exe",
     "$env:ProgramFiles\ngrok\ngrok.exe"
   )
@@ -1041,15 +1511,15 @@ try {
     "$env:ProgramFiles\nodejs\npx.cmd"
   ) -PreferCmdWrapper
 
-  if (-not $cloudflared -and -not $ngrok -and -not $ssh -and -not $npx) {
-    Write-Fail "Не найден ни cloudflared, ни ngrok, ни ssh localhost.run, ни npx/localtunnel. Установи хотя бы один туннельный клиент."
+  if (-not $tailscale -and -not $cloudflared -and -not $ngrok -and -not $ssh -and -not $npx) {
+    Write-Fail "Не найден ни tailscale, ни cloudflared, ни ngrok, ни ssh localhost.run, ни npx/localtunnel. Установи хотя бы один туннельный клиент."
     exit 1
   }
 
-  Show-DependencySummary -OllamaPath $ollama -CloudflaredPath $cloudflared -NgrokPath $ngrok -SshPath $ssh -NpxPath $npx
+  Show-DependencySummary -OllamaPath $ollama -TailscalePath $tailscale -CloudflaredPath $cloudflared -NgrokPath $ngrok -SshPath $ssh -NpxPath $npx
 
   $ollamaInfo = Ensure-OllamaReady -OllamaPath $ollama
-  $tunnelInfo = Ensure-TunnelReady -CloudflaredPath $cloudflared -NgrokPath $ngrok -SshPath $ssh -NpxPath $npx
+  $tunnelInfo = Ensure-TunnelReady -TailscalePath $tailscale -CloudflaredPath $cloudflared -NgrokPath $ngrok -SshPath $ssh -NpxPath $npx
   Show-ReadySummary -OllamaInfo $ollamaInfo -TunnelInfo $tunnelInfo
 
   if ($ExitAfterReady) {
@@ -1058,7 +1528,7 @@ try {
     exit 0
   }
 
-  Invoke-MonitorLoop -OllamaPath $ollama -CloudflaredPath $cloudflared -NgrokPath $ngrok -SshPath $ssh -NpxPath $npx -CurrentOllamaInfo $ollamaInfo -CurrentTunnelInfo $tunnelInfo
+  Invoke-MonitorLoop -OllamaPath $ollama -TailscalePath $tailscale -CloudflaredPath $cloudflared -NgrokPath $ngrok -SshPath $ssh -NpxPath $npx -CurrentOllamaInfo $ollamaInfo -CurrentTunnelInfo $tunnelInfo
 } finally {
   $Host.UI.RawUI.WindowTitle = $oldWindowTitle
   Cleanup-Launcher

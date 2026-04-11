@@ -30,6 +30,7 @@ interface OllamaChatChunk {
 
 const MIN_OLLAMA_CHAT_TIMEOUT_MS = 240_000;
 const MIN_OLLAMA_EMBED_TIMEOUT_MS = 180_000;
+const OLLAMA_KEEP_ALIVE = "10m";
 
 function normalizeModelPart(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -150,6 +151,7 @@ export function pickClosestInstalledModel(requestedModel: string, availableModel
 function buildChatPayload(options: LlmChatOptions, model: string, maxTokens: number) {
   return {
     model,
+    keep_alive: OLLAMA_KEEP_ALIVE,
     stream: true,
     ...(shouldDisableThinking(model) ? { think: false } : {}),
     format: options.format,
@@ -160,6 +162,11 @@ function buildChatPayload(options: LlmChatOptions, model: string, maxTokens: num
     messages: options.messages,
     tools: options.tools
   };
+}
+
+function isAbortLikeError(error: unknown) {
+  const errorText = asErrorMessage(error).toLowerCase();
+  return errorText.includes("abort") || errorText.includes("timeout") || errorText.includes("timed out");
 }
 
 export function parseOllamaChatResponseBody(bodyText: string): LlmChatResponse {
@@ -225,6 +232,7 @@ export function parseOllamaChatResponseBody(bodyText: string): LlmChatResponse {
 
 export class OllamaClient implements LlmClient {
   private readonly resolvedModelAliases = new Map<string, string>();
+  private requestQueue = Promise.resolve();
 
   constructor(
     private readonly env: AppEnv,
@@ -232,6 +240,10 @@ export class OllamaClient implements LlmClient {
   ) {}
 
   async chat(options: LlmChatOptions): Promise<LlmChatResponse> {
+    return this.withRequestSlot(() => this.chatUnqueued(options));
+  }
+
+  private async chatUnqueued(options: LlmChatOptions): Promise<LlmChatResponse> {
     const baseUrl = this.env.OLLAMA_BASE_URL;
     if (!baseUrl) {
       throw new Error("OLLAMA_BASE_URL not configured \u2014 use /bot-ai-url to set it");
@@ -241,31 +253,29 @@ export class OllamaClient implements LlmClient {
 
     try {
       const resolvedModel = await this.resolveModelAlias(baseUrl, requestedModel);
-      let response = await this.postJson(
-        new URL("/api/chat", baseUrl),
-        buildChatPayload(options, resolvedModel, maxTokens),
-        Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS)
-      );
-
-      if (response.ok) {
-        return await this.readChatResponse(response);
-      }
-
-      const fallbackModel = await this.tryResolveMissingModel(baseUrl, requestedModel, response, "chat");
-      if (fallbackModel) {
-        response = await this.postJson(
-          new URL("/api/chat", baseUrl),
-          buildChatPayload(options, fallbackModel, maxTokens),
-          Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS)
+      return await this.sendChatRequest(baseUrl, requestedModel, resolvedModel, options, maxTokens);
+    } catch (error) {
+      if (isAbortLikeError(error) && maxTokens > 96) {
+        const retryMaxTokens = Math.max(64, Math.min(128, Math.floor(maxTokens / 2)));
+        const errorText = asErrorMessage(error);
+        this.logger.warn(
+          { error: errorText, model: requestedModel, retryMaxTokens, url: baseUrl },
+          `ollama chat timed out, retrying with shorter response: url=${baseUrl} model=${requestedModel} retryMaxTokens=${retryMaxTokens}`
         );
 
-        if (response.ok) {
-          return await this.readChatResponse(response);
+        try {
+          const resolvedModel = await this.resolveModelAlias(baseUrl, requestedModel);
+          return await this.sendChatRequest(baseUrl, requestedModel, resolvedModel, options, retryMaxTokens);
+        } catch (retryError) {
+          const retryErrorText = asErrorMessage(retryError);
+          this.logger.error(
+            { error: retryErrorText, model: requestedModel, url: baseUrl },
+            `ollama chat retry failed: url=${baseUrl} model=${requestedModel} error=${retryErrorText}`
+          );
+          throw retryError;
         }
       }
 
-      throw new Error(`Ollama chat failed with status ${response.status}`);
-    } catch (error) {
       const errorText = asErrorMessage(error);
       this.logger.error({ error: errorText, model: requestedModel, url: baseUrl }, `ollama chat request failed: url=${baseUrl} model=${requestedModel} error=${errorText}`);
       throw error;
@@ -273,6 +283,10 @@ export class OllamaClient implements LlmClient {
   }
 
   async embed(model: string, input: string | string[]): Promise<number[][]> {
+    return this.withRequestSlot(() => this.embedUnqueued(model, input));
+  }
+
+  private async embedUnqueued(model: string, input: string | string[]): Promise<number[][]> {
     const baseUrl = this.env.OLLAMA_BASE_URL;
     if (!baseUrl) {
       throw new Error("OLLAMA_BASE_URL not configured \u2014 use /bot-ai-url to set it");
@@ -320,6 +334,50 @@ export class OllamaClient implements LlmClient {
 
   private async readChatResponse(response: Response) {
     return parseOllamaChatResponseBody(await response.text());
+  }
+
+  private async sendChatRequest(baseUrl: string, requestedModel: string, model: string, options: LlmChatOptions, maxTokens: number) {
+    let response = await this.postJson(
+      new URL("/api/chat", baseUrl),
+      buildChatPayload(options, model, maxTokens),
+      Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS)
+    );
+
+    if (response.ok) {
+      return await this.readChatResponse(response);
+    }
+
+    const fallbackModel = await this.tryResolveMissingModel(baseUrl, requestedModel, response, "chat");
+    if (fallbackModel) {
+      response = await this.postJson(
+        new URL("/api/chat", baseUrl),
+        buildChatPayload(options, fallbackModel, maxTokens),
+        Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS)
+      );
+
+      if (response.ok) {
+        return await this.readChatResponse(response);
+      }
+    }
+
+    throw new Error(`Ollama chat failed with status ${response.status}`);
+  }
+
+  private async withRequestSlot<T>(operation: () => Promise<T>) {
+    const previousRequest = this.requestQueue;
+    let release!: () => void;
+
+    this.requestQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    await previousRequest.catch(() => undefined);
+
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
   }
 
   private async postJson(url: URL, payload: unknown, timeoutMs = this.env.OLLAMA_TIMEOUT_MS) {

@@ -12,7 +12,7 @@ describe("loadEnv", () => {
 
     expect(env.FEATURE_WEB_SEARCH).toBe(true);
     expect(env.FEATURE_AUTOINTERJECT).toBe(false);
-    expect(env.LLM_MAX_CONTEXT_MESSAGES).toBe(24);
+    expect(env.LLM_MAX_CONTEXT_MESSAGES).toBe(12);
     expect(env.USER_PROFILE_MIN_MESSAGES).toBe(50);
   });
 
