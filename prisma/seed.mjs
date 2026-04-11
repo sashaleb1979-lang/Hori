@@ -12,7 +12,16 @@ async function main() {
     { key: "auto_interject", enabled: false },
     { key: "user_profiles", enabled: true },
     { key: "context_actions", enabled: true },
-    { key: "roast", enabled: true }
+    { key: "roast", enabled: true },
+    { key: "channel_aware_mode", enabled: true },
+    { key: "message_kind_aware_mode", enabled: true },
+    { key: "anti_slop_strict_mode", enabled: true },
+    { key: "playful_mode_enabled", enabled: true },
+    { key: "irritated_mode_enabled", enabled: true },
+    { key: "ideological_flavour_enabled", enabled: true },
+    { key: "analogy_ban_enabled", enabled: true },
+    { key: "slang_layer_enabled", enabled: true },
+    { key: "self_interjection_constraints_enabled", enabled: true }
   ];
 
   for (const flag of globalFlags) {

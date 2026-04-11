@@ -1,46 +1,61 @@
-import type { PersonaSettings, RelationshipOverlay } from "@hori/shared";
+import type { FeatureFlags, MessageEnvelope, PersonaSettings, RelationshipOverlay } from "@hori/shared";
 
-import { BASE_PERSONA_PROMPT } from "../prompts/system-prompts";
+import { composeBehaviorPrompt } from "./compose";
+import type { ComposeBehaviorPromptInput } from "./types";
+
+const defaultBehaviorFeatureFlags: FeatureFlags = {
+  webSearch: true,
+  autoInterject: false,
+  userProfiles: true,
+  contextActions: true,
+  roast: true,
+  channelAwareMode: true,
+  messageKindAwareMode: true,
+  antiSlopStrictMode: true,
+  playfulModeEnabled: true,
+  irritatedModeEnabled: true,
+  ideologicalFlavourEnabled: true,
+  analogyBanEnabled: true,
+  slangLayerEnabled: true,
+  selfInterjectionConstraintsEnabled: true
+};
+
+const fallbackMessage: MessageEnvelope = {
+  messageId: "persona-preview",
+  guildId: "guild",
+  channelId: "channel",
+  userId: "user",
+  username: "preview",
+  channelName: null,
+  content: "",
+  createdAt: new Date(0),
+  replyToMessageId: null,
+  mentionCount: 0,
+  mentionedBot: false,
+  mentionsBotByName: false,
+  mentionedUserIds: [],
+  isModerator: false,
+  explicitInvocation: true
+};
 
 export class PersonaService {
+  composeBehavior(options: ComposeBehaviorPromptInput) {
+    return composeBehaviorPrompt(options);
+  }
+
   composePrompt(options: {
     guildSettings: PersonaSettings;
     moderatorOverlay?: { preferredStyle?: string | null; forbiddenTopics?: string[]; forbiddenWords?: string[] } | null;
     relationship?: RelationshipOverlay | null;
   }) {
-    const parts = [BASE_PERSONA_PROMPT.trim()];
-
-    parts.push(
-      `Серверный стиль: грубость=${options.guildSettings.roughnessLevel}/5, сарказм=${options.guildSettings.sarcasmLevel}/5, стёб=${options.guildSettings.roastLevel}/5, длина=${options.guildSettings.replyLength}, предпочтительный стиль="${options.guildSettings.preferredStyle}".`
-    );
-
-    if (options.guildSettings.forbiddenTopics.length) {
-      parts.push(`Запрещённые темы: ${options.guildSettings.forbiddenTopics.join(", ")}.`);
-    }
-
-    if (options.guildSettings.forbiddenWords.length) {
-      parts.push(`Запрещённые слова: ${options.guildSettings.forbiddenWords.join(", ")}.`);
-    }
-
-    if (options.moderatorOverlay?.preferredStyle) {
-      parts.push(`Модераторский оверлей: ${options.moderatorOverlay.preferredStyle}.`);
-    }
-
-    if (options.moderatorOverlay?.forbiddenTopics?.length) {
-      parts.push(`Доп. запрещённые темы: ${options.moderatorOverlay.forbiddenTopics.join(", ")}.`);
-    }
-
-    if (options.relationship) {
-      parts.push(
-        `Отношение к юзеру: tone_bias=${options.relationship.toneBias}, roast_level=${options.relationship.roastLevel}, praise_bias=${options.relationship.praiseBias}, do_not_mock=${options.relationship.doNotMock}.`
-      );
-
-      if (options.relationship.protectedTopics.length) {
-        parts.push(`Защищённые темы для этого юзера: ${options.relationship.protectedTopics.join(", ")}.`);
-      }
-    }
-
-    return parts.join("\n");
+    return composeBehaviorPrompt({
+      guildSettings: options.guildSettings,
+      moderatorOverlay: options.moderatorOverlay,
+      relationship: options.relationship,
+      featureFlags: defaultBehaviorFeatureFlags,
+      message: fallbackMessage,
+      intent: "chat",
+      cleanedContent: ""
+    }).prompt;
   }
 }
-

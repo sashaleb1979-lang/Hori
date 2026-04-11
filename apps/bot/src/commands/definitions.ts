@@ -69,7 +69,16 @@ export const slashCommandDefinitions = [
           { name: "auto_interject", value: "auto_interject" },
           { name: "user_profiles", value: "user_profiles" },
           { name: "context_actions", value: "context_actions" },
-          { name: "roast", value: "roast" }
+          { name: "roast", value: "roast" },
+          { name: "channel_aware_mode", value: "channel_aware_mode" },
+          { name: "message_kind_aware_mode", value: "message_kind_aware_mode" },
+          { name: "anti_slop_strict_mode", value: "anti_slop_strict_mode" },
+          { name: "playful_mode_enabled", value: "playful_mode_enabled" },
+          { name: "irritated_mode_enabled", value: "irritated_mode_enabled" },
+          { name: "ideological_flavour_enabled", value: "ideological_flavour_enabled" },
+          { name: "analogy_ban_enabled", value: "analogy_ban_enabled" },
+          { name: "slang_layer_enabled", value: "slang_layer_enabled" },
+          { name: "self_interjection_constraints_enabled", value: "self_interjection_constraints_enabled" }
         )
     )
     .addBooleanOption((option) => option.setName("enabled").setDescription("Включить/выключить").setRequired(true)),

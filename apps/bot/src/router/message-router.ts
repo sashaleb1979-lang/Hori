@@ -148,6 +148,7 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
     userId: message.author.id,
     username: message.author.username,
     displayName: member.displayName,
+    channelName: "name" in message.channel ? message.channel.name : null,
     content: message.content,
     createdAt: message.createdAt,
     replyToMessageId: message.reference?.messageId ?? null,
@@ -163,7 +164,7 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
   await runtime.ingestService.ingestMessage({
     ...envelope,
     guildName: message.guild.name,
-    channelName: "name" in message.channel ? message.channel.name : undefined,
+    channelName: envelope.channelName,
     isBotUser: false
   });
   trackIngestedMessage();

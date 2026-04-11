@@ -103,14 +103,25 @@ export class ChatOrchestrator {
     const effectiveRoast = runtimeConfig.featureFlags.roast
       ? this.roastPolicy.resolveRoastLevel(guildSettings.roastLevel, contextBundle.relationship)
       : 0;
-    const systemPrompt = this.persona.composePrompt({
+    const behavior = this.persona.composeBehavior({
       guildSettings: {
         ...guildSettings,
         roastLevel: effectiveRoast
       },
+      featureFlags: runtimeConfig.featureFlags,
+      channelPolicy: runtimeConfig.channelPolicy,
+      message,
+      intent: intent.intent,
+      cleanedContent: intent.cleanedContent,
+      context: contextBundle,
       moderatorOverlay,
-      relationship: contextBundle.relationship
+      relationship: contextBundle.relationship,
+      userLanguage: guildSettings.preferredLanguage,
+      isMention: message.mentionedBot || message.mentionsBotByName,
+      isReplyToBot: message.triggerSource === "reply",
+      isSelfInitiated: message.triggerSource === "auto_interject"
     });
+    const systemPrompt = behavior.prompt;
 
     const trace: BotTrace = {
       triggerSource: message.triggerSource,
@@ -123,7 +134,8 @@ export class ChatOrchestrator {
       contextMessages: contextBundle.recentMessages.length,
       memoryLayers,
       relationshipApplied: Boolean(contextBundle.relationship),
-      responded: true
+      responded: true,
+      behavior: behavior.trace
     };
 
     let reply = "";
@@ -134,14 +146,14 @@ export class ChatOrchestrator {
           reply = HELP_TEXT;
           break;
         case "analytics":
-          reply = await this.handleAnalytics(message.guildId, intent.cleanedContent, systemPrompt);
+          reply = await this.handleAnalytics(message.guildId, intent.cleanedContent, systemPrompt, behavior.limits.maxTokens);
           break;
         case "summary":
-          reply = await this.handleSummary(intent.cleanedContent, systemPrompt, contextText);
+          reply = await this.handleSummary(intent.cleanedContent, systemPrompt, contextText, behavior.limits.maxTokens);
           break;
         case "search": {
           const result = runtimeConfig.featureFlags.webSearch
-            ? await this.handleSearch(message, intent.cleanedContent, systemPrompt)
+            ? await this.handleSearch(message, intent.cleanedContent, systemPrompt, behavior.limits.maxTokens)
             : { text: "Поиск сейчас выключен.", toolNames: [], usedSearch: false };
           reply = result.text;
           trace.usedSearch = result.usedSearch;
@@ -155,7 +167,7 @@ export class ChatOrchestrator {
           reply = await this.handleMemoryForget(message, intent.cleanedContent);
           break;
         case "rewrite":
-          reply = await this.handleRewrite(message, intent.cleanedContent, systemPrompt);
+          reply = await this.handleRewrite(message, intent.cleanedContent, systemPrompt, behavior.limits.maxTokens);
           break;
         case "profile":
           reply = runtimeConfig.featureFlags.userProfiles ? await this.handleProfile(message) : "Профили сейчас выключены.";
@@ -165,7 +177,7 @@ export class ChatOrchestrator {
           break;
         case "chat":
         default:
-          reply = await this.handleChat(intent.cleanedContent, systemPrompt, contextText);
+          reply = await this.handleChat(intent.cleanedContent, systemPrompt, contextText, behavior.limits.maxTokens);
           break;
       }
     } catch (error) {
@@ -174,8 +186,13 @@ export class ChatOrchestrator {
       trace.routeReason = "llm_unavailable";
     }
 
+    const behaviorLimitedIntents = new Set(["analytics", "summary", "search", "rewrite", "chat"]);
+    const maxReplyChars = behaviorLimitedIntents.has(intent.intent)
+      ? Math.min(this.deps.env.DEFAULT_REPLY_MAX_CHARS, behavior.limits.maxChars)
+      : this.deps.env.DEFAULT_REPLY_MAX_CHARS;
+
     reply = this.responseGuard.enforce(reply, {
-      maxChars: this.deps.env.DEFAULT_REPLY_MAX_CHARS,
+      maxChars: maxReplyChars,
       forbiddenWords: guildSettings.forbiddenWords
     });
 
@@ -280,44 +297,47 @@ export class ChatOrchestrator {
     return fallback;
   }
 
-  private async handleChat(content: string, systemPrompt: string, contextText: string) {
+  private async handleChat(content: string, systemPrompt: string, contextText: string, maxTokens?: number) {
     const response = await this.deps.llmClient.chat({
       model: this.deps.modelRouter.pickModel("chat"),
       messages: [
         { role: "system", content: `${systemPrompt}\n\n${contextText}` },
         { role: "user", content }
-      ]
+      ],
+      maxTokens
     });
 
     return response.message.content;
   }
 
-  private async handleSummary(content: string, systemPrompt: string, contextText: string) {
+  private async handleSummary(content: string, systemPrompt: string, contextText: string, maxTokens?: number) {
     const messages = buildSummaryPrompt(contextText || "Контекста почти нет.", content);
     messages[0].content = `${systemPrompt}\n\n${messages[0].content}`;
 
     const response = await this.deps.llmClient.chat({
       model: this.deps.modelRouter.pickModel("summary"),
-      messages
+      messages,
+      maxTokens
     });
 
     return response.message.content;
   }
 
-  private async handleAnalytics(guildId: string, request: string, systemPrompt: string) {
+  private async handleAnalytics(guildId: string, request: string, systemPrompt: string, maxTokens?: number) {
     const window = /за день|сегодня/i.test(request) ? "day" : /за месяц|месяц/i.test(request) ? "month" : "week";
     const overview = await this.deps.analytics.getOverview(guildId, window);
     const analyticsText = formatAnalyticsOverview(overview);
 
     const response = await this.deps.llmClient.chat({
       model: this.deps.modelRouter.pickModel("analytics"),
-      messages: [{ role: "system", content: systemPrompt }, ...buildAnalyticsNarrationPrompt(analyticsText, request)]
+      messages: [{ role: "system", content: systemPrompt }, ...buildAnalyticsNarrationPrompt(analyticsText, request)],
+      maxTokens
     });
 
     return response.message.content || analyticsText;
   }
 
-  private async handleSearch(message: MessageEnvelope, request: string, systemPrompt: string) {
+  private async handleSearch(message: MessageEnvelope, request: string, systemPrompt: string, maxTokens?: number) {
     const fetchedPages: Array<{ url: string; title: string; content: string }> = [];
     let searchRequests = 0;
     const tools = [
@@ -367,7 +387,8 @@ export class ChatOrchestrator {
         { role: "user", content: request }
       ],
       tools,
-      maxToolCalls: this.deps.env.LLM_MAX_TOOL_CALLS
+      maxToolCalls: this.deps.env.LLM_MAX_TOOL_CALLS,
+      maxTokens
     });
 
     if (run.toolCalls.length === 0) {
@@ -381,7 +402,8 @@ export class ChatOrchestrator {
 
     const response = await this.deps.llmClient.chat({
       model: this.deps.modelRouter.pickModel("search"),
-      messages: finalPrompt
+      messages: finalPrompt,
+      maxTokens
     });
 
     return {
@@ -435,7 +457,7 @@ export class ChatOrchestrator {
     return `Удалила память по ${factKey}.`;
   }
 
-  private async handleRewrite(message: MessageEnvelope, cleanedContent: string, systemPrompt: string) {
+  private async handleRewrite(message: MessageEnvelope, cleanedContent: string, systemPrompt: string, maxTokens?: number) {
     const source = message.replyToMessageId ? await this.deps.prisma.message.findUnique({ where: { id: message.replyToMessageId } }) : null;
 
     if (!source) {
@@ -447,7 +469,8 @@ export class ChatOrchestrator {
 
     const response = await this.deps.llmClient.chat({
       model: this.deps.modelRouter.pickModel("rewrite"),
-      messages: prompt
+      messages: prompt,
+      maxTokens
     });
 
     return response.message.content;

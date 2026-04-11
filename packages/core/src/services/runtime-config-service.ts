@@ -6,7 +6,16 @@ const FEATURE_KEY_MAP = {
   auto_interject: "autoInterject",
   user_profiles: "userProfiles",
   context_actions: "contextActions",
-  roast: "roast"
+  roast: "roast",
+  channel_aware_mode: "channelAwareMode",
+  message_kind_aware_mode: "messageKindAwareMode",
+  anti_slop_strict_mode: "antiSlopStrictMode",
+  playful_mode_enabled: "playfulModeEnabled",
+  irritated_mode_enabled: "irritatedModeEnabled",
+  ideological_flavour_enabled: "ideologicalFlavourEnabled",
+  analogy_ban_enabled: "analogyBanEnabled",
+  slang_layer_enabled: "slangLayerEnabled",
+  self_interjection_constraints_enabled: "selfInterjectionConstraintsEnabled"
 } as const satisfies Record<string, keyof FeatureFlags>;
 
 export interface EffectiveChannelPolicy {

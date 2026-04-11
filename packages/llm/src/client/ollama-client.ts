@@ -249,7 +249,7 @@ export class OllamaClient implements LlmClient {
       throw new Error("OLLAMA_BASE_URL not configured \u2014 use /bot-ai-url to set it");
     }
     const requestedModel = options.model;
-    const maxTokens = Math.max(32, this.env.LLM_REPLY_MAX_TOKENS);
+    const maxTokens = Math.max(32, options.maxTokens ?? this.env.LLM_REPLY_MAX_TOKENS);
 
     try {
       const resolvedModel = await this.resolveModelAlias(baseUrl, requestedModel);

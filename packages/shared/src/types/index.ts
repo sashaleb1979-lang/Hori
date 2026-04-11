@@ -19,12 +19,87 @@ export type TriggerSource = "name" | "mention" | "reply" | "slash" | "context_ac
 
 export type MemoryLayer = "recent_messages" | "channel_summaries" | "server_memory" | "user_profile" | "relationship";
 
+export type PersonaMode = "normal" | "playful" | "dry" | "irritated" | "focused" | "sleepy" | "detached";
+
+export type ChannelKind = "general" | "memes" | "serious" | "help" | "bot" | "offtopic" | "late_night";
+
+export type MessageKind =
+  | "direct_mention"
+  | "reply_to_bot"
+  | "casual_address"
+  | "info_question"
+  | "opinion_question"
+  | "request_for_explanation"
+  | "meme_bait"
+  | "provocation"
+  | "repeated_question"
+  | "low_signal_noise"
+  | "command_like_request";
+
+export type RequestedDepth = "tiny" | "short" | "normal" | "long" | "deep";
+
+export type StylePresetName =
+  | "curt"
+  | "neutral_short"
+  | "playful_short"
+  | "sharp_short"
+  | "focused_compact"
+  | "dismissive_short"
+  | "sleepy_short"
+  | "unsolicited_poke"
+  | "unsolicited_meme_caption";
+
+export type AntiSlopProfile = "off" | "standard" | "strict";
+
+export type IdeologicalFlavourState = "disabled" | "background" | "enabled";
+
+export interface PersonaResponseLimits {
+  maxSentences: number;
+  maxParagraphs: number;
+  maxChars: number;
+  maxTokens: number;
+  compactness: RequestedDepth;
+  bulletListAllowed: boolean;
+  explanationDensity: number;
+  followUpAllowed: boolean;
+}
+
+export interface PersonaBehaviorTrace {
+  personaName: string;
+  activeMode: PersonaMode;
+  channelKind: ChannelKind;
+  messageKind: MessageKind;
+  stylePreset: StylePresetName;
+  requestedDepth: RequestedDepth;
+  compactness: RequestedDepth;
+  antiSlopProfile: AntiSlopProfile;
+  ideologicalFlavour: IdeologicalFlavourState;
+  analogyBan: boolean;
+  slangProfile: string;
+  isSelfInitiated: boolean;
+  maxChars: number;
+  maxSentences: number;
+  maxParagraphs: number;
+  bulletListAllowed: boolean;
+  followUpAllowed: boolean;
+  blocksUsed: string[];
+}
+
 export interface FeatureFlags {
   webSearch: boolean;
   autoInterject: boolean;
   userProfiles: boolean;
   contextActions: boolean;
   roast: boolean;
+  channelAwareMode: boolean;
+  messageKindAwareMode: boolean;
+  antiSlopStrictMode: boolean;
+  playfulModeEnabled: boolean;
+  irritatedModeEnabled: boolean;
+  ideologicalFlavourEnabled: boolean;
+  analogyBanEnabled: boolean;
+  slangLayerEnabled: boolean;
+  selfInterjectionConstraintsEnabled: boolean;
 }
 
 export interface PersonaSettings {
@@ -57,6 +132,7 @@ export interface MessageEnvelope {
   userId: string;
   username: string;
   displayName?: string | null;
+  channelName?: string | null;
   content: string;
   createdAt: Date;
   replyToMessageId?: string | null;
@@ -134,6 +210,7 @@ export interface BotTrace {
   relationshipApplied: boolean;
   latencyMs?: number;
   responded: boolean;
+  behavior?: PersonaBehaviorTrace;
 }
 
 export interface ContextBundle {

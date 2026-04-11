@@ -1,5 +1,6 @@
 export * from "./intents/intent-router";
 export * from "./orchestrators/chat-orchestrator";
+export * from "./persona";
 export * from "./persona/persona-service";
 export * from "./policies/interjection-policy";
 export * from "./prompts/system-prompts";

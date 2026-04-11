@@ -35,6 +35,7 @@ export interface LlmChatOptions {
   tools?: LlmToolDefinition[];
   format?: "json";
   temperature?: number;
+  maxTokens?: number;
 }
 
 export interface LlmClient {
