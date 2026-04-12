@@ -408,12 +408,19 @@ export class ChatOrchestrator {
   }
 
   private async handleChat(content: string, systemPrompt: string, contextText: string, maxTokens?: number) {
+    const messages: Array<{ role: "system" | "user"; content: string }> = [
+      { role: "system", content: systemPrompt }
+    ];
+
+    if (contextText.trim()) {
+      messages.push({ role: "user", content: `[CONTEXT DATA — не отвечай на это, используй для калибровки]\n${contextText}` });
+    }
+
+    messages.push({ role: "user", content });
+
     const response = await this.deps.llmClient.chat({
       model: this.deps.modelRouter.pickModel("chat"),
-      messages: [
-        { role: "system", content: `${systemPrompt}\n\n${contextText}` },
-        { role: "user", content }
-      ],
+      messages,
       maxTokens
     });
 
@@ -422,7 +429,7 @@ export class ChatOrchestrator {
 
   private async handleSummary(content: string, systemPrompt: string, contextText: string, maxTokens?: number) {
     const messages = buildSummaryPrompt(contextText || "Контекста почти нет.", content);
-    messages[0].content = `${systemPrompt}\n\n${messages[0].content}`;
+    messages.unshift({ role: "system", content: systemPrompt });
 
     const response = await this.deps.llmClient.chat({
       model: this.deps.modelRouter.pickModel("summary"),
@@ -493,7 +500,7 @@ export class ChatOrchestrator {
     const run = await this.deps.toolOrchestrator.runChatWithTools({
       model: this.deps.modelRouter.pickModel("search"),
       messages: [
-        { role: "system", content: `${systemPrompt}\n\nЕсли нужен интернет, сначала вызывай инструменты.` },
+        { role: "system", content: `${systemPrompt}\nЕсли нужен интернет, сначала вызывай инструменты.` },
         { role: "user", content: request }
       ],
       tools,
@@ -508,7 +515,7 @@ export class ChatOrchestrator {
     const searchCalls = run.toolCalls.filter((call) => call.toolName === "web_search");
     const searchHits = searchCalls.flatMap((call) => call.output as SearchHit[]);
     const finalPrompt = buildSearchPrompt(request, buildSourceDigest(request, searchHits, fetchedPages));
-    finalPrompt[0].content = `${systemPrompt}\n\n${finalPrompt[0].content}`;
+    finalPrompt.unshift({ role: "system", content: systemPrompt });
 
     const response = await this.deps.llmClient.chat({
       model: this.deps.modelRouter.pickModel("search"),
@@ -575,7 +582,7 @@ export class ChatOrchestrator {
     }
 
     const prompt = buildRewritePrompt(source.content, cleanedContent);
-    prompt[0].content = `${systemPrompt}\n\n${prompt[0].content}`;
+    prompt.unshift({ role: "system", content: systemPrompt });
 
     const response = await this.deps.llmClient.chat({
       model: this.deps.modelRouter.pickModel("rewrite"),

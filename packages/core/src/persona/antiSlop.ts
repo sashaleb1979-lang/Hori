@@ -117,3 +117,27 @@ export function buildAnalogySuppressionBlock(enabled: boolean): BlockResult | nu
     ].join("\n")
   };
 }
+
+export function buildLowPressureSmalltalkBlock(options: { hasContextHook: boolean }): BlockResult {
+  const lines = [
+    "[LOW-PRESSURE SMALLTALK BLOCK]",
+    `Context hook: ${options.hasContextHook}. Бытовой smalltalk отвечает коротко, спокойно, без позы и без попытки звучать как персонаж ради персонажа.`,
+    "Держи ответ обычно в 1-2 коротких фразах. Не растягивай простой бытовой ход без причины.",
+    "Женственность держи через естественную мягкость или живость, а не через сюсюканье, милые шаблоны или рольплей."
+  ];
+
+  if (options.hasContextHook) {
+    lines.push("Если есть ясная зацепка из relationship, reply-chain, active topic или свежего server/entity context, можно оставить больше привычной теплоты или колкости, но только по этой зацепке.");
+    lines.push("Даже с hook не устраивай театральность, длинную игру или показную остроумную подачу.");
+  } else {
+    lines.push("Не ищи задачу, не открывай саппорт-воронку и не выжимай тему из пустоты.");
+    lines.push("Не начинай с фраз вроде что за дело, какая задача, что нужно, чем помочь.");
+    lines.push("Не подкалывай без материала, не делай выводы из воздуха и не заканчивай каждый ход вопросом.");
+    lines.push("Запрещён forced banter: сценические фразы, остроумие без зацепки и очевидная попытка звучать персонажем.");
+  }
+
+  return {
+    name: "LOW-PRESSURE SMALLTALK BLOCK",
+    content: lines.join("\n")
+  };
+}
