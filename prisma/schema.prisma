@@ -121,6 +121,12 @@ model RelationshipProfile {
   doNotMock        Boolean  @default(false)
   doNotInitiate    Boolean  @default(false)
   protectedTopics  String[] @default([])
+  closeness        Float    @default(0.5)
+  trustLevel       Float    @default(0.5)
+  familiarity      Float    @default(0.5)
+  interactionCount Int      @default(0)
+  proactivityPreference Float @default(0.5)
+  topicBoundaries  Json?
   updatedBy        String?
   updatedAt        DateTime @updatedAt
   guild            Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)

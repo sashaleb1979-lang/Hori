@@ -72,7 +72,14 @@ export const defaultRuntimeTuning = {
   JOB_QUEUE_PREFIX: "hori",
   JOB_CONCURRENCY_SUMMARIES: 1,
   JOB_CONCURRENCY_PROFILES: 1,
-  JOB_CONCURRENCY_EMBEDDINGS: 1
+  JOB_CONCURRENCY_EMBEDDINGS: 1,
+
+  // --- Quiet hours + rate limits (из AICO agency.yaml) ---
+  QUIET_HOURS_ENABLED: true,
+  QUIET_HOURS_START: 22,      // 22:00
+  QUIET_HOURS_END: 8,         // 08:00
+  MAX_PROACTIVE_PER_DAY: 5,
+  MIN_HOURS_BETWEEN_PROACTIVE: 2,
 };
 
 export type RuntimeTuning = typeof defaultRuntimeTuning;

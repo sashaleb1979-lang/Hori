@@ -14,3 +14,15 @@ export * from "./services/mood-service";
 export * from "./services/reply-queue-service";
 export * from "./services/runtime-config-service";
 export * from "./services/slash-admin-service";
+
+// --- Brain (Phase 1) ---
+export * from "./brain/emotion-state";
+export * from "./brain/emotion-engine";
+export * from "./brain/activation-policy";
+export * from "./brain/response-budget";
+
+// --- Phase 2: Relationships + Busy Engine ---
+export * from "./persona/personality-traits";
+export * from "./services/priority-queue";
+export * from "./services/busy-engine";
+export * from "./policies/debounce-policy";
