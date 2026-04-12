@@ -40,8 +40,27 @@ function normalizeForRepeat(value: string) {
     .trim();
 }
 
+const unicodeWordBoundaryEnd = String.raw`(?=$|[^\p{L}\p{N}_])`;
+const unicodeWordBoundaryAround = (pattern: string) => new RegExp(String.raw`(?:^|[^\p{L}\p{N}_])(?:${pattern})${unicodeWordBoundaryEnd}`, "iu");
+const unicodeStartsWithWord = (pattern: string) => new RegExp(String.raw`^(?:${pattern})${unicodeWordBoundaryEnd}`, "iu");
+
+const questionLikePattern = unicodeStartsWithWord(
+  "как|что|кто|где|когда|зачем|почему|сколько|какой|какая|какие|можно|надо ли|правда ли"
+);
+
+const commandLikePattern = unicodeStartsWithWord("найди|сделай|перепиши|запомни|забудь|покажи|дай|скинь");
+
+const smalltalkHangoutPatterns = [
+  unicodeStartsWithWord("(?:хори[,.!\\s-]*)?(?:привет|хай|хелло|здарова|здрасьте|доброе\\s+утро|добрый\\s+день|добрый\\s+вечер|ку|йо)"),
+  unicodeStartsWithWord("(?:ну\\s+)?(?:как\\s+дела|как\\s+ты|че\\s+как|ч[её]\\s+как|что\\s+делаешь|чем\\s+занимаешься)"),
+  unicodeWordBoundaryAround(
+    "просто\\s+поболтать(?:\\s+хочу)?|поболтать(?:\\s+хочу)?|просто\\s+поговорить(?:\\s+хочу)?|скучно|мне\\s+скучно|да\\s+так|пока\\s+ничего\\s+не\\s+делаю|ничего\\s+не\\s+делаю"
+  )
+];
+
 function isQuestionLike(content: string) {
-  return /\?|^(как|что|кто|где|когда|зачем|почему|сколько|какой|какая|какие|можно|надо ли|правда ли)\b/i.test(content.trim());
+  const normalized = content.trim();
+  return normalized.includes("?") || questionLikePattern.test(normalized);
 }
 
 function isLowSignal(content: string) {
@@ -60,11 +79,7 @@ function isSmalltalkHangout(content: string, intent: BotIntent) {
     return false;
   }
 
-  return [
-    /^(?:хори[,.!\s-]*)?(?:привет|хай|хелло|здарова|здрасьте|доброе\s+утро|добрый\s+день|добрый\s+вечер|ку|йо)\b/i,
-    /^(?:ну\s+)?(?:как\s+дела|как\s+ты|че\s+как|ч[её]\s+как|что\s+делаешь|чем\s+занимаешься)\b/i,
-    /\b(?:просто\s+поболтать(?:\s+хочу)?|поболтать(?:\s+хочу)?|просто\s+поговорить(?:\s+хочу)?|скучно|мне\s+скучно|да\s+так|пока\s+ничего\s+не\s+делаю|ничего\s+не\s+делаю)\b/i
-  ].some((pattern) => pattern.test(normalized));
+  return smalltalkHangoutPatterns.some((pattern) => pattern.test(normalized));
 }
 
 function repeatedInContext(content: string, context?: ContextBundle | null) {
@@ -114,7 +129,7 @@ export function detectMessageKind(options: {
     options.intent === "memory_write" ||
     options.intent === "memory_forget" ||
     options.intent === "rewrite" ||
-    /^(найди|сделай|перепиши|запомни|забудь|покажи|дай|скинь)\b/i.test(content)
+    commandLikePattern.test(content)
   ) {
     return "command_like_request";
   }

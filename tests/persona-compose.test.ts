@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { composeBehaviorPrompt } from "../packages/core/src/persona/compose";
-import type { BotIntent, FeatureFlags, MessageEnvelope, PersonaSettings } from "@hori/shared";
+import type { BotIntent, ContextBundleV2, ContextTrace, FeatureFlags, MessageEnvelope, PersonaSettings } from "@hori/shared";
 
 const featureFlags: FeatureFlags = {
   webSearch: true,
@@ -196,6 +196,38 @@ describe("composeBehaviorPrompt", () => {
   });
 
   it("keeps smalltalk kind but marks contextual hook when fresh context exists", () => {
+    const context = {
+      version: "v2",
+      recentMessages: [
+        { author: "tester", content: "вечер опять скучно тянется", createdAt: new Date() },
+        { author: "friend", content: "да, скучно и тихо сегодня", createdAt: new Date() }
+      ],
+      summaries: [],
+      serverMemories: [{ key: "вечер", value: "В этом канале вечером часто жалуются, что скучно.", type: "pattern" }],
+      replyChain: [{ author: "friend", content: "ты опять пишешь что скучно", createdAt: new Date() }],
+      topicWindow: [],
+      entities: [{ type: "concept", surface: "вечер", score: 0.92 }],
+      entityMemories: [{ key: "вечер", value: "обычно тянет на спокойный бытовой чат", type: "note", score: 0.81 }],
+      activeTopic: {
+        topicId: "topic-1",
+        title: "Скучный вечер",
+        summaryShort: "Все жалуются, что вечер пустой и вялый.",
+        summaryFacts: ["В канале тихо", "Никто ничего не делает"],
+        lastUpdatedAt: new Date(),
+        confidence: 0.84
+      },
+      relationship: null,
+      userProfile: null
+    } satisfies ContextBundleV2;
+
+    const contextTrace = {
+      version: "v2",
+      activeTopicId: "topic-1",
+      replyChainCount: 1,
+      entityTriggers: ["вечер"],
+      sections: ["reply_chain", "active_topic", "entity_memory", "server_memory"]
+    } satisfies ContextTrace;
+
     const result = compose("скучно", {
       relationship: {
         toneBias: "familiar",
@@ -206,36 +238,8 @@ describe("composeBehaviorPrompt", () => {
         doNotInitiate: false,
         protectedTopics: []
       },
-      context: {
-        version: "v2",
-        recentMessages: [
-          { author: "tester", content: "вечер опять скучно тянется", createdAt: new Date() },
-          { author: "friend", content: "да, скучно и тихо сегодня", createdAt: new Date() }
-        ],
-        summaries: [],
-        serverMemories: [{ key: "вечер", value: "В этом канале вечером часто жалуются, что скучно.", type: "pattern" }],
-        replyChain: [{ author: "friend", content: "ты опять пишешь что скучно", createdAt: new Date() }],
-        topicWindow: [],
-        entities: [{ type: "concept", surface: "вечер", score: 0.92 }],
-        entityMemories: [{ key: "вечер", value: "обычно тянет на спокойный бытовой чат", type: "note", score: 0.81 }],
-        activeTopic: {
-          topicId: "topic-1",
-          title: "Скучный вечер",
-          summaryShort: "Все жалуются, что вечер пустой и вялый.",
-          summaryFacts: ["В канале тихо", "Никто ничего не делает"],
-          lastUpdatedAt: new Date(),
-          confidence: 0.84
-        },
-        relationship: null,
-        userProfile: null
-      },
-      contextTrace: {
-        version: "v2",
-        activeTopicId: "topic-1",
-        replyChainCount: 1,
-        entityTriggers: ["вечер"],
-        sections: ["reply_chain", "active_topic", "entity_memory", "server_memory"]
-      },
+      context,
+      contextTrace,
       message: {
         triggerSource: "reply"
       }

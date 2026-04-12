@@ -6,6 +6,15 @@ Cluster 1 adds a modular behavior composer for Hori. It replaces the old single 
 
 The default config lives in `packages/core/src/persona/defaults.ts`. Example JSON snapshots are in `examples/hori.persona.json` and `examples/hori.persona.minimal.json`.
 
+`examples/persona.initial.json` is kept only as a legacy `PersonaSettings` snapshot for `/bot-style`-compatible fields. For Cluster 1 tuning, prefer the `hori.persona*.json` examples.
+
+Additional reference artifacts:
+
+- `examples/cluster1-context-bundle-v2.json` — sample Context V2 payload shape.
+- `examples/cluster1-behavior-trace.json` — sample `PersonaBehaviorTrace` / debug behavior output.
+- `examples/cluster1-channel-config.json` — sample `ChannelConfig.topicInterestTags` setup.
+- `examples/cluster1-cfg-expanded.json` — sample expanded `CFG` JSON runtime tuning.
+
 Important config groups:
 
 - `identity`: name, age, language and Discord role description.
@@ -19,6 +28,17 @@ Important config groups:
 - `antiSlopRules`, `selfInterjectionRules`, `forbiddenPatterns`: hard style bans and future auto-interject constraints.
 
 The old `PersonaSettings` from guild DB settings still works. `PersonaService` adapts `/bot-style` fields into the new config at runtime.
+
+## Model Tiers
+
+`OLLAMA_FAST_MODEL` and `OLLAMA_SMART_MODEL` now both default to `qwen3.5:9b` unless overridden by env.
+
+The routing split still matters:
+
+- `fast` keeps lower token caps and colder sampling for cheap/common replies.
+- `smart` keeps a wider token cap and slightly richer sampling for summaries, search and profile-like paths.
+
+That tuning lives in `packages/llm/src/router/model-profiles.ts`, so changing tier behavior does not require rewriting the persona layer.
 
 ## Composer
 

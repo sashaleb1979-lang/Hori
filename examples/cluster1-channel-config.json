@@ -1,0 +1,10 @@
+{
+  "channelId": "123456789012345678",
+  "guildId": "987654321098765432",
+  "responseLengthOverride": null,
+  "topicInterestTags": [
+    "kind:memes",
+    "mode:playful",
+    "depth:short"
+  ]
+}
