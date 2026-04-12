@@ -145,16 +145,16 @@ export class TopicService {
       return null;
     }
 
+    if (isWeakTopicSignal(input.content)) {
+      return null;
+    }
+
     if (now.getTime() - activeTopic.lastActiveAt.getTime() > this.topicTtlMinutes * 60 * 1000) {
       return "ttl_expired";
     }
 
     if (/(новая тема|другое|сменим тему|кстати)\b/i.test(input.content)) {
       return "explicit_topic_switch";
-    }
-
-    if (isWeakTopicSignal(input.content)) {
-      return null;
     }
 
     const embeddingSimilarity = input.embedding?.length ? await this.getEmbeddingSimilarity(activeTopic.id, input.embedding) : null;
