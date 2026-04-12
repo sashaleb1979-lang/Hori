@@ -21,6 +21,9 @@ export class ToolOrchestrator {
     temperature?: number;
     topP?: number;
     maxTokens?: number;
+    keepAlive?: string;
+    numCtx?: number;
+    numBatch?: number;
   }): Promise<ChatRunResult> {
     const transcript = [...options.messages];
     const toolMap = new Map(options.tools.map((tool) => [tool.definition.function.name, tool]));
@@ -33,7 +36,10 @@ export class ToolOrchestrator {
         tools: options.tools.map((tool) => tool.definition),
         temperature: options.temperature,
         topP: options.topP,
-        maxTokens: options.maxTokens
+        maxTokens: options.maxTokens,
+        keepAlive: options.keepAlive,
+        numCtx: options.numCtx,
+        numBatch: options.numBatch
       });
 
       transcript.push({
@@ -84,7 +90,10 @@ export class ToolOrchestrator {
       messages: transcript,
       temperature: options.temperature,
       topP: options.topP,
-      maxTokens: options.maxTokens
+      maxTokens: options.maxTokens,
+      keepAlive: options.keepAlive,
+      numCtx: options.numCtx,
+      numBatch: options.numBatch
     });
 
     return {

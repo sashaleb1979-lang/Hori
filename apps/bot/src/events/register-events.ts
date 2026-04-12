@@ -31,7 +31,7 @@ export function registerEvents(runtime: BotRuntime) {
 
   runtime.client.on("interactionCreate", async (interaction) => {
     try {
-      if (interaction.isChatInputCommand() || interaction.isMessageContextMenuCommand() || interaction.isModalSubmit()) {
+      if (interaction.isChatInputCommand() || interaction.isMessageContextMenuCommand() || interaction.isModalSubmit() || interaction.isButton()) {
         await routeInteraction(runtime, interaction);
       }
     } catch (error) {

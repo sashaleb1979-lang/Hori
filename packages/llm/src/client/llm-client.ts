@@ -37,6 +37,9 @@ export interface LlmChatOptions {
   temperature?: number;
   topP?: number;
   maxTokens?: number;
+  keepAlive?: string;
+  numCtx?: number;
+  numBatch?: number;
 }
 
 export interface LlmClient {

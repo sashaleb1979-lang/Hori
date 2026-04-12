@@ -466,12 +466,18 @@ model MediaMetadata {
   filePath        String
   toneTags        String[] @default([])
   triggerTags     String[] @default([])
+  emotionTags     String[] @default([])
+  messageKindTags String[] @default([])
   allowedMoods    String[] @default([])
   allowedChannels String[] @default([])
   nsfw            Boolean  @default(false)
   enabled         Boolean  @default(true)
+  autoUseEnabled  Boolean  @default(true)
+  manualOnly      Boolean  @default(false)
   weight          Int      @default(1)
   cooldownSec     Int      @default(600)
+  minConfidence   Float    @default(0.82)
+  minIntensity    Float    @default(0.62)
   lastUsedAt      DateTime?
   metaJson        Json?
   createdAt       DateTime @default(now())
@@ -480,6 +486,21 @@ model MediaMetadata {
   @@index([type])
   @@index([nsfw])
   @@index([enabled])
+}
+
+model MediaUsageLog {
+  id            String   @id @default(cuid())
+  mediaId       String
+  guildId       String
+  channelId     String
+  messageId     String?
+  reasonKey     String?
+  autoTriggered Boolean  @default(false)
+  usedAt        DateTime @default(now())
+
+  @@index([guildId, usedAt])
+  @@index([guildId, autoTriggered, usedAt])
+  @@index([guildId, mediaId, usedAt])
 }
 
 model MemoryAlbumEntry {

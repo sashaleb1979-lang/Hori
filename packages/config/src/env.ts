@@ -164,7 +164,9 @@ const compactConfigSchema = z
         contextMessages: z.number().int().positive().optional(),
         toolCalls: z.number().int().positive().optional(),
         replyMaxTokens: z.number().int().positive().optional(),
-        keepAlive: z.string().optional()
+        keepAlive: z.string().optional(),
+        numCtx: z.number().int().positive().optional(),
+        numBatch: z.number().int().positive().optional()
       })
       .partial()
       .optional(),
@@ -239,6 +241,14 @@ const compactConfigSchema = z
       })
       .partial()
       .optional(),
+    media: z
+      .object({
+        autoGlobalCooldownSec: z.number().int().nonnegative().optional(),
+        autoMinConfidence: z.number().min(0).max(1).optional(),
+        autoMinIntensity: z.number().min(0).max(1).optional()
+      })
+      .partial()
+      .optional(),
     jobs: z
       .object({
         prefix: z.string().optional(),
@@ -286,6 +296,8 @@ const legacyAdvancedSchema = z
     LLM_MAX_TOOL_CALLS: intish.optional(),
     LLM_REPLY_MAX_TOKENS: intish.optional(),
     OLLAMA_KEEP_ALIVE: z.string().optional(),
+    OLLAMA_NUM_CTX: intish.optional(),
+    OLLAMA_NUM_BATCH: intish.optional(),
     RUNTIME_CONFIG_CACHE_TTL_SEC: intish.optional(),
     EMBEDDING_CACHE_TTL_SEC: intish.optional(),
     CONTEXT_V2_MAX_CHARS: intish.optional(),
@@ -317,6 +329,9 @@ const legacyAdvancedSchema = z
     NATURAL_SPLIT_CHANCE: floatish.optional(),
     NATURAL_SPLIT_COOLDOWN_SEC: intish.optional(),
     SELECTIVE_ENGAGEMENT_MIN_SCORE: floatish.optional(),
+    MEDIA_AUTO_GLOBAL_COOLDOWN_SEC: intish.optional(),
+    MEDIA_AUTO_MIN_CONFIDENCE: floatish.optional(),
+    MEDIA_AUTO_MIN_INTENSITY: floatish.optional(),
     JOB_QUEUE_PREFIX: z.string().optional(),
     JOB_CONCURRENCY_SUMMARIES: intish.optional(),
     JOB_CONCURRENCY_PROFILES: intish.optional(),
@@ -438,6 +453,8 @@ function parseCompactConfig(cfg?: string): Partial<RuntimeTuning> {
     LLM_MAX_TOOL_CALLS: parsed.llm?.toolCalls,
     LLM_REPLY_MAX_TOKENS: parsed.llm?.replyMaxTokens,
     OLLAMA_KEEP_ALIVE: parsed.llm?.keepAlive,
+    OLLAMA_NUM_CTX: parsed.llm?.numCtx,
+    OLLAMA_NUM_BATCH: parsed.llm?.numBatch,
     RUNTIME_CONFIG_CACHE_TTL_SEC: parsed.context?.runtimeConfigCacheTtlSec,
     EMBEDDING_CACHE_TTL_SEC: parsed.context?.embeddingCacheTtlSec,
     CONTEXT_V2_MAX_CHARS: parsed.context?.maxChars,
@@ -469,6 +486,9 @@ function parseCompactConfig(cfg?: string): Partial<RuntimeTuning> {
     NATURAL_SPLIT_CHANCE: parsed.chat?.naturalSplitChance,
     NATURAL_SPLIT_COOLDOWN_SEC: parsed.chat?.naturalSplitCooldownSec,
     SELECTIVE_ENGAGEMENT_MIN_SCORE: parsed.chat?.selectiveEngagementMinScore,
+    MEDIA_AUTO_GLOBAL_COOLDOWN_SEC: parsed.media?.autoGlobalCooldownSec,
+    MEDIA_AUTO_MIN_CONFIDENCE: parsed.media?.autoMinConfidence,
+    MEDIA_AUTO_MIN_INTENSITY: parsed.media?.autoMinIntensity,
     JOB_QUEUE_PREFIX: parsed.jobs?.prefix,
     JOB_CONCURRENCY_SUMMARIES: parsed.jobs?.summaries,
     JOB_CONCURRENCY_PROFILES: parsed.jobs?.profiles,

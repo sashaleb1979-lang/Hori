@@ -354,6 +354,8 @@ export interface MediaReactionTrace {
   selected: boolean;
   mediaId?: string | null;
   reason?: string;
+  autoTriggered?: boolean;
+  reasonKey?: string | null;
 }
 
 export interface BotReplyPayload {

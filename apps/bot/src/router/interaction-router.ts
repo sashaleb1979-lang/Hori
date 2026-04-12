@@ -1,5 +1,8 @@
 import {
   ActionRowBuilder,
+  ButtonBuilder,
+  ButtonInteraction,
+  ButtonStyle,
   ChatInputCommandInteraction,
   ContextMenuCommandInteraction,
   MessageFlags,
@@ -17,17 +20,27 @@ import type { BotRuntime } from "../bootstrap";
 import { getOwnerLockdownState, isBotOwner, setOwnerLockdownState, shouldIgnoreForOwnerLockdown } from "./owner-lockdown";
 
 const PUBLIC_COMMANDS = new Set(["bot-help", "bot-album"]);
-const OWNER_COMMANDS = new Set(["bot-ai-url", "bot-import", "bot-lockdown"]);
+const OWNER_COMMANDS = new Set(["bot-ai-url", "bot-import", "bot-lockdown", "bot-power"]);
 const MEMORY_ALBUM_MODAL_PREFIX = "memory-album";
+const POWER_PANEL_PREFIX = "power-panel";
+const POWER_PROFILES = ["economy", "balanced", "expanded", "max"] as const;
 
 function ensureModerator(interaction: ChatInputCommandInteraction | ContextMenuCommandInteraction | ModalSubmitInteraction) {
   return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
 }
 
-export async function routeInteraction(runtime: BotRuntime, interaction: ChatInputCommandInteraction | ContextMenuCommandInteraction | ModalSubmitInteraction) {
+export async function routeInteraction(
+  runtime: BotRuntime,
+  interaction: ChatInputCommandInteraction | ContextMenuCommandInteraction | ModalSubmitInteraction | ButtonInteraction
+) {
   const isOwner = isBotOwner(runtime, interaction.user.id);
 
   if (!isOwner && (await shouldIgnoreForOwnerLockdown(runtime, interaction.user.id))) {
+    return;
+  }
+
+  if (interaction.isButton()) {
+    await routeButtonInteraction(runtime, interaction, isOwner);
     return;
   }
 
@@ -196,6 +209,35 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
           flags: MessageFlags.Ephemeral
         });
         return;
+      case "bot-power": {
+        if (!isOwner) {
+          await interaction.reply({ content: "Эта команда только для владельца бота.", flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        const subcommand = interaction.options.getSubcommand();
+
+        if (subcommand === "panel") {
+          const status = await runtime.runtimeConfig.getPowerProfileStatus();
+          await interaction.reply({
+            content: await runtime.slashAdmin.powerPanel(),
+            components: buildPowerPanelRows(status.activeProfile),
+            flags: MessageFlags.Ephemeral
+          });
+          return;
+        }
+
+        const content =
+          subcommand === "apply"
+            ? await runtime.slashAdmin.powerApply(
+                interaction.options.getString("profile", true) as (typeof POWER_PROFILES)[number],
+                interaction.user.id
+              )
+            : await runtime.slashAdmin.powerStatus();
+
+        await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+        return;
+      }
       case "bot-debug":
         await interaction.reply({
           content: await runtime.slashAdmin.debugTrace(interaction.options.getString("message-id", true)),
@@ -276,6 +318,12 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
       }
       case "bot-media": {
         const subcommand = interaction.options.getSubcommand();
+
+        if (subcommand === "sync-pack" && !isOwner) {
+          await interaction.reply({ content: "Синхронизация pack доступна только владельцу бота.", flags: MessageFlags.Ephemeral });
+          return;
+        }
+
         const content =
           subcommand === "add"
             ? await runtime.slashAdmin.mediaAdd({
@@ -288,6 +336,8 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
                 allowedMoods: interaction.options.getString("moods"),
                 nsfw: interaction.options.getBoolean("nsfw")
               })
+            : subcommand === "sync-pack"
+              ? await runtime.slashAdmin.mediaSyncPack(interaction.options.getString("path") ?? "assets/memes/catalog.json")
             : subcommand === "disable"
               ? await runtime.slashAdmin.mediaDisable(interaction.options.getString("id", true))
               : await runtime.slashAdmin.mediaList();
@@ -598,6 +648,32 @@ async function routeModalSubmit(runtime: BotRuntime, interaction: ModalSubmitInt
   });
 }
 
+async function routeButtonInteraction(runtime: BotRuntime, interaction: ButtonInteraction, isOwner: boolean) {
+  if (!interaction.customId.startsWith(`${POWER_PANEL_PREFIX}:`)) {
+    return;
+  }
+
+  if (!isOwner) {
+    await interaction.reply({ content: "Эта панель только для владельца бота.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const [, action, profile] = interaction.customId.split(":");
+
+  if (action !== "apply" || !isPowerProfile(profile)) {
+    await interaction.reply({ content: "Неизвестная кнопка панели мощности.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const content = await runtime.slashAdmin.powerApply(profile, interaction.user.id);
+  const status = await runtime.runtimeConfig.getPowerProfileStatus();
+
+  await interaction.update({
+    content,
+    components: buildPowerPanelRows(status.activeProfile)
+  });
+}
+
 async function fetchSourceMessageForAlbum(
   runtime: BotRuntime,
   interaction: ModalSubmitInteraction,
@@ -640,4 +716,21 @@ function parseMemoryAlbumModalId(customId: string) {
   }
 
   return { requestId, messageId };
+}
+
+function buildPowerPanelRows(activeProfile: (typeof POWER_PROFILES)[number]) {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      ...POWER_PROFILES.map((profile) =>
+        new ButtonBuilder()
+          .setCustomId(`${POWER_PANEL_PREFIX}:apply:${profile}`)
+          .setLabel(profile)
+          .setStyle(profile === activeProfile ? ButtonStyle.Primary : ButtonStyle.Secondary)
+      )
+    )
+  ];
+}
+
+function isPowerProfile(value: string): value is (typeof POWER_PROFILES)[number] {
+  return POWER_PROFILES.includes(value as (typeof POWER_PROFILES)[number]);
 }

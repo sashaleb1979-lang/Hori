@@ -216,9 +216,37 @@ export const slashCommandDefinitions = [
     .addSubcommand((subcommand) => subcommand.setName("list").setDescription("Список media"))
     .addSubcommand((subcommand) =>
       subcommand
+        .setName("sync-pack")
+        .setDescription("Синхронизировать media из catalog.json")
+        .addStringOption((option) => option.setName("path").setDescription("Путь к catalog.json внутри репозитория"))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
         .setName("disable")
         .setDescription("Отключить media")
         .addStringOption((option) => option.setName("id").setDescription("media id").setRequired(true))
+    ),
+  new SlashCommandBuilder()
+    .setName("bot-power")
+    .setDescription("Глобальные пресеты мощности Ollama и контекста")
+    .addSubcommand((subcommand) => subcommand.setName("panel").setDescription("Открыть owner-only панель пресетов"))
+    .addSubcommand((subcommand) => subcommand.setName("status").setDescription("Показать активный power profile и лимиты"))
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("apply")
+        .setDescription("Применить power profile")
+        .addStringOption((option) =>
+          option
+            .setName("profile")
+            .setDescription("Пресет мощности")
+            .setRequired(true)
+            .addChoices(
+              { name: "economy", value: "economy" },
+              { name: "balanced", value: "balanced" },
+              { name: "expanded", value: "expanded" },
+              { name: "max", value: "max" }
+            )
+        )
     ),
   new SlashCommandBuilder()
     .setName("bot-ai-url")

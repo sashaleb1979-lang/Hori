@@ -8,7 +8,7 @@ import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics"
 import { ContextService, ReflectionService, RelationshipService, RetrievalService } from "@hori/memory";
 import { BraveSearchClient, buildSourceDigest, extractLinksFromMessage, fetchWebPage } from "@hori/search";
 import { chooseConflictStrategy, detectConflict, type ConflictDetection } from "../brain/conflict-detector";
-import { EmotionLabel } from "../brain/emotion-state";
+import { EmotionLabel, type EmotionalState } from "../brain/emotion-state";
 import { createEngineState, generateEmotionalState } from "../brain/emotion-engine";
 import { pickContourAResponse, resolveContour, type Contour } from "../brain/response-budget";
 import { IntentRouter } from "../intents/intent-router";
@@ -19,10 +19,11 @@ import { ResponseGuard } from "../safety/response-guard";
 import { RoastPolicy } from "../safety/roast-policy";
 import { ContextBuilderService } from "../services/context-builder";
 import { ContextScoringService } from "../services/context-scoring-service";
+import { EmotionMediaDecisionService } from "../services/emotion-media-decision-service";
 import type { AffinityService } from "../services/affinity-service";
 import type { MediaReactionService } from "../services/media-reaction-service";
 import type { MoodService } from "../services/mood-service";
-import type { EffectiveRoutingConfig } from "../services/runtime-config-service";
+import type { EffectiveRoutingConfig, EffectiveRuntimeSettings } from "../services/runtime-config-service";
 import { RuntimeConfigService } from "../services/runtime-config-service";
 
 interface OrchestratorDeps {
@@ -69,19 +70,29 @@ export class ChatOrchestrator {
   private readonly responseGuard = new ResponseGuard();
   private readonly contextBuilder = new ContextBuilderService();
   private readonly contextScoring = new ContextScoringService();
+  private readonly emotionMediaDecision = new EmotionMediaDecisionService();
   private readonly embeddingCache = new Map<string, { expiresAt: number; value: number[] }>();
   private readonly emotionStateByScope = new Map<string, ReturnType<typeof createEngineState>>();
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
-  private getLlmSettings(intent: Parameters<ModelRouter["pickModel"]>[0], maxTokens?: number, overrides: { temperature?: number; topP?: number } = {}) {
+  private getLlmSettings(
+    intent: Parameters<ModelRouter["pickModel"]>[0],
+    runtimeSettings: EffectiveRuntimeSettings,
+    maxTokens?: number,
+    overrides: { temperature?: number; topP?: number } = {}
+  ) {
     const profile = this.deps.modelRouter.pickProfile(intent);
+    const cappedMaxTokens = Math.min(maxTokens ?? runtimeSettings.llmReplyMaxTokens, profile.maxTokens, runtimeSettings.llmReplyMaxTokens);
 
     return {
       model: this.deps.modelRouter.pickModel(intent),
       temperature: overrides.temperature ?? profile.temperature,
       topP: overrides.topP ?? profile.topP,
-      maxTokens: maxTokens ? Math.min(maxTokens, profile.maxTokens) : profile.maxTokens
+      maxTokens: cappedMaxTokens,
+      keepAlive: runtimeSettings.ollamaKeepAlive,
+      numCtx: runtimeSettings.ollamaNumCtx,
+      numBatch: runtimeSettings.ollamaNumBatch
     };
   }
 
@@ -89,6 +100,7 @@ export class ChatOrchestrator {
     const startedAt = Date.now();
     const runtimeConfig = prefetchedConfig ?? (await this.deps.runtimeConfig.getRoutingConfig(message.guildId, message.channelId));
     const guildSettings = runtimeConfig.guildSettings;
+    const runtimeSettings = runtimeConfig.runtimeSettings;
     const initialIntent = this.router.route(message, guildSettings.botName);
 
     if (initialIntent.intent === "ignore") {
@@ -110,13 +122,13 @@ export class ChatOrchestrator {
       );
     }
 
-    const intent = initialIntent.confidence < 0.7 ? await this.classifyWithLlm(initialIntent.cleanedContent, initialIntent) : initialIntent;
+    const intent = initialIntent.confidence < 0.7 ? await this.classifyWithLlm(initialIntent.cleanedContent, initialIntent, runtimeSettings) : initialIntent;
     const queryEmbedding = intent.intent !== "help" ? await this.safeEmbed(intent.cleanedContent) : undefined;
     const contextBundle = await this.deps.contextService.buildContext({
       guildId: message.guildId,
       channelId: message.channelId,
       userId: message.userId,
-      limit: this.deps.env.LLM_MAX_CONTEXT_MESSAGES,
+      limit: runtimeSettings.llmMaxContextMessages,
       queryEmbedding,
       message,
       intent: intent.intent
@@ -164,7 +176,7 @@ export class ChatOrchestrator {
     const { contextText, memoryLayers, trace: contextTrace } = this.contextBuilder.buildPromptContext(contextBundle, {
       message,
       intent: intent.intent,
-      maxChars: this.deps.env.CONTEXT_V2_MAX_CHARS,
+      maxChars: runtimeSettings.contextMaxChars,
       contextV2Enabled: runtimeConfig.featureFlags.contextV2Enabled
     });
     const linkContext = runtimeConfig.featureFlags.webSearch && runtimeConfig.featureFlags.linkUnderstandingEnabled
@@ -290,14 +302,14 @@ export class ChatOrchestrator {
           reply = HELP_TEXT;
           break;
         case "analytics":
-          reply = await this.handleAnalytics(message.guildId, intent.cleanedContent, systemPrompt, behavior.limits.maxTokens);
+          reply = await this.handleAnalytics(message.guildId, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens);
           break;
         case "summary":
-          reply = await this.handleSummary(intent.cleanedContent, systemPrompt, promptContextText, behavior.limits.maxTokens);
+          reply = await this.handleSummary(intent.cleanedContent, systemPrompt, promptContextText, runtimeSettings, behavior.limits.maxTokens);
           break;
         case "search": {
           const result = runtimeConfig.featureFlags.webSearch
-            ? await this.handleSearch(message, intent.cleanedContent, systemPrompt, behavior.limits.maxTokens)
+            ? await this.handleSearch(message, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens)
             : { text: "Поиск сейчас выключен.", toolNames: [], usedSearch: false };
           reply = result.text;
           trace.usedSearch = result.usedSearch;
@@ -311,7 +323,7 @@ export class ChatOrchestrator {
           reply = await this.handleMemoryForget(message, intent.cleanedContent);
           break;
         case "rewrite":
-          reply = await this.handleRewrite(message, intent.cleanedContent, systemPrompt, behavior.limits.maxTokens);
+          reply = await this.handleRewrite(message, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens);
           break;
         case "profile":
           reply = runtimeConfig.featureFlags.userProfiles ? await this.handleProfile(message) : "Профили сейчас выключены.";
@@ -323,7 +335,7 @@ export class ChatOrchestrator {
         default:
           reply = contour.contour === "A"
             ? pickContourAResponse()
-            : await this.handleChat(intent.cleanedContent, systemPrompt, promptContextText, behavior.limits.maxTokens, contour.contour);
+            : await this.handleChat(intent.cleanedContent, systemPrompt, promptContextText, runtimeSettings, behavior.limits.maxTokens, contour.contour);
           break;
       }
     } catch (error) {
@@ -334,8 +346,8 @@ export class ChatOrchestrator {
 
     const behaviorLimitedIntents = new Set(["analytics", "summary", "search", "rewrite", "chat"]);
     const maxReplyChars = behaviorLimitedIntents.has(intent.intent)
-      ? Math.min(this.deps.env.DEFAULT_REPLY_MAX_CHARS, behavior.limits.maxChars)
-      : this.deps.env.DEFAULT_REPLY_MAX_CHARS;
+      ? Math.min(runtimeSettings.defaultReplyMaxChars, behavior.limits.maxChars)
+      : runtimeSettings.defaultReplyMaxChars;
 
     reply = this.responseGuard.enforce(reply, {
       maxChars: maxReplyChars,
@@ -363,21 +375,58 @@ export class ChatOrchestrator {
     let replyPayload: string | BotReplyPayload = reply;
 
     if (runtimeConfig.featureFlags.mediaReactionsEnabled && this.deps.media && behavior.trace.mediaReactionEligible) {
-      const mediaResult = await this.deps.media.maybeAttachMedia({
+      const mediaDecision = this.emotionMediaDecision.decide({
         enabled: true,
-        replyText: reply,
+        eligible: behavior.trace.mediaReactionEligible,
+        triggerSource: message.triggerSource,
+        emotionalState,
+        messageKind,
         channelKind: behavior.trace.channelKind,
-        mode: behavior.trace.activeMode,
-        stylePreset: behavior.trace.stylePreset,
-        triggerTags: [
-          behavior.trace.messageKind,
-          behavior.trace.channelKind,
-          behavior.trace.activeMode,
-          ...(behavior.trace.staleTakeDetected ? ["stale_take"] : [])
-        ]
+        activeMode: behavior.trace.activeMode,
+        contextConfidence: contextScores?.contextConfidence,
+        conflictScore: conflict.score,
+        relationship: {
+          toneBias: affinityRelationship?.toneBias,
+          closeness: (affinityRelationship as { closeness?: number } | null | undefined)?.closeness,
+          trustLevel: (affinityRelationship as { trustLevel?: number } | null | undefined)?.trustLevel
+        },
+        runtimeSettings
       });
-      replyPayload = mediaResult.payload;
-      trace.media = mediaResult.trace;
+
+      if (mediaDecision.allowAutoMedia) {
+        const mediaResult = await this.deps.media.maybeAttachMedia({
+          enabled: true,
+          replyText: reply,
+          guildId: message.guildId,
+          channelId: message.channelId,
+          messageId: message.messageId,
+          channelKind: behavior.trace.channelKind,
+          mode: behavior.trace.activeMode,
+          stylePreset: behavior.trace.stylePreset,
+          triggerTags: [
+            ...mediaDecision.triggerTags,
+            ...(behavior.trace.staleTakeDetected ? ["stale_take"] : [])
+          ],
+          emotionTags: mediaDecision.emotionTags,
+          messageKind,
+          confidence: contextScores?.contextConfidence,
+          intensity: emotionalState.intensity,
+          autoTriggered: true,
+          reasonKey: mediaDecision.reasonKey,
+          globalCooldownSec: runtimeSettings.mediaAutoGlobalCooldownSec
+        });
+
+        replyPayload = mediaResult.payload;
+        trace.media = mediaResult.trace;
+      } else {
+        trace.media = {
+          enabled: true,
+          selected: false,
+          reason: mediaDecision.reason,
+          autoTriggered: true,
+          reasonKey: mediaDecision.reasonKey ?? null
+        };
+      }
     }
 
     botRepliesCounter.inc({ intent: intent.intent });
@@ -454,16 +503,23 @@ export class ChatOrchestrator {
     });
   }
 
-  private async classifyWithLlm(cleanedContent: string, fallback: ReturnType<IntentRouter["route"]>) {
+  private async classifyWithLlm(
+    cleanedContent: string,
+    fallback: ReturnType<IntentRouter["route"]>,
+    runtimeSettings: EffectiveRuntimeSettings
+  ) {
     try {
-      const llm = this.getLlmSettings("chat", 96, { temperature: 0 });
+      const llm = this.getLlmSettings("chat", runtimeSettings, 96, { temperature: 0 });
       const response = await this.deps.llmClient.chat({
         model: llm.model,
         messages: buildIntentClassifierPrompt(cleanedContent),
         format: "json",
         temperature: llm.temperature,
         topP: llm.topP,
-        maxTokens: llm.maxTokens
+        maxTokens: llm.maxTokens,
+        keepAlive: llm.keepAlive,
+        numCtx: llm.numCtx,
+        numBatch: llm.numBatch
       });
 
       const raw = response.message.content.trim();
@@ -494,8 +550,15 @@ export class ChatOrchestrator {
     return fallback;
   }
 
-  private async handleChat(content: string, systemPrompt: string, contextText: string, maxTokens?: number, contour: Contour = "B") {
-    const llm = this.getChatSettingsForContour(contour, maxTokens);
+  private async handleChat(
+    content: string,
+    systemPrompt: string,
+    contextText: string,
+    runtimeSettings: EffectiveRuntimeSettings,
+    maxTokens?: number,
+    contour: Contour = "B"
+  ) {
+    const llm = this.getChatSettingsForContour(contour, runtimeSettings, maxTokens);
     const messages: Array<{ role: "system" | "user"; content: string }> = [{ role: "system", content: systemPrompt }];
 
     if (contextText.trim()) {
@@ -512,14 +575,23 @@ export class ChatOrchestrator {
       messages,
       temperature: llm.temperature,
       topP: llm.topP,
-      maxTokens: llm.maxTokens
+      maxTokens: llm.maxTokens,
+      keepAlive: llm.keepAlive,
+      numCtx: llm.numCtx,
+      numBatch: llm.numBatch
     });
 
     return response.message.content;
   }
 
-  private async handleSummary(content: string, systemPrompt: string, contextText: string, maxTokens?: number) {
-    const llm = this.getLlmSettings("summary", maxTokens);
+  private async handleSummary(
+    content: string,
+    systemPrompt: string,
+    contextText: string,
+    runtimeSettings: EffectiveRuntimeSettings,
+    maxTokens?: number
+  ) {
+    const llm = this.getLlmSettings("summary", runtimeSettings, maxTokens);
     const messages = buildSummaryPrompt(contextText || "Контекста почти нет.", content);
     messages.unshift({ role: "system", content: systemPrompt });
 
@@ -528,14 +600,23 @@ export class ChatOrchestrator {
       messages,
       temperature: llm.temperature,
       topP: llm.topP,
-      maxTokens: llm.maxTokens
+      maxTokens: llm.maxTokens,
+      keepAlive: llm.keepAlive,
+      numCtx: llm.numCtx,
+      numBatch: llm.numBatch
     });
 
     return response.message.content;
   }
 
-  private async handleAnalytics(guildId: string, request: string, systemPrompt: string, maxTokens?: number) {
-    const llm = this.getLlmSettings("analytics", maxTokens);
+  private async handleAnalytics(
+    guildId: string,
+    request: string,
+    systemPrompt: string,
+    runtimeSettings: EffectiveRuntimeSettings,
+    maxTokens?: number
+  ) {
+    const llm = this.getLlmSettings("analytics", runtimeSettings, maxTokens);
     const window = /за день|сегодня/i.test(request) ? "day" : /за месяц|месяц/i.test(request) ? "month" : "week";
     const overview = await this.deps.analytics.getOverview(guildId, window);
     const analyticsText = formatAnalyticsOverview(overview);
@@ -545,14 +626,23 @@ export class ChatOrchestrator {
       messages: [{ role: "system", content: systemPrompt }, ...buildAnalyticsNarrationPrompt(analyticsText, request)],
       temperature: llm.temperature,
       topP: llm.topP,
-      maxTokens: llm.maxTokens
+      maxTokens: llm.maxTokens,
+      keepAlive: llm.keepAlive,
+      numCtx: llm.numCtx,
+      numBatch: llm.numBatch
     });
 
     return response.message.content || analyticsText;
   }
 
-  private async handleSearch(message: MessageEnvelope, request: string, systemPrompt: string, maxTokens?: number) {
-    const llm = this.getLlmSettings("search", maxTokens);
+  private async handleSearch(
+    message: MessageEnvelope,
+    request: string,
+    systemPrompt: string,
+    runtimeSettings: EffectiveRuntimeSettings,
+    maxTokens?: number
+  ) {
+    const llm = this.getLlmSettings("search", runtimeSettings, maxTokens);
     const fetchedPages: Array<{ url: string; title: string; content: string }> = [];
     let searchRequests = 0;
     const tools = [
@@ -605,7 +695,10 @@ export class ChatOrchestrator {
       maxToolCalls: this.deps.env.LLM_MAX_TOOL_CALLS,
       temperature: llm.temperature,
       topP: llm.topP,
-      maxTokens: llm.maxTokens
+      maxTokens: llm.maxTokens,
+      keepAlive: llm.keepAlive,
+      numCtx: llm.numCtx,
+      numBatch: llm.numBatch
     });
 
     if (run.toolCalls.length === 0) {
@@ -622,7 +715,10 @@ export class ChatOrchestrator {
       messages: finalPrompt,
       temperature: llm.temperature,
       topP: llm.topP,
-      maxTokens: llm.maxTokens
+      maxTokens: llm.maxTokens,
+      keepAlive: llm.keepAlive,
+      numCtx: llm.numCtx,
+      numBatch: llm.numBatch
     });
 
     return {
@@ -676,8 +772,14 @@ export class ChatOrchestrator {
     return `Удалила память по ${factKey}.`;
   }
 
-  private async handleRewrite(message: MessageEnvelope, cleanedContent: string, systemPrompt: string, maxTokens?: number) {
-    const llm = this.getLlmSettings("rewrite", maxTokens);
+  private async handleRewrite(
+    message: MessageEnvelope,
+    cleanedContent: string,
+    systemPrompt: string,
+    runtimeSettings: EffectiveRuntimeSettings,
+    maxTokens?: number
+  ) {
+    const llm = this.getLlmSettings("rewrite", runtimeSettings, maxTokens);
     const source = message.replyToMessageId ? await this.deps.prisma.message.findUnique({ where: { id: message.replyToMessageId } }) : null;
 
     if (!source) {
@@ -692,7 +794,10 @@ export class ChatOrchestrator {
       messages: prompt,
       temperature: llm.temperature,
       topP: llm.topP,
-      maxTokens: llm.maxTokens
+      maxTokens: llm.maxTokens,
+      keepAlive: llm.keepAlive,
+      numCtx: llm.numCtx,
+      numBatch: llm.numBatch
     });
 
     return response.message.content;
@@ -796,14 +901,17 @@ export class ChatOrchestrator {
     }
   }
 
-  private getChatSettingsForContour(contour: Contour, maxTokens?: number) {
+  private getChatSettingsForContour(contour: Contour, runtimeSettings: EffectiveRuntimeSettings, maxTokens?: number) {
     if (contour === "C") {
       const profile = getModelProfile("smart");
       return {
         model: this.deps.env.OLLAMA_SMART_MODEL,
         temperature: profile.temperature,
         topP: profile.topP,
-        maxTokens: maxTokens ? Math.min(maxTokens, profile.maxTokens) : profile.maxTokens,
+        maxTokens: Math.min(maxTokens ?? profile.maxTokens, profile.maxTokens, runtimeSettings.llmReplyMaxTokens),
+        keepAlive: runtimeSettings.ollamaKeepAlive,
+        numCtx: runtimeSettings.ollamaNumCtx,
+        numBatch: runtimeSettings.ollamaNumBatch,
       };
     }
 
@@ -814,7 +922,10 @@ export class ChatOrchestrator {
       model: this.deps.env.OLLAMA_FAST_MODEL,
       temperature: profile.temperature,
       topP: profile.topP,
-      maxTokens: Math.min(maxTokens ?? profile.maxTokens, contourCap),
+      maxTokens: Math.min(maxTokens ?? profile.maxTokens, contourCap, runtimeSettings.llmReplyMaxTokens),
+      keepAlive: runtimeSettings.ollamaKeepAlive,
+      numCtx: runtimeSettings.ollamaNumCtx,
+      numBatch: runtimeSettings.ollamaNumBatch,
     };
   }
 

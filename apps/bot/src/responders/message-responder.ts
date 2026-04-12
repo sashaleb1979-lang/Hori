@@ -1,3 +1,5 @@
+import { isAbsolute, resolve } from "node:path";
+
 import type { Message } from "discord.js";
 
 import { splitLongMessage, type BotReplyPayload } from "@hori/shared";
@@ -39,7 +41,8 @@ export async function sendReplyToChannel(
 }
 
 function mediaReplyPayload(content: string, filePath: string) {
-  return content ? { content, files: [filePath] } : { files: [filePath] };
+  const resolvedPath = isAbsolute(filePath) ? filePath : resolve(process.cwd(), filePath);
+  return content ? { content, files: [resolvedPath] } : { files: [resolvedPath] };
 }
 
 function sleep(ms: number) {

@@ -147,16 +147,23 @@ export function pickClosestInstalledModel(requestedModel: string, availableModel
   return best.model.name;
 }
 
-function buildChatPayload(options: LlmChatOptions, model: string, maxTokens: number, keepAlive: string) {
+function buildChatPayload(
+  options: LlmChatOptions,
+  model: string,
+  maxTokens: number,
+  defaults: { keepAlive: string; numCtx?: number; numBatch?: number }
+) {
   return {
     model,
-    keep_alive: keepAlive,
+    keep_alive: options.keepAlive ?? defaults.keepAlive,
     stream: true,
     ...(shouldDisableThinking(model) ? { think: false } : {}),
     format: options.format,
     options: {
       temperature: options.temperature ?? 0.5,
       ...(options.topP !== undefined ? { top_p: options.topP } : {}),
+      ...((options.numCtx ?? defaults.numCtx) !== undefined ? { num_ctx: options.numCtx ?? defaults.numCtx } : {}),
+      ...((options.numBatch ?? defaults.numBatch) !== undefined ? { num_batch: options.numBatch ?? defaults.numBatch } : {}),
       num_predict: maxTokens
     },
     messages: options.messages,
@@ -341,7 +348,11 @@ export class OllamaClient implements LlmClient {
   private async sendChatRequest(baseUrl: string, requestedModel: string, model: string, options: LlmChatOptions, maxTokens: number) {
     let response = await this.postJson(
       new URL("/api/chat", baseUrl),
-      buildChatPayload(options, model, maxTokens, this.env.OLLAMA_KEEP_ALIVE),
+      buildChatPayload(options, model, maxTokens, {
+        keepAlive: this.env.OLLAMA_KEEP_ALIVE,
+        numCtx: this.env.OLLAMA_NUM_CTX,
+        numBatch: this.env.OLLAMA_NUM_BATCH
+      }),
       Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS)
     );
 
@@ -353,7 +364,11 @@ export class OllamaClient implements LlmClient {
     if (fallbackModel) {
       response = await this.postJson(
         new URL("/api/chat", baseUrl),
-        buildChatPayload(options, fallbackModel, maxTokens, this.env.OLLAMA_KEEP_ALIVE),
+        buildChatPayload(options, fallbackModel, maxTokens, {
+          keepAlive: this.env.OLLAMA_KEEP_ALIVE,
+          numCtx: this.env.OLLAMA_NUM_CTX,
+          numBatch: this.env.OLLAMA_NUM_BATCH
+        }),
         Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS)
       );
 

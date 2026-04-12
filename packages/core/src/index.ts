@@ -10,6 +10,7 @@ export * from "./safety/response-guard";
 export * from "./safety/roast-policy";
 export * from "./services/context-builder";
 export * from "./services/context-scoring-service";
+export * from "./services/emotion-media-decision-service";
 export * from "./services/affinity-service";
 export * from "./services/media-reaction-service";
 export * from "./services/mood-service";

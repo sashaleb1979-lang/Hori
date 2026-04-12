@@ -1,12 +1,15 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+
 import type { AppPrismaClient, PersonaMode } from "@hori/shared";
 import { parseCsv } from "@hori/shared";
 
-import { defaultPersonaSettings } from "@hori/config";
+import { defaultPersonaSettings, type PowerProfileName } from "@hori/config";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
 import { MemoryAlbumService, ReflectionService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
 import type { MoodService } from "./mood-service";
 import type { ReplyQueueService } from "./reply-queue-service";
-import { FEATURE_KEY_MAP, type RuntimeConfigService } from "./runtime-config-service";
+import { FEATURE_KEY_MAP, type PowerProfileStatus, type RuntimeConfigService } from "./runtime-config-service";
 
 export class SlashAdminService {
   constructor(
@@ -23,7 +26,7 @@ export class SlashAdminService {
   ) {}
 
   async handleHelp() {
-    return "Команды: /bot-album для своих сохранённых моментов. Админка: /bot-style, /bot-memory, /bot-relationship, /bot-feature, /bot-debug, /bot-profile, /bot-channel, /bot-summary, /bot-stats, /bot-topic, /bot-mood, /bot-queue, /bot-reflection, /bot-media. Владелец: /bot-lockdown.";
+    return "Команды: /bot-album для своих сохранённых моментов. Админка: /bot-style, /bot-memory, /bot-relationship, /bot-feature, /bot-debug, /bot-profile, /bot-channel, /bot-summary, /bot-stats, /bot-topic, /bot-mood, /bot-queue, /bot-reflection, /bot-media. Владелец: /bot-lockdown, /bot-power.";
   }
 
   async updateStyle(
@@ -98,6 +101,31 @@ export class SlashAdminService {
 
     this.runtimeConfig?.invalidate(guildId);
     return `Фича ${normalizedKey}: ${enabled ? "on" : "off"}.`;
+  }
+
+  async powerStatus() {
+    if (!this.runtimeConfig) {
+      return "Power panel недоступна.";
+    }
+
+    return formatPowerProfileStatus(await this.runtimeConfig.getPowerProfileStatus());
+  }
+
+  async powerPanel() {
+    if (!this.runtimeConfig) {
+      return "Power panel недоступна.";
+    }
+
+    return `${formatPowerProfileStatus(await this.runtimeConfig.getPowerProfileStatus())}\n\nВыбери пресет кнопками ниже или через /bot-power apply.`;
+  }
+
+  async powerApply(profile: PowerProfileName, updatedBy?: string) {
+    if (!this.runtimeConfig) {
+      return "Power panel недоступна.";
+    }
+
+    const status = await this.runtimeConfig.setPowerProfile(profile, updatedBy);
+    return `${formatPowerProfileStatus(status)}\n\nПресет применён.`;
   }
 
   async updateRelationship(
@@ -334,6 +362,101 @@ export class SlashAdminService {
     return `Media ${mediaId}: off.`;
   }
 
+  async mediaSyncPack(catalogPath = "assets/memes/catalog.json") {
+    const absolutePath = resolve(process.cwd(), catalogPath);
+
+    let raw: string;
+    try {
+      raw = await readFile(absolutePath, "utf8");
+    } catch {
+      return `Не удалось прочитать файл: ${catalogPath}`;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return `Невалидный JSON в ${catalogPath}`;
+    }
+
+    const items = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === "object"
+        ? (parsed as Record<string, unknown>).items
+        : undefined;
+
+    if (!Array.isArray(items) || !items.length) {
+      return "Каталог пуст или не содержит items.";
+    }
+
+    let synced = 0;
+    let skipped = 0;
+
+    for (const entry of items) {
+      const mediaId = readTrimmedString(entry, "mediaId");
+      const type = readTrimmedString(entry, "type");
+      const filePath = readTrimmedString(entry, "filePath");
+
+      if (!mediaId || !type || !filePath) {
+        skipped += 1;
+        continue;
+      }
+
+      await this.prisma.mediaMetadata.upsert({
+        where: { mediaId },
+        update: {
+          type,
+          filePath,
+          triggerTags: readStringArray(entry, "triggerTags"),
+          toneTags: readStringArray(entry, "toneTags"),
+          emotionTags: readStringArray(entry, "emotionTags"),
+          messageKindTags: readStringArray(entry, "messageKindTags"),
+          allowedChannels: readStringArray(entry, "allowedChannels"),
+          allowedMoods: readStringArray(entry, "allowedMoods"),
+          nsfw: readBoolean(entry, "nsfw") ?? false,
+          enabled: readBoolean(entry, "enabled") ?? true,
+          autoUseEnabled: readBoolean(entry, "autoUseEnabled") ?? true,
+          manualOnly: readBoolean(entry, "manualOnly") ?? false,
+          weight: readNumber(entry, "weight") ?? 1,
+          cooldownSec: readNumber(entry, "cooldownSec") ?? 600,
+          minConfidence: readFloat(entry, "minConfidence") ?? 0.82,
+          minIntensity: readFloat(entry, "minIntensity") ?? 0.62,
+          metaJson: {
+            catalogPath,
+            description: readTrimmedString(entry, "description") ?? null
+          }
+        },
+        create: {
+          mediaId,
+          type,
+          filePath,
+          triggerTags: readStringArray(entry, "triggerTags"),
+          toneTags: readStringArray(entry, "toneTags"),
+          emotionTags: readStringArray(entry, "emotionTags"),
+          messageKindTags: readStringArray(entry, "messageKindTags"),
+          allowedChannels: readStringArray(entry, "allowedChannels"),
+          allowedMoods: readStringArray(entry, "allowedMoods"),
+          nsfw: readBoolean(entry, "nsfw") ?? false,
+          enabled: readBoolean(entry, "enabled") ?? true,
+          autoUseEnabled: readBoolean(entry, "autoUseEnabled") ?? true,
+          manualOnly: readBoolean(entry, "manualOnly") ?? false,
+          weight: readNumber(entry, "weight") ?? 1,
+          cooldownSec: readNumber(entry, "cooldownSec") ?? 600,
+          minConfidence: readFloat(entry, "minConfidence") ?? 0.82,
+          minIntensity: readFloat(entry, "minIntensity") ?? 0.62,
+          metaJson: {
+            catalogPath,
+            description: readTrimmedString(entry, "description") ?? null
+          }
+        }
+      });
+
+      synced += 1;
+    }
+
+    return `Синхронизировала pack: ${synced} записей${skipped ? `, пропустила ${skipped}` : ""}.`;
+  }
+
   async reflectionStatus(guildId: string) {
     const status = await this.reflection?.status(guildId);
 
@@ -400,4 +523,69 @@ export class SlashAdminService {
     const overview = await this.analytics.getOverview(guildId, "week");
     return formatAnalyticsOverview(overview);
   }
+}
+
+function formatPowerProfileStatus(status: PowerProfileStatus) {
+  return [
+    `Power profile: ${status.activeProfile}`,
+    `Источник: ${status.source}`,
+    `Context messages: ${status.effective.llmMaxContextMessages}`,
+    `Context chars: ${status.effective.contextMaxChars}`,
+    `Reply max tokens: ${status.effective.llmReplyMaxTokens}`,
+    `Reply max chars: ${status.effective.defaultReplyMaxChars}`,
+    `Ollama keep_alive: ${status.effective.ollamaKeepAlive}`,
+    `Ollama num_ctx: ${status.effective.ollamaNumCtx}`,
+    `Ollama num_batch: ${status.effective.ollamaNumBatch}`,
+    `Auto-media cooldown: ${status.effective.mediaAutoGlobalCooldownSec}s`,
+    `Auto-media thresholds: confidence>=${status.effective.mediaAutoMinConfidence}, intensity>=${status.effective.mediaAutoMinIntensity}`,
+    status.updatedBy ? `Updated by: ${status.updatedBy}` : null,
+    status.updatedAt ? `Updated at: ${status.updatedAt.toISOString()}` : null
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function readTrimmedString(value: unknown, key: string) {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const next = (value as Record<string, unknown>)[key];
+  return typeof next === "string" && next.trim() ? next.trim() : undefined;
+}
+
+function readStringArray(value: unknown, key: string) {
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  const next = (value as Record<string, unknown>)[key];
+  return Array.isArray(next) ? next.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()) : [];
+}
+
+function readBoolean(value: unknown, key: string) {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const next = (value as Record<string, unknown>)[key];
+  return typeof next === "boolean" ? next : undefined;
+}
+
+function readNumber(value: unknown, key: string) {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const next = (value as Record<string, unknown>)[key];
+  return typeof next === "number" && Number.isInteger(next) ? next : undefined;
+}
+
+function readFloat(value: unknown, key: string) {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const next = (value as Record<string, unknown>)[key];
+  return typeof next === "number" && Number.isFinite(next) ? next : undefined;
 }
