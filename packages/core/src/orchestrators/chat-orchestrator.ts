@@ -2,11 +2,15 @@ import type { AppEnv } from "@hori/config";
 import type { AppLogger, AppPrismaClient, BotReplyPayload, BotTrace, MessageEnvelope, SearchHit } from "@hori/shared";
 import { botLatencyHistogram, botRepliesCounter, buildMemoryKey, clamp, normalizeWhitespace } from "@hori/shared";
 
-import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet } from "@hori/llm";
+import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet, getModelProfile } from "@hori/llm";
 import type { LlmClient } from "@hori/llm";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
-import { ContextService, RetrievalService } from "@hori/memory";
+import { ContextService, RelationshipService, RetrievalService } from "@hori/memory";
 import { BraveSearchClient, buildSourceDigest, fetchWebPage } from "@hori/search";
+import { chooseConflictStrategy, detectConflict, type ConflictDetection } from "../brain/conflict-detector";
+import { EmotionLabel } from "../brain/emotion-state";
+import { createEngineState, generateEmotionalState } from "../brain/emotion-engine";
+import { pickContourAResponse, resolveContour, type Contour } from "../brain/response-budget";
 import { IntentRouter } from "../intents/intent-router";
 import { detectMessageKind } from "../persona/messageKinds";
 import { PersonaService } from "../persona/persona-service";
@@ -34,6 +38,7 @@ interface OrchestratorDeps {
   searchClient: BraveSearchClient;
   embeddingAdapter: EmbeddingAdapter;
   runtimeConfig: RuntimeConfigService;
+  relationships?: RelationshipService;
   affinity?: AffinityService;
   mood?: MoodService;
   media?: MediaReactionService;
@@ -64,6 +69,7 @@ export class ChatOrchestrator {
   private readonly contextBuilder = new ContextBuilderService();
   private readonly contextScoring = new ContextScoringService();
   private readonly embeddingCache = new Map<string, { expiresAt: number; value: number[] }>();
+  private readonly emotionStateByScope = new Map<string, ReturnType<typeof createEngineState>>();
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
@@ -124,9 +130,28 @@ export class ChatOrchestrator {
       : /\?/.test(intent.cleanedContent)
         ? "info_question"
         : "casual_address";
+    const contour = intent.intent === "chat"
+      ? resolveContour({
+          messageKind,
+          currentHour: message.createdAt.getHours(),
+          quietHoursEnabled: this.deps.env.QUIET_HOURS_ENABLED,
+          isAutoInterject: message.triggerSource === "auto_interject"
+        })
+      : { contour: "C" as const, reason: `intent:${intent.intent}` };
     const affinityRelationship = runtimeConfig.featureFlags.affinitySignalsEnabled
       ? await this.deps.affinity?.applyRecentOverlay(message.guildId, message.userId, contextBundle.relationship)
       : contextBundle.relationship;
+    const conflict = detectConflict(
+      contextBundle.recentMessages.map((entry) => ({ userId: entry.userId ?? "unknown", content: entry.content }))
+    );
+    const emotionalState = this.buildEmotionalState({
+      message,
+      messageKind,
+      relationship: affinityRelationship,
+      conflict,
+      cleanedContent: intent.cleanedContent,
+    });
+    const conflictStrategy = chooseConflictStrategy(emotionalState.subjectiveFeeling, conflict.score);
     const contextScores = runtimeConfig.featureFlags.contextConfidenceEnabled
       ? this.contextScoring.score({
           bundle: contextBundle,
@@ -154,6 +179,7 @@ export class ChatOrchestrator {
       ? this.roastPolicy.resolveRoastLevel(guildSettings.roastLevel, affinityRelationship)
       : 0;
     const activeMood = runtimeConfig.featureFlags.moodEngineEnabled ? await this.deps.mood?.getActiveMode(message.guildId) : null;
+    const effectiveMode = activeMood ?? this.mapEmotionToMode(emotionalState.subjectiveFeeling, conflictStrategy);
 
     if (
       runtimeConfig.featureFlags.contextConfidenceEnabled &&
@@ -200,7 +226,7 @@ export class ChatOrchestrator {
       context: contextBundle,
       moderatorOverlay,
       relationship: affinityRelationship,
-      activeMode: activeMood ?? undefined,
+      activeMode: effectiveMode,
       messageKind,
       contextScores,
       contextTrace,
@@ -209,20 +235,38 @@ export class ChatOrchestrator {
       isReplyToBot: message.triggerSource === "reply",
       isSelfInitiated: message.triggerSource === "auto_interject"
     });
-    const systemPrompt = behavior.prompt;
+    const systemPrompt = [
+      behavior.prompt,
+      this.buildEmotionGuidance(emotionalState),
+      this.buildConflictGuidance(conflict, conflictStrategy),
+      this.buildContourGuidance(contour.contour),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
     const trace: BotTrace = {
       triggerSource: message.triggerSource,
       explicitInvocation: message.explicitInvocation,
       intent: intent.intent,
       routeReason: intent.reason,
-      modelKind: this.deps.modelRouter.pickKind(intent.intent),
+      modelKind: intent.intent === "chat" && contour.contour === "C" ? "smart" : this.deps.modelRouter.pickKind(intent.intent),
       usedSearch: false,
       toolNames: [],
       contextMessages: contextBundle.recentMessages.length,
       memoryLayers,
       relationshipApplied: Boolean(affinityRelationship),
       responded: true,
+      responseBudget: contour,
+      conflict,
+      emotion: {
+        label: emotionalState.subjectiveFeeling,
+        mode: effectiveMode,
+        style: {
+          warmth: emotionalState.warmth,
+          energy: emotionalState.energy,
+          directness: emotionalState.directness,
+        }
+      },
       behavior: behavior.trace,
       queue: queueTrace,
       context: {
@@ -271,7 +315,9 @@ export class ChatOrchestrator {
           break;
         case "chat":
         default:
-          reply = await this.handleChat(intent.cleanedContent, systemPrompt, contextText, behavior.limits.maxTokens);
+          reply = contour.contour === "A"
+            ? pickContourAResponse()
+            : await this.handleChat(intent.cleanedContent, systemPrompt, contextText, behavior.limits.maxTokens, contour.contour);
           break;
       }
     } catch (error) {
@@ -296,6 +342,7 @@ export class ChatOrchestrator {
       messageId: message.messageId,
       messageKind
     });
+    await this.recordRelationshipInteraction(message, messageKind, conflict);
 
     let replyPayload: string | BotReplyPayload = reply;
 
@@ -421,8 +468,8 @@ export class ChatOrchestrator {
     return fallback;
   }
 
-  private async handleChat(content: string, systemPrompt: string, contextText: string, maxTokens?: number) {
-    const llm = this.getLlmSettings("chat", maxTokens);
+  private async handleChat(content: string, systemPrompt: string, contextText: string, maxTokens?: number, contour: Contour = "B") {
+    const llm = this.getChatSettingsForContour(contour, maxTokens);
     const messages: Array<{ role: "system" | "user"; content: string }> = [{ role: "system", content: systemPrompt }];
 
     if (contextText.trim()) {
@@ -684,6 +731,197 @@ export class ChatOrchestrator {
       await this.deps.affinity.recordMessageSignal(input);
     } catch (error) {
       this.deps.logger.warn({ error }, "failed to record affinity signal");
+    }
+  }
+
+  private getChatSettingsForContour(contour: Contour, maxTokens?: number) {
+    if (contour === "C") {
+      const profile = getModelProfile("smart");
+      return {
+        model: this.deps.env.OLLAMA_SMART_MODEL,
+        temperature: profile.temperature,
+        topP: profile.topP,
+        maxTokens: maxTokens ? Math.min(maxTokens, profile.maxTokens) : profile.maxTokens,
+      };
+    }
+
+    const profile = this.deps.modelRouter.pickProfile("chat");
+    const contourCap = contour === "B" ? 120 : 48;
+
+    return {
+      model: this.deps.env.OLLAMA_FAST_MODEL,
+      temperature: profile.temperature,
+      topP: profile.topP,
+      maxTokens: Math.min(maxTokens ?? profile.maxTokens, contourCap),
+    };
+  }
+
+  private buildEmotionalState(input: {
+    message: MessageEnvelope;
+    messageKind: ReturnType<typeof detectMessageKind>;
+    relationship?: { toneBias: string; roastLevel: number; praiseBias: number } | null;
+    conflict: ConflictDetection;
+    cleanedContent: string;
+  }) {
+    const scopeKey = `${input.message.guildId}:${input.message.channelId}`;
+    const engine = this.emotionStateByScope.get(scopeKey) ?? createEngineState();
+    this.emotionStateByScope.set(scopeKey, engine);
+
+    const crisisIndicators = /(суицид|самоубийств|убью себя|self-harm|kill myself)/i.test(input.cleanedContent);
+    const negativeConflict = input.conflict.isConflict ? Math.min(0.65, input.conflict.score + 0.2) : 0;
+    const baseValenceByKind: Record<ReturnType<typeof detectMessageKind>, number> = {
+      direct_mention: 0.1,
+      reply_to_bot: 0.18,
+      meta_feedback: -0.2,
+      casual_address: 0.08,
+      smalltalk_hangout: 0.24,
+      info_question: 0.05,
+      opinion_question: 0,
+      request_for_explanation: 0.16,
+      meme_bait: 0.22,
+      provocation: -0.42,
+      repeated_question: -0.28,
+      low_signal_noise: -0.08,
+      command_like_request: 0.04,
+    };
+
+    const sentimentValence = clamp(
+      baseValenceByKind[input.messageKind] - negativeConflict + ((input.relationship?.praiseBias ?? 0) * 0.03) - ((input.relationship?.roastLevel ?? 0) * 0.02),
+      -1,
+      1,
+    );
+
+    const appraisal = {
+      relevance: clamp(
+        0.35 + (input.message.explicitInvocation ? 0.18 : 0) + (input.conflict.isConflict ? input.conflict.score * 0.4 : 0) + (input.messageKind === "request_for_explanation" ? 0.12 : 0),
+        0,
+        1,
+      ),
+      goalImpact: crisisIndicators
+        ? "supportive_opportunity"
+        : input.conflict.isConflict
+          ? "resolution_opportunity"
+          : input.messageKind === "request_for_explanation" || input.messageKind === "info_question"
+            ? "engaging_opportunity"
+            : input.messageKind === "provocation"
+              ? "challenging"
+              : "neutral",
+      copingCapability: input.conflict.isConflict ? "moderate" : "high_capability",
+      socialAppropriateness: crisisIndicators
+        ? "crisis_protocol"
+        : input.conflict.isConflict
+          ? "calm_resolution"
+          : input.messageKind === "smalltalk_hangout" || input.messageKind === "meme_bait"
+            ? "warm_engagement"
+            : input.messageKind === "request_for_explanation" || input.messageKind === "info_question"
+              ? "empathetic_response"
+              : "neutral_response",
+      userEmotionDetected: input.conflict.isConflict ? "conflict" : undefined,
+      crisisIndicators,
+    };
+
+    return generateEmotionalState(
+      appraisal,
+      {
+        valence: sentimentValence,
+        confidence: clamp(0.45 + input.conflict.score * 0.35 + (input.message.explicitInvocation ? 0.1 : 0), 0, 1),
+      },
+      engine,
+    );
+  }
+
+  private mapEmotionToMode(label: EmotionLabel, conflictStrategy: ReturnType<typeof chooseConflictStrategy>) {
+    if (conflictStrategy === "peacemake") {
+      return "focused" as const;
+    }
+
+    if (label === EmotionLabel.PLAYFUL || label === EmotionLabel.CURIOUS || label === EmotionLabel.OVERPLAYFUL) {
+      return "playful" as const;
+    }
+
+    if (label === EmotionLabel.PROTECTIVE || label === EmotionLabel.WARM_CONCERN || label === EmotionLabel.REASSURING || label === EmotionLabel.FOCUSED) {
+      return "focused" as const;
+    }
+
+    if (label === EmotionLabel.REFLECTIVE || label === EmotionLabel.COLD_IGNORE || label === EmotionLabel.TIRED) {
+      return "dry" as const;
+    }
+
+    if (label === EmotionLabel.SUPER_AGGRESSIVE || label === EmotionLabel.SUPER_IRONIC) {
+      return "irritated" as const;
+    }
+
+    return "normal" as const;
+  }
+
+  private buildEmotionGuidance(state: ReturnType<ChatOrchestrator["buildEmotionalState"]>) {
+    return [
+      "[EMOTIONAL STATE]",
+      `Primary label: ${state.subjectiveFeeling}.`,
+      `Latent style: warmth=${state.warmth.toFixed(2)}, energy=${state.energy.toFixed(2)}, directness=${state.directness.toFixed(2)}, engagement=${state.engagement.toFixed(2)}.`,
+      "Use this only as hidden tone control. Never narrate or explain the emotional state to the user.",
+    ].join("\n");
+  }
+
+  private buildConflictGuidance(conflict: ConflictDetection, strategy: ReturnType<typeof chooseConflictStrategy>) {
+    if (!conflict.isConflict) {
+      return null;
+    }
+
+    if (strategy === "peacemake") {
+      return "[CONFLICT SIGNAL]\nRecent messages look conflict-heavy. De-escalate, separate the claims, and avoid adding heat.";
+    }
+
+    if (strategy === "joke") {
+      return "[CONFLICT SIGNAL]\nThere is tension. If you lighten it, do it briefly and without humiliating either side or escalating the fight.";
+    }
+
+    return "[CONFLICT SIGNAL]\nRecent messages look conflict-heavy. Do not escalate. Keep the answer dry, bounded and non-inflammatory.";
+  }
+
+  private buildContourGuidance(contour: Contour) {
+    if (contour === "B") {
+      return "[RESPONSE BUDGET]\nKeep the answer compact and tactical. Prefer one short reply over a full essay.";
+    }
+
+    if (contour === "C") {
+      return "[RESPONSE BUDGET]\nThis turn can spend a fuller reasoning budget if needed, but stay concise by Discord standards.";
+    }
+
+    return null;
+  }
+
+  private async recordRelationshipInteraction(
+    message: MessageEnvelope,
+    messageKind: ReturnType<typeof detectMessageKind>,
+    conflict: ConflictDetection,
+  ) {
+    if (!this.deps.relationships) {
+      return;
+    }
+
+    const baseSentiment: Record<ReturnType<typeof detectMessageKind>, number> = {
+      direct_mention: 0.08,
+      reply_to_bot: 0.1,
+      meta_feedback: -0.08,
+      casual_address: 0.04,
+      smalltalk_hangout: 0.12,
+      info_question: 0.06,
+      opinion_question: 0.01,
+      request_for_explanation: 0.1,
+      meme_bait: 0.03,
+      provocation: -0.35,
+      repeated_question: -0.18,
+      low_signal_noise: -0.04,
+      command_like_request: 0.03,
+    };
+
+    const sentiment = clamp(baseSentiment[messageKind] - (conflict.isConflict ? conflict.score * 0.5 : 0), -1, 1);
+
+    try {
+      await this.deps.relationships.recordInteraction(message.guildId, message.userId, sentiment);
+    } catch (error) {
+      this.deps.logger.warn({ error }, "failed to record relationship interaction");
     }
   }
 

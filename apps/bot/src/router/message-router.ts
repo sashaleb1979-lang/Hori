@@ -2,17 +2,28 @@ import type { Message } from "discord.js";
 import { PermissionFlagsBits } from "discord.js";
 
 import { trackIngestedMessage } from "@hori/analytics";
+import { DEFAULT_DEBOUNCE, IntentRouter, createChannelDebouncer, detectMessageKind, implicitMentionKindWhen, resolveActivation, shouldDebounce } from "@hori/core";
 import { asErrorMessage, type ReplyQueueTrace, type TriggerSource } from "@hori/shared";
 
 import type { BotRuntime } from "../bootstrap";
 import { enqueueBackgroundJobs } from "./background-jobs";
 import { sendReply } from "../responders/message-responder";
 
-async function detectTriggerSource(message: Message, botName: string, botId: string): Promise<TriggerSource | undefined> {
+const intentRouter = new IntentRouter();
+const inboundDebouncers = new Map<string, ReturnType<typeof createChannelDebouncer<PendingInvocation>>>();
+
+interface PendingInvocation {
+  runtime: BotRuntime;
+  message: Message;
+  routingConfig: Awaited<ReturnType<BotRuntime["runtimeConfig"]["getRoutingConfig"]>>;
+  triggerSource?: TriggerSource;
+}
+
+async function detectTriggerSource(message: Message, botName: string, botId: string): Promise<{ triggerSource?: TriggerSource; wasMentioned: boolean; implicitMentionKinds: Array<"reply_to_bot" | "name_in_text"> }> {
   const content = message.content.trim();
 
   if (message.mentions.has(botId)) {
-    return "mention";
+    return { triggerSource: "mention", wasMentioned: true, implicitMentionKinds: [] };
   }
 
   if (message.reference?.messageId) {
@@ -20,18 +31,18 @@ async function detectTriggerSource(message: Message, botName: string, botId: str
       const referenced = await message.fetchReference();
 
       if (referenced.author.id === botId) {
-        return "reply";
+        return { triggerSource: "reply", wasMentioned: false, implicitMentionKinds: ["reply_to_bot"] };
       }
     } catch {
-      return undefined;
+      return { triggerSource: undefined, wasMentioned: false, implicitMentionKinds: [] };
     }
   }
 
   if (new RegExp(`^${botName}[,:!\\s-]*`, "i").test(content)) {
-    return "name";
+    return { triggerSource: "name", wasMentioned: false, implicitMentionKinds: ["name_in_text"] };
   }
 
-  return undefined;
+  return { triggerSource: undefined, wasMentioned: false, implicitMentionKinds: [] };
 }
 
 async function shouldAutoInterject(runtime: BotRuntime, message: Message) {
@@ -78,8 +89,29 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
 
   const routingConfig = await runtime.runtimeConfig.getRoutingConfig(message.guildId, message.channelId);
   const botName = routingConfig.guildSettings.botName;
-  const triggerSource = await detectTriggerSource(message, botName, runtime.client.user.id);
-  const explicitInvocation = Boolean(triggerSource);
+  const member = message.member ?? (await message.guild.members.fetch(message.author.id));
+  const triggerContext = await detectTriggerSource(message, botName, runtime.client.user.id);
+  const activation = resolveActivation(
+    {
+      canDetectMention: true,
+      wasMentioned: triggerContext.wasMentioned,
+      hasAnyMention: message.mentions.users.size > 0,
+      implicitMentionKinds: [
+        ...implicitMentionKindWhen("reply_to_bot", triggerContext.implicitMentionKinds.includes("reply_to_bot")),
+        ...implicitMentionKindWhen("name_in_text", triggerContext.implicitMentionKinds.includes("name_in_text")),
+      ],
+    },
+    {
+      isGroup: true,
+      requireMention: true,
+      allowedImplicitMentionKinds: ["reply_to_bot", "name_in_text"],
+      allowTextCommands: true,
+      hasControlCommand: /^(запомни|забудь)\b/i.test(message.content.trim()),
+      commandAuthorized: member.permissions.has(PermissionFlagsBits.ManageGuild),
+    }
+  );
+  const triggerSource = triggerContext.triggerSource ?? (activation.shouldBypassMention ? "name" : undefined);
+  const explicitInvocation = activation.effectiveWasMentioned;
   const autoInterject =
     !explicitInvocation &&
     routingConfig.featureFlags.autoInterject &&
@@ -88,26 +120,7 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
     (!runtime.env.AUTOINTERJECT_CHANNEL_ALLOWLIST.length ||
       runtime.env.AUTOINTERJECT_CHANNEL_ALLOWLIST.includes(message.channelId)) &&
     (await shouldAutoInterject(runtime, message));
-  const member = message.member ?? (await message.guild.members.fetch(message.author.id));
-  const envelope = {
-    messageId: message.id,
-    guildId: message.guildId,
-    channelId: message.channelId,
-    userId: message.author.id,
-    username: message.author.username,
-    displayName: member.displayName,
-    channelName: "name" in message.channel ? message.channel.name : null,
-    content: message.content,
-    createdAt: message.createdAt,
-    replyToMessageId: message.reference?.messageId ?? null,
-    mentionCount: message.mentions.users.size,
-    mentionedBot: message.mentions.has(runtime.client.user.id),
-    mentionsBotByName: new RegExp(`\\b${botName}\\b`, "i").test(message.content),
-    mentionedUserIds: [...message.mentions.users.keys()],
-    triggerSource: triggerSource ?? (autoInterject ? "auto_interject" : undefined),
-    isModerator: member.permissions.has(PermissionFlagsBits.ManageGuild),
-    explicitInvocation
-  };
+  const envelope = buildEnvelope(runtime, message, member, botName, triggerSource, explicitInvocation, autoInterject);
 
   await runtime.ingestService.ingestMessage({
     ...envelope,
@@ -145,6 +158,70 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
     return;
   }
 
+  const allowDebounce = explicitInvocation && (triggerSource === "reply" || triggerSource === "name");
+  if (shouldDebounce({ text: message.content, hasMedia: message.attachments.size > 0, allowDebounce })) {
+    const debouncer = getOrCreateInboundDebouncer(message.channelId);
+    await debouncer.enqueue({ runtime, message, routingConfig, triggerSource });
+    return;
+  }
+
+  await processInvocation(runtime, message, routingConfig, triggerSource, autoInterject);
+}
+
+function buildEnvelope(
+  runtime: BotRuntime,
+  message: Message,
+  member: Awaited<ReturnType<Message["guild"]["members"]["fetch"]>>,
+  botName: string,
+  triggerSource: TriggerSource | undefined,
+  explicitInvocation: boolean,
+  autoInterject: boolean,
+  contentOverride?: string,
+) {
+  return {
+    messageId: message.id,
+    guildId: message.guildId,
+    channelId: message.channelId,
+    userId: message.author.id,
+    username: message.author.username,
+    displayName: member.displayName,
+    channelName: "name" in message.channel ? message.channel.name : null,
+    content: contentOverride ?? message.content,
+    createdAt: message.createdAt,
+    replyToMessageId: message.reference?.messageId ?? null,
+    mentionCount: message.mentions.users.size,
+    mentionedBot: message.mentions.has(runtime.client.user.id),
+    mentionsBotByName: new RegExp(`\\b${botName}\\b`, "i").test(message.content),
+    mentionedUserIds: [...message.mentions.users.keys()],
+    triggerSource: triggerSource ?? (autoInterject ? "auto_interject" : undefined),
+    isModerator: member.permissions.has(PermissionFlagsBits.ManageGuild),
+    explicitInvocation
+  };
+}
+
+async function processInvocation(
+  runtime: BotRuntime,
+  message: Message,
+  routingConfig: Awaited<ReturnType<BotRuntime["runtimeConfig"]["getRoutingConfig"]>>,
+  triggerSource: TriggerSource | undefined,
+  autoInterject: boolean,
+  contentOverride?: string,
+) {
+  if (!message.inGuild() || !runtime.client.user) {
+    return;
+  }
+
+  const member = message.member ?? (await message.guild.members.fetch(message.author.id));
+  const botName = routingConfig.guildSettings.botName;
+  const explicitInvocation = Boolean(triggerSource) || /^(запомни|забудь)\b/i.test((contentOverride ?? message.content).trim());
+  const envelope = buildEnvelope(runtime, message, member, botName, triggerSource, explicitInvocation, autoInterject, contentOverride);
+  const preliminaryIntent = intentRouter.route(envelope, botName);
+  const queueMessageKind = detectMessageKind({
+    content: preliminaryIntent.cleanedContent,
+    intent: preliminaryIntent.intent,
+    message: envelope,
+  });
+
   let queueItemId: string | null = null;
   let queueTrace: ReplyQueueTrace = { enabled: false, action: "none" };
   if (routingConfig.featureFlags.replyQueueEnabled) {
@@ -153,8 +230,11 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
       channelId: envelope.channelId,
       sourceMsgId: envelope.messageId,
       targetUserId: envelope.userId,
+      messageKind: queueMessageKind,
+      mentionCount: Math.max(1, envelope.mentionCount),
+      createdAt: envelope.createdAt,
       triggerSource: envelope.triggerSource,
-      explicitInvocation
+      explicitInvocation,
     });
 
     if (queueTrace.action === "dropped") {
@@ -198,6 +278,33 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
       }
     });
   }
+}
+
+function getOrCreateInboundDebouncer(channelId: string) {
+  const existing = inboundDebouncers.get(channelId);
+  if (existing) {
+    return existing;
+  }
+
+  const debouncer = createChannelDebouncer<PendingInvocation>(channelId, DEFAULT_DEBOUNCE, {
+    buildKey: (item) => `${item.message.channelId}:${item.message.author.id}`,
+    onFlush: async (items) => {
+      const latest = items.at(-1);
+      if (!latest) {
+        return;
+      }
+
+      const combinedContent = items
+        .map((item) => item.message.content.trim())
+        .filter(Boolean)
+        .join("\n");
+
+      await processInvocation(latest.runtime, latest.message, latest.routingConfig, latest.triggerSource, false, combinedContent);
+    }
+  });
+
+  inboundDebouncers.set(channelId, debouncer);
+  return debouncer;
 }
 
 async function drainReplyQueue(runtime: BotRuntime, message: Message) {

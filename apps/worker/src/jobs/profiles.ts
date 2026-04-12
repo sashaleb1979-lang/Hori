@@ -1,6 +1,7 @@
 import type { Job } from "bullmq";
 
 import { buildUserProfilePrompt, getModelProfile } from "@hori/llm";
+import { MemoryFormationService } from "@hori/memory";
 import { asErrorMessage, type ProfileJobPayload } from "@hori/shared";
 
 import type { WorkerRuntime } from "../index";
@@ -74,6 +75,29 @@ export function createProfileJob(runtime: WorkerRuntime) {
       sourceWindowSize: stats.totalMessages,
       isEligible: true
     });
+
+    const latestChannelId = messages[0]?.channelId;
+    if (latestChannelId && messages.length) {
+      try {
+        const formationService = new MemoryFormationService(runtime.prisma, runtime.retrievalService, runtime.llmClient, runtime.env);
+        const priorSummaries = await runtime.summaryService.getRecentSummaries(job.data.guildId, latestChannelId, 2);
+
+        await formationService.runFormation({
+          guildId: job.data.guildId,
+          channelId: latestChannelId,
+          userId: job.data.userId,
+          priorSummaries: priorSummaries.map((summary) => summary.summaryShort),
+          source: "profile_job",
+          createdBy: "worker",
+          messages: messages
+            .slice()
+            .reverse()
+            .map((message) => ({ role: "user" as const, content: message.content })),
+        });
+      } catch (error) {
+        runtime.logger.warn({ error: asErrorMessage(error), guildId: job.data.guildId, userId: job.data.userId, jobId: job.id }, "memory formation skipped");
+      }
+    }
 
     return { skipped: false };
   };

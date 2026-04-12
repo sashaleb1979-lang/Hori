@@ -167,11 +167,30 @@ export class RelationshipService {
   }
 
   private toOverlay(profile: RelationshipProfileRecord): RelationshipOverlay {
+    const toneBias = deriveSignalToneBias(
+      profile.toneBias,
+      profile.closeness ?? DEFAULT_SIGNALS.closeness,
+      profile.trustLevel ?? DEFAULT_SIGNALS.trustLevel,
+    );
+
     return {
-      toneBias: profile.toneBias,
-      roastLevel: profile.roastLevel,
-      praiseBias: profile.praiseBias,
-      interruptPriority: profile.interruptPriority,
+      toneBias,
+      roastLevel: deriveSignalRoastLevel(
+        profile.roastLevel,
+        profile.closeness ?? DEFAULT_SIGNALS.closeness,
+        profile.trustLevel ?? DEFAULT_SIGNALS.trustLevel,
+        profile.doNotMock,
+      ),
+      praiseBias: deriveSignalPraiseBias(
+        profile.praiseBias,
+        profile.closeness ?? DEFAULT_SIGNALS.closeness,
+        profile.familiarity ?? DEFAULT_SIGNALS.familiarity,
+      ),
+      interruptPriority: deriveSignalInterruptPriority(
+        profile.interruptPriority,
+        profile.proactivityPreference ?? DEFAULT_SIGNALS.proactivityPreference,
+        profile.familiarity ?? DEFAULT_SIGNALS.familiarity,
+      ),
       doNotMock: profile.doNotMock,
       doNotInitiate: profile.doNotInitiate,
       protectedTopics: profile.protectedTopics,
@@ -188,6 +207,48 @@ export class RelationshipService {
       topicBoundaries: normalizeTopicBoundaries(profile.topicBoundaries),
     });
   }
+}
+
+function deriveSignalToneBias(baseToneBias: string, closeness: number, trustLevel: number) {
+  if (baseToneBias && baseToneBias !== "neutral") {
+    return baseToneBias;
+  }
+
+  if (trustLevel <= 0.28 || closeness <= 0.22) {
+    return "sharp";
+  }
+
+  if (trustLevel >= 0.72 || closeness >= 0.72) {
+    return "friendly";
+  }
+
+  return baseToneBias;
+}
+
+function deriveSignalRoastLevel(baseRoastLevel: number, closeness: number, trustLevel: number, doNotMock: boolean) {
+  if (doNotMock) {
+    return 0;
+  }
+
+  if (trustLevel <= 0.3) {
+    return Math.min(5, Math.max(baseRoastLevel, 3));
+  }
+
+  if (closeness >= 0.78 && trustLevel >= 0.72) {
+    return Math.max(0, baseRoastLevel - 1);
+  }
+
+  return baseRoastLevel;
+}
+
+function deriveSignalPraiseBias(basePraiseBias: number, closeness: number, familiarity: number) {
+  const boost = closeness >= 0.7 ? 1 : familiarity >= 0.78 ? 1 : 0;
+  return Math.max(0, Math.min(5, basePraiseBias + boost));
+}
+
+function deriveSignalInterruptPriority(baseInterruptPriority: number, proactivityPreference: number, familiarity: number) {
+  const boost = proactivityPreference >= 0.72 && familiarity >= 0.65 ? 1 : 0;
+  return Math.max(0, Math.min(5, baseInterruptPriority + boost));
 }
 
 function normalizeTopicBoundaries(value: unknown): Record<string, boolean> {

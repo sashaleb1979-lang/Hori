@@ -2,6 +2,7 @@ import type { AppEnv } from "@hori/config";
 import type { AppPrismaClient } from "@hori/shared";
 
 export interface ProfileMessageSnapshot {
+  channelId: string;
   content: string;
   createdAt: Date;
 }
@@ -51,6 +52,7 @@ export class ProfileService {
     return this.prisma.message.findMany({
       where: { guildId, userId },
       select: {
+        channelId: true,
         content: true,
         createdAt: true
       },

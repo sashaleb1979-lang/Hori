@@ -253,6 +253,25 @@ export interface BotTrace {
   contextMessages: number;
   memoryLayers: MemoryLayer[];
   relationshipApplied: boolean;
+  responseBudget?: {
+    contour: "A" | "B" | "C";
+    reason: string;
+  };
+  conflict?: {
+    isConflict: boolean;
+    score: number;
+    participants: string[];
+    reasons: string[];
+  };
+  emotion?: {
+    label: string;
+    mode: PersonaMode;
+    style: {
+      warmth: number;
+      energy: number;
+      directness: number;
+    };
+  };
   latencyMs?: number;
   responded: boolean;
   behavior?: PersonaBehaviorTrace;

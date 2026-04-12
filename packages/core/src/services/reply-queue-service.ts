@@ -1,4 +1,7 @@
-import type { AppPrismaClient, ReplyQueueTrace, TriggerSource } from "@hori/shared";
+import type { AppPrismaClient, MessageKind, ReplyQueueTrace, TriggerSource } from "@hori/shared";
+
+import { resolveRunAction } from "./busy-engine";
+import { PriorityTaskQueue, type QueueLane } from "./priority-queue";
 
 interface ReplyQueueItemSnapshot {
   id: string;
@@ -25,6 +28,9 @@ export class ReplyQueueService {
     channelId: string;
     sourceMsgId: string;
     targetUserId: string;
+    messageKind: MessageKind;
+    mentionCount: number;
+    createdAt: Date;
     triggerSource?: TriggerSource;
     explicitInvocation: boolean;
   }): Promise<ReplyQueueTrace> {
@@ -59,49 +65,83 @@ export class ReplyQueueService {
       orderBy: { createdAt: "asc" }
     });
 
-    if (busy) {
-      if (!input.explicitInvocation || input.triggerSource === "auto_interject") {
-        const dropped = await this.prisma.replyQueueItem.create({
-          data: {
-            guildId: input.guildId,
-            channelId: input.channelId,
-            targetUserId: input.targetUserId,
-            sourceMsgId: input.sourceMsgId,
-            priority: 0,
-            status: "dropped"
-          }
-        });
-
-        return { enabled: true, action: "dropped", itemId: dropped.id, reason: "channel_busy_auto" };
+    const queueDepth = await this.prisma.replyQueueItem.count({
+      where: {
+        guildId: input.guildId,
+        channelId: input.channelId,
+        status: { in: ["queued", "processing"] }
       }
+    });
 
-      const queued = await this.prisma.replyQueueItem.create({
+    const triggerSource = input.triggerSource ?? (input.explicitInvocation ? "name" : "auto_interject");
+    const decision = resolveRunAction({
+      triggerSource,
+      messageKind: input.messageKind,
+      ageMinutes: Math.max(0, (Date.now() - input.createdAt.getTime()) / 60_000),
+      mentionCount: input.mentionCount,
+      channelBusy: Boolean(busy),
+      queueDepth
+    });
+    const priority = toStoredPriority(decision.scored.lane, decision.scored.score);
+
+    if (decision.action === "drop") {
+      const dropped = await this.prisma.replyQueueItem.create({
         data: {
           guildId: input.guildId,
           channelId: input.channelId,
           targetUserId: input.targetUserId,
           sourceMsgId: input.sourceMsgId,
-          priority: 10,
-          status: "queued"
+          priority,
+          status: "dropped"
         }
       });
 
-      return { enabled: true, action: "busy_ack", itemId: queued.id, reason: "channel_busy" };
+      return { enabled: true, action: "dropped", itemId: dropped.id, reason: decision.reason };
     }
 
-    const processing = await this.prisma.replyQueueItem.create({
+    if (!busy && queueDepth === 0) {
+      const processing = await this.prisma.replyQueueItem.create({
+        data: {
+          guildId: input.guildId,
+          channelId: input.channelId,
+          targetUserId: input.targetUserId,
+          sourceMsgId: input.sourceMsgId,
+          priority,
+          status: "processing",
+          lockedUntil: new Date(Date.now() + this.busyTtlSec * 1000)
+        }
+      });
+
+      return { enabled: true, action: "processing", itemId: processing.id, reason: decision.reason };
+    }
+
+    if (!input.explicitInvocation) {
+      const dropped = await this.prisma.replyQueueItem.create({
+        data: {
+          guildId: input.guildId,
+          channelId: input.channelId,
+          targetUserId: input.targetUserId,
+          sourceMsgId: input.sourceMsgId,
+          priority,
+          status: "dropped"
+        }
+      });
+
+      return { enabled: true, action: "dropped", itemId: dropped.id, reason: decision.reason };
+    }
+
+    const queued = await this.prisma.replyQueueItem.create({
       data: {
         guildId: input.guildId,
         channelId: input.channelId,
         targetUserId: input.targetUserId,
         sourceMsgId: input.sourceMsgId,
-        priority: input.explicitInvocation ? 10 : 1,
-        status: "processing",
-        lockedUntil: new Date(Date.now() + this.busyTtlSec * 1000)
+        priority,
+        status: "queued"
       }
     });
 
-    return { enabled: true, action: "processing", itemId: processing.id };
+    return { enabled: true, action: "busy_ack", itemId: queued.id, reason: decision.reason };
   }
 
   async complete(itemId: string | null | undefined, resultMsgId?: string | null): Promise<void> {
@@ -120,15 +160,38 @@ export class ReplyQueueService {
   }
 
   async nextQueued(guildId: string, channelId: string): Promise<ReplyQueueItemSnapshot | null> {
-    const next = await this.prisma.replyQueueItem.findFirst({
+    const queued = await this.prisma.replyQueueItem.findMany({
       where: {
         guildId,
         channelId,
         status: "queued"
       },
-      orderBy: [{ priority: "desc" }, { createdAt: "asc" }]
+      orderBy: [{ createdAt: "asc" }],
+      take: 64
     });
 
+    if (!queued.length) {
+      return null;
+    }
+
+    const queue = new PriorityTaskQueue(Math.max(queued.length + 4, 16));
+
+    for (const item of queued) {
+      queue.enqueue(
+        item.id,
+        laneFromStoredPriority(item.priority),
+        toTaskPriority(item.priority),
+        { sourceMsgId: item.sourceMsgId },
+        item.sourceMsgId
+      );
+    }
+
+    const selected = queue.dequeue();
+    if (!selected) {
+      return null;
+    }
+
+    const next = queued.find((item) => item.id === selected.taskId) ?? null;
     if (!next) {
       return null;
     }
@@ -172,4 +235,35 @@ export class ReplyQueueService {
       }
     });
   }
+}
+
+function toStoredPriority(lane: QueueLane, score: number) {
+  const laneBase: Record<QueueLane, number> = {
+    mention: 900,
+    reply: 700,
+    auto_interject: 500,
+    background: 300,
+  };
+
+  return laneBase[lane] + Math.max(0, Math.min(99, Math.round(score * 100)));
+}
+
+function laneFromStoredPriority(priority: number): QueueLane {
+  if (priority >= 900) {
+    return "mention";
+  }
+
+  if (priority >= 700) {
+    return "reply";
+  }
+
+  if (priority >= 500) {
+    return "auto_interject";
+  }
+
+  return "background";
+}
+
+function toTaskPriority(priority: number) {
+  return Math.max(0, 1_000 - priority);
 }

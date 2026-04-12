@@ -41,4 +41,41 @@ describe("RelationshipService", () => {
     expect(reloaded.familiarity).toBeCloseTo(updated.familiarity, 5);
     expect(reloaded.familiarity).toBeGreaterThan(0.5);
   });
+
+  it("derives live overlay tone from stored vector signals", async () => {
+    const prisma = {
+      relationshipProfile: {
+        async findUnique() {
+          return {
+            id: "rel_1",
+            guildId: "guild-1",
+            userId: "user-1",
+            toneBias: "neutral",
+            roastLevel: 1,
+            praiseBias: 0,
+            interruptPriority: 0,
+            doNotMock: false,
+            doNotInitiate: false,
+            protectedTopics: [],
+            closeness: 0.82,
+            trustLevel: 0.79,
+            familiarity: 0.88,
+            interactionCount: 14,
+            proactivityPreference: 0.76,
+            topicBoundaries: {},
+          };
+        },
+        async upsert() {
+          throw new Error("not used");
+        },
+      },
+    } as unknown as AppPrismaClient;
+
+    const service = new RelationshipService(prisma);
+    const relationship = await service.getRelationship("guild-1", "user-1");
+
+    expect(relationship?.toneBias).toBe("friendly");
+    expect(relationship?.praiseBias).toBeGreaterThan(0);
+    expect(relationship?.interruptPriority).toBeGreaterThan(0);
+  });
 });

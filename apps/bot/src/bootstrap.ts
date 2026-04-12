@@ -156,6 +156,7 @@ export async function bootstrapBot() {
     searchClient,
     embeddingAdapter,
     runtimeConfig,
+    relationships: relationshipService,
     affinity: affinityService,
     mood: moodService,
     media: mediaReactionService
