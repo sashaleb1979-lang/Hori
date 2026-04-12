@@ -1,5 +1,8 @@
 import { EmotionLabel } from "./emotion-state";
 
+const unicodeBoundaryEnd = String.raw`(?=$|[^\p{L}\p{N}_])`;
+const unicodeWordPattern = (pattern: string) => new RegExp(String.raw`(?:^|[^\p{L}\p{N}_])(?:${pattern})${unicodeBoundaryEnd}`, "iu");
+
 export interface ConflictMessage {
   userId: string;
   content: string;
@@ -15,18 +18,18 @@ export interface ConflictDetection {
 export type ConflictStrategy = "joke" | "peacemake" | "fuel" | "ignore";
 
 const insultPatterns = [
-  /\b(дурак|идиот|дебил|тупой|мразь|придурок)\b/i,
-  /\b(stupid|idiot|moron|dumb|clown)\b/i,
+  unicodeWordPattern("дурак|идиот|дебил|тупой|мразь|придурок"),
+  unicodeWordPattern("stupid|idiot|moron|dumb|clown"),
 ];
 
 const contradictionPatterns = [
-  /\b(ты неправ|это бред|чушь|херня|ерунда)\b/i,
-  /\b(you're wrong|bullshit|nonsense|shut up)\b/i,
+  unicodeWordPattern("ты\\s+неправ|это\\s+бред|чушь|херня|ерунда"),
+  unicodeWordPattern("you're\\s+wrong|bullshit|nonsense|shut\\s+up"),
 ];
 
 const profanityPatterns = [
-  /\b(бля|сука|нахуй|пизд|ебан)\w*/i,
-  /\b(fuck|shit|bitch|asshole)\b/i,
+  new RegExp(String.raw`(?:^|[^\p{L}\p{N}_])(?:бля|сука|нахуй|пизд|ебан)[\p{L}\p{N}_]*${unicodeBoundaryEnd}`, "iu"),
+  unicodeWordPattern("fuck|shit|bitch|asshole"),
 ];
 
 export function detectConflict(messages: readonly ConflictMessage[]): ConflictDetection {

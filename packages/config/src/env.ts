@@ -118,9 +118,6 @@ const coreEnvSchema = z.object({
   OLLAMA_SMART_MODEL: z.string().default("qwen3.5:9b"),
   OLLAMA_EMBED_MODEL: z.string().default("nomic-embed-text"),
   OLLAMA_TIMEOUT_MS: intish.default(45000),
-  OPENAI_STT_API_KEY: z.string().optional(),
-  OPENAI_STT_API_BASE_URL: urlish.default("https://api.openai.com/v1"),
-  OPENAI_STT_MODEL: z.string().default("gpt-4o-mini-transcribe"),
 
   BRAVE_SEARCH_API_KEY: z.string().optional(),
 
@@ -367,9 +364,6 @@ function mapCoreAliases(raw: NodeJS.ProcessEnv) {
     OLLAMA_SMART_MODEL: raw.AI_SMART ?? raw.OLLAMA_SMART_MODEL,
     OLLAMA_EMBED_MODEL: raw.AI_EMBED ?? raw.OLLAMA_EMBED_MODEL,
     OLLAMA_TIMEOUT_MS: raw.AI_TIMEOUT ?? raw.OLLAMA_TIMEOUT_MS,
-    OPENAI_STT_API_KEY: raw.OPENAI_STT_API_KEY,
-    OPENAI_STT_API_BASE_URL: raw.OPENAI_STT_API_BASE_URL,
-    OPENAI_STT_MODEL: raw.OPENAI_STT_MODEL,
     BRAVE_SEARCH_API_KEY: raw.BRAVE_KEY ?? raw.BRAVE_SEARCH_API_KEY,
     CFG: raw.CFG ?? raw.HORI_CFG ?? raw.HORI_CONFIG_JSON
   };
