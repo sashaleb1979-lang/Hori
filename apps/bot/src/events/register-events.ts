@@ -8,18 +8,11 @@ import { routeMessage } from "../router/message-router";
 async function syncCommands(runtime: BotRuntime) {
   const rest = new REST({ version: "10" }).setToken(runtime.env.DISCORD_TOKEN!);
   const body = [...slashCommandDefinitions, ...contextMenuDefinitions];
-
-  if (runtime.env.DISCORD_DEV_GUILD_ID) {
-    await rest.put(
-      Routes.applicationGuildCommands(runtime.env.DISCORD_CLIENT_ID!, runtime.env.DISCORD_DEV_GUILD_ID),
-      { body }
-    );
-    runtime.logger.info({ scope: "guild", guildId: runtime.env.DISCORD_DEV_GUILD_ID }, "discord commands synced");
-    return;
-  }
+  const slashCount = slashCommandDefinitions.length;
+  const contextCount = contextMenuDefinitions.length;
 
   await rest.put(Routes.applicationCommands(runtime.env.DISCORD_CLIENT_ID!), { body });
-  runtime.logger.info({ scope: "global" }, "discord commands synced");
+  runtime.logger.info({ scope: "global", slash: slashCount, context: contextCount, total: body.length }, "discord commands synced globally");
 }
 
 export function registerEvents(runtime: BotRuntime) {

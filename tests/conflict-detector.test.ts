@@ -18,4 +18,9 @@ describe("conflict-detector", () => {
     const strategy = chooseConflictStrategy(EmotionLabel.PROTECTIVE, 0.72);
     expect(strategy).toBe("peacemake");
   });
+
+  it("chooses confront for aggressive mood during conflict", () => {
+    const strategy = chooseConflictStrategy(EmotionLabel.SUPER_AGGRESSIVE, 0.5);
+    expect(strategy).toBe("confront");
+  });
 });

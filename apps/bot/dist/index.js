@@ -5,7 +5,7 @@ var import_analytics2 = require("@hori/analytics");
 var import_config = require("@hori/config");
 var import_core2 = require("@hori/core");
 var import_llm = require("@hori/llm");
-var import_memory = require("@hori/memory");
+var import_memory2 = require("@hori/memory");
 var import_search = require("@hori/search");
 var import_shared5 = require("@hori/shared");
 
@@ -123,7 +123,8 @@ var slashCommandDefinitions = [
   ).addSubcommand((subcommand) => subcommand.setName("list").setDescription("\u0421\u043F\u0438\u0441\u043E\u043A media")).addSubcommand(
     (subcommand) => subcommand.setName("disable").setDescription("\u041E\u0442\u043A\u043B\u044E\u0447\u0438\u0442\u044C media").addStringOption((option) => option.setName("id").setDescription("media id").setRequired(true))
   ),
-  new import_discord2.SlashCommandBuilder().setName("bot-ai-url").setDescription("\u0421\u043C\u0435\u043D\u0438\u0442\u044C Ollama URL (\u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446 \u0431\u043E\u0442\u0430)").addStringOption((option) => option.setName("url").setDescription("\u041D\u043E\u0432\u044B\u0439 URL (https://...)").setRequired(true))
+  new import_discord2.SlashCommandBuilder().setName("bot-ai-url").setDescription("\u0421\u043C\u0435\u043D\u0438\u0442\u044C Ollama URL (\u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446 \u0431\u043E\u0442\u0430)").addStringOption((option) => option.setName("url").setDescription("\u041D\u043E\u0432\u044B\u0439 URL (https://...)").setRequired(true)),
+  new import_discord2.SlashCommandBuilder().setName("bot-import").setDescription("\u0418\u043C\u043F\u043E\u0440\u0442\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0438\u0441\u0442\u043E\u0440\u0438\u044E \u0447\u0430\u0442\u0430 \u0438\u0437 JSON \u0444\u0430\u0439\u043B\u0430").addAttachmentOption((option) => option.setName("file").setDescription(".json \u0444\u0430\u0439\u043B \u0441 \u0438\u0441\u0442\u043E\u0440\u0438\u0435\u0439 \u0447\u0430\u0442\u0430").setRequired(true))
 ].map((command) => command.toJSON());
 var contextMenuDefinitions = [
   new import_discord2.ContextMenuCommandBuilder().setName(import_shared.CONTEXT_ACTIONS.explain).setType(import_discord2.ApplicationCommandType.Message),
@@ -134,6 +135,7 @@ var contextMenuDefinitions = [
 // src/router/interaction-router.ts
 var import_discord3 = require("discord.js");
 var import_shared2 = require("@hori/shared");
+var import_memory = require("@hori/memory");
 function ensureModerator(interaction) {
   return interaction.memberPermissions?.has(import_discord3.PermissionFlagsBits.ManageGuild) ?? false;
 }
@@ -327,6 +329,113 @@ ${status}`
           nsfw: interaction.options.getBoolean("nsfw")
         }) : subcommand === "disable" ? await runtime.slashAdmin.mediaDisable(interaction.options.getString("id", true)) : await runtime.slashAdmin.mediaList();
         await interaction.reply({ content, flags: import_discord3.MessageFlags.Ephemeral });
+        return;
+      }
+      case "bot-import": {
+        const isOwner = runtime.env.DISCORD_OWNER_IDS.includes(interaction.user.id);
+        if (!isOwner) {
+          await interaction.reply({ content: "\u0418\u043C\u043F\u043E\u0440\u0442 \u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D \u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0443 \u0431\u043E\u0442\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+          return;
+        }
+        const attachment = interaction.options.getAttachment("file", true);
+        if (!attachment.name.endsWith(".json")) {
+          await interaction.reply({ content: "\u041D\u0443\u0436\u0435\u043D .json \u0444\u0430\u0439\u043B.", flags: import_discord3.MessageFlags.Ephemeral });
+          return;
+        }
+        if (attachment.size > 50 * 1024 * 1024) {
+          await interaction.reply({ content: "\u0424\u0430\u0439\u043B \u0441\u043B\u0438\u0448\u043A\u043E\u043C \u0431\u043E\u043B\u044C\u0448\u043E\u0439 (\u043C\u0430\u043A\u0441 50 \u041C\u0411).", flags: import_discord3.MessageFlags.Ephemeral });
+          return;
+        }
+        await interaction.deferReply({ flags: import_discord3.MessageFlags.Ephemeral });
+        try {
+          const response = await fetch(attachment.url);
+          if (!response.ok) {
+            await interaction.editReply({ content: `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043A\u0430\u0447\u0430\u0442\u044C \u0444\u0430\u0439\u043B: ${response.status}` });
+            return;
+          }
+          const data = await response.json();
+          const guildId = data.guildId ?? interaction.guildId;
+          const messages = data.messages;
+          if (!Array.isArray(messages) || messages.length === 0) {
+            await interaction.editReply({ content: "\u0424\u0430\u0439\u043B \u043F\u0443\u0441\u0442 \u0438\u043B\u0438 \u043D\u0435 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u0442 \u043C\u0430\u0441\u0441\u0438\u0432 messages." });
+            return;
+          }
+          if (messages.length > 5e4) {
+            await interaction.editReply({ content: "\u041C\u0430\u043A\u0441\u0438\u043C\u0443\u043C 50 000 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0439 \u0437\u0430 \u0440\u0430\u0437." });
+            return;
+          }
+          await runtime.prisma.guild.upsert({
+            where: { id: guildId },
+            update: {},
+            create: { id: guildId }
+          });
+          let imported = 0;
+          let skipped = 0;
+          let errors = 0;
+          const seenUsers = /* @__PURE__ */ new Set();
+          const userMsgCounts = /* @__PURE__ */ new Map();
+          for (const entry of messages) {
+            if (!entry.userId || !entry.content || !entry.timestamp) {
+              skipped++;
+              continue;
+            }
+            const createdAt = new Date(entry.timestamp);
+            if (isNaN(createdAt.getTime())) {
+              skipped++;
+              continue;
+            }
+            const messageId = `import:${guildId}:${entry.userId}:${createdAt.getTime()}`;
+            try {
+              const exists = await runtime.prisma.message.findUnique({ where: { id: messageId }, select: { id: true } });
+              if (exists) {
+                skipped++;
+                continue;
+              }
+              await runtime.prisma.user.upsert({
+                where: { id: entry.userId },
+                update: { username: entry.username ?? void 0 },
+                create: { id: entry.userId, username: entry.username ?? null }
+              });
+              await runtime.prisma.message.create({
+                data: {
+                  id: messageId,
+                  guildId,
+                  channelId: entry.channelId ?? "imported",
+                  userId: entry.userId,
+                  content: entry.content,
+                  createdAt,
+                  charCount: entry.content.length,
+                  tokenEstimate: Math.ceil(entry.content.length / 4),
+                  mentionCount: 0,
+                  replyToMessageId: entry.replyToId ? `import:${guildId}:${entry.replyToId}` : void 0
+                }
+              });
+              seenUsers.add(entry.userId);
+              userMsgCounts.set(entry.userId, (userMsgCounts.get(entry.userId) ?? 0) + 1);
+              imported++;
+            } catch {
+              errors++;
+            }
+          }
+          let seeded = 0;
+          if (userMsgCounts.size > 0) {
+            try {
+              const relService = new import_memory.RelationshipService(runtime.prisma);
+              seeded = await relService.seedFromImportedHistory(guildId, userMsgCounts);
+            } catch {
+            }
+          }
+          await interaction.editReply({
+            content: `\u2705 \u0418\u043C\u043F\u043E\u0440\u0442 \u0437\u0430\u0432\u0435\u0440\u0448\u0451\u043D
+\u{1F4E5} \u0418\u043C\u043F\u043E\u0440\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u043E: ${imported}
+\u23ED\uFE0F \u041F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E: ${skipped}
+\u274C \u041E\u0448\u0438\u0431\u043E\u043A: ${errors}
+\u{1F464} \u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u0435\u0439: ${seenUsers.size}
+\u{1F91D} \u041F\u0440\u043E\u0444\u0438\u043B\u0435\u0439 \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0439 \u0441\u043E\u0437\u0434\u0430\u043D\u043E: ${seeded}`
+          });
+        } catch (err) {
+          await interaction.editReply({ content: `\u274C \u041E\u0448\u0438\u0431\u043A\u0430 \u0438\u043C\u043F\u043E\u0440\u0442\u0430: ${err instanceof Error ? err.message : "unknown"}` });
+        }
         return;
       }
       default:
@@ -684,16 +793,10 @@ function escapeRegExp(value) {
 async function syncCommands(runtime) {
   const rest = new import_discord5.REST({ version: "10" }).setToken(runtime.env.DISCORD_TOKEN);
   const body = [...slashCommandDefinitions, ...contextMenuDefinitions];
-  if (runtime.env.DISCORD_DEV_GUILD_ID) {
-    await rest.put(
-      import_discord5.Routes.applicationGuildCommands(runtime.env.DISCORD_CLIENT_ID, runtime.env.DISCORD_DEV_GUILD_ID),
-      { body }
-    );
-    runtime.logger.info({ scope: "guild", guildId: runtime.env.DISCORD_DEV_GUILD_ID }, "discord commands synced");
-    return;
-  }
+  const slashCount = slashCommandDefinitions.length;
+  const contextCount = contextMenuDefinitions.length;
   await rest.put(import_discord5.Routes.applicationCommands(runtime.env.DISCORD_CLIENT_ID), { body });
-  runtime.logger.info({ scope: "global" }, "discord commands synced");
+  runtime.logger.info({ scope: "global", slash: slashCount, context: contextCount, total: body.length }, "discord commands synced globally");
 }
 function registerEvents(runtime) {
   runtime.client.once("clientReady", async () => {
@@ -771,16 +874,16 @@ async function bootstrapBot() {
   const queues = redisReady ? (0, import_shared5.createAppQueues)(env.REDIS_URL, env.JOB_QUEUE_PREFIX) : createNoopQueues(logger, env.JOB_QUEUE_PREFIX);
   const client = createDiscordClient();
   const analytics = new import_analytics2.AnalyticsQueryService(prisma);
-  const summaryService = new import_memory.SummaryService(prisma);
-  const relationshipService = new import_memory.RelationshipService(prisma);
-  const retrievalService = new import_memory.RetrievalService(prisma);
-  const profileService = new import_memory.ProfileService(prisma, env);
+  const summaryService = new import_memory2.SummaryService(prisma);
+  const relationshipService = new import_memory2.RelationshipService(prisma);
+  const retrievalService = new import_memory2.RetrievalService(prisma);
+  const profileService = new import_memory2.ProfileService(prisma, env);
   const runtimeConfig = new import_core2.RuntimeConfigService(prisma, env);
   const affinityService = new import_core2.AffinityService(prisma);
   const moodService = new import_core2.MoodService(prisma);
   const mediaReactionService = new import_core2.MediaReactionService(prisma);
   const replyQueueService = new import_core2.ReplyQueueService(prisma, env.REPLY_QUEUE_BUSY_TTL_SEC);
-  const contextService = new import_memory.ContextService(prisma, summaryService, profileService, relationshipService, retrievalService);
+  const contextService = new import_memory2.ContextService(prisma, summaryService, profileService, relationshipService, retrievalService);
   const llmClient = new import_llm.OllamaClient(env, logger);
   if (env.OLLAMA_BASE_URL) {
     try {

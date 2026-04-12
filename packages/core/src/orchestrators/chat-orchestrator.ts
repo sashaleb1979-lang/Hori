@@ -450,9 +450,19 @@ export class ChatOrchestrator {
         maxTokens: llm.maxTokens
       });
 
-      const parsed = JSON.parse(response.message.content) as { intent?: string; confidence?: number; reason?: string };
+      const raw = response.message.content.trim();
+      let parsed: { intent?: string; confidence?: number; reason?: string } | null = null;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        const start = raw.indexOf("{");
+        const end = raw.lastIndexOf("}");
+        if (start !== -1 && end > start) {
+          try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch { /* give up */ }
+        }
+      }
 
-      if (parsed.intent) {
+      if (parsed?.intent) {
         return {
           intent: parsed.intent as ReturnType<IntentRouter["route"]>["intent"],
           confidence: clamp(Number(parsed.confidence ?? 0.5), 0, 1),
@@ -835,6 +845,10 @@ export class ChatOrchestrator {
       return "focused" as const;
     }
 
+    if (conflictStrategy === "confront") {
+      return "irritated" as const;
+    }
+
     if (label === EmotionLabel.PLAYFUL || label === EmotionLabel.CURIOUS || label === EmotionLabel.OVERPLAYFUL) {
       return "playful" as const;
     }
@@ -876,6 +890,10 @@ export class ChatOrchestrator {
       return "[CONFLICT SIGNAL]\nThere is tension. If you lighten it, do it briefly and without humiliating either side or escalating the fight.";
     }
 
+    if (strategy === "confront") {
+      return "[CONFLICT SIGNAL]\nЧеловек ведёт себя токсично. Отвечай прямо, коротко, без юмора и сарказма. Не пытайся быть остроумной. Просто скажи что думаешь. Будь грубой если надо, но не язвительной.";
+    }
+
     return "[CONFLICT SIGNAL]\nRecent messages look conflict-heavy. Do not escalate. Keep the answer dry, bounded and non-inflammatory.";
   }
 
@@ -897,6 +915,17 @@ export class ChatOrchestrator {
     conflict: ConflictDetection,
   ) {
     if (!this.deps.relationships) {
+      return;
+    }
+
+    const isToxic = messageKind === "provocation" || (conflict.isConflict && conflict.score >= 0.4);
+
+    if (isToxic) {
+      try {
+        await this.deps.relationships.recordToxicBehavior(message.guildId, message.userId);
+      } catch (error) {
+        this.deps.logger.warn({ error }, "failed to record toxic behavior");
+      }
       return;
     }
 

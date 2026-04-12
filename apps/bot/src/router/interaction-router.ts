@@ -6,6 +6,7 @@ import {
 } from "discord.js";
 
 import { CONTEXT_ACTIONS, asErrorMessage, persistOllamaBaseUrl, type PersonaMode } from "@hori/shared";
+import { RelationshipService } from "@hori/memory";
 
 import type { BotRuntime } from "../bootstrap";
 
@@ -233,6 +234,106 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
               ? await runtime.slashAdmin.mediaDisable(interaction.options.getString("id", true))
               : await runtime.slashAdmin.mediaList();
         await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      case "bot-import": {
+        const isOwner = runtime.env.DISCORD_OWNER_IDS.includes(interaction.user.id);
+        if (!isOwner) {
+          await interaction.reply({ content: "Импорт доступен только владельцу бота.", flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        const attachment = interaction.options.getAttachment("file", true);
+        if (!attachment.name.endsWith(".json")) {
+          await interaction.reply({ content: "Нужен .json файл.", flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        if (attachment.size > 50 * 1024 * 1024) {
+          await interaction.reply({ content: "Файл слишком большой (макс 50 МБ).", flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        try {
+          const response = await fetch(attachment.url);
+          if (!response.ok) {
+            await interaction.editReply({ content: `Не удалось скачать файл: ${response.status}` });
+            return;
+          }
+
+          const data = (await response.json()) as {
+            guildId?: string;
+            messages?: { userId: string; username?: string; content: string; timestamp: string; channelId?: string; replyToId?: string }[];
+          };
+
+          const guildId = data.guildId ?? interaction.guildId;
+          const messages = data.messages;
+
+          if (!Array.isArray(messages) || messages.length === 0) {
+            await interaction.editReply({ content: "Файл пуст или не содержит массив messages." });
+            return;
+          }
+
+          if (messages.length > 50000) {
+            await interaction.editReply({ content: "Максимум 50 000 сообщений за раз." });
+            return;
+          }
+
+          await runtime.prisma.guild.upsert({
+            where: { id: guildId! },
+            update: {},
+            create: { id: guildId! },
+          });
+
+          let imported = 0;
+          let skipped = 0;
+          let errors = 0;
+          const seenUsers = new Set<string>();
+          const userMsgCounts = new Map<string, number>();
+
+          for (const entry of messages) {
+            if (!entry.userId || !entry.content || !entry.timestamp) { skipped++; continue; }
+            const createdAt = new Date(entry.timestamp);
+            if (isNaN(createdAt.getTime())) { skipped++; continue; }
+            const messageId = `import:${guildId}:${entry.userId}:${createdAt.getTime()}`;
+            try {
+              const exists = await runtime.prisma.message.findUnique({ where: { id: messageId }, select: { id: true } });
+              if (exists) { skipped++; continue; }
+              await runtime.prisma.user.upsert({
+                where: { id: entry.userId },
+                update: { username: entry.username ?? undefined },
+                create: { id: entry.userId, username: entry.username ?? null },
+              });
+              await runtime.prisma.message.create({
+                data: {
+                  id: messageId, guildId: guildId!, channelId: entry.channelId ?? "imported",
+                  userId: entry.userId, content: entry.content, createdAt,
+                  charCount: entry.content.length, tokenEstimate: Math.ceil(entry.content.length / 4),
+                  mentionCount: 0, replyToMessageId: entry.replyToId ? `import:${guildId}:${entry.replyToId}` : undefined,
+                },
+              });
+              seenUsers.add(entry.userId);
+              userMsgCounts.set(entry.userId, (userMsgCounts.get(entry.userId) ?? 0) + 1);
+              imported++;
+            } catch { errors++; }
+          }
+
+          let seeded = 0;
+          if (userMsgCounts.size > 0) {
+            try {
+              const relService = new RelationshipService(runtime.prisma);
+              seeded = await relService.seedFromImportedHistory(guildId!, userMsgCounts);
+            } catch { /* non-critical */ }
+          }
+
+          await interaction.editReply({
+            content: `✅ Импорт завершён\n📥 Импортировано: ${imported}\n⏭️ Пропущено: ${skipped}\n❌ Ошибок: ${errors}\n👤 Пользователей: ${seenUsers.size}\n🤝 Профилей отношений создано: ${seeded}`,
+          });
+        } catch (err) {
+          await interaction.editReply({ content: `❌ Ошибка импорта: ${err instanceof Error ? err.message : "unknown"}` });
+        }
         return;
       }
       default:

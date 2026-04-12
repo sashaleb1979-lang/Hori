@@ -54,12 +54,18 @@ export function createProfileJob(runtime: WorkerRuntime) {
         maxTokens: Math.min(profile.maxTokens, 220)
       });
 
-      parsed = JSON.parse(response.message.content) as {
-        summaryShort?: string;
-        styleTags?: string[];
-        topicTags?: string[];
-        confidenceScore?: number;
-      };
+      const raw = response.message.content.trim();
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        const start = raw.indexOf("{");
+        const end = raw.lastIndexOf("}");
+        if (start !== -1 && end > start) {
+          parsed = JSON.parse(raw.slice(start, end + 1));
+        } else {
+          throw new Error("no JSON object found in LLM response");
+        }
+      }
     } catch (error) {
       runtime.logger.warn({ error: asErrorMessage(error), guildId: job.data.guildId, jobId: job.id, userId: job.data.userId }, "profile refresh skipped because ollama is unavailable or returned invalid json");
       return { skipped: true, reason: "ollama unavailable" };

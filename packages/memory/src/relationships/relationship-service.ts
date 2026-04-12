@@ -155,6 +155,38 @@ export class RelationshipService {
     });
   }
 
+  /**
+   * Record explicitly toxic behavior — aggressive trust penalty.
+   * If trust drops below 0.28, toneBias auto-switches to "sharp".
+   */
+  async recordToxicBehavior(
+    guildId: string,
+    userId: string,
+  ): Promise<RelationshipVector> {
+    const vector = await this.getVector(guildId, userId);
+    const newTrust = Math.max(0, vector.trustLevel - 0.04);
+    const newCloseness = Math.max(0, vector.closeness - 0.02);
+    const autoSharp = newTrust <= 0.28 || newCloseness <= 0.22;
+
+    return this.upsertRelationship({
+      guildId,
+      userId,
+      toneBias: autoSharp ? "sharp" : vector.toneBias,
+      roastLevel: vector.roastLevel,
+      praiseBias: vector.praiseBias,
+      interruptPriority: Math.max(0, vector.interruptPriority - (autoSharp ? 1 : 0)),
+      doNotMock: vector.doNotMock,
+      doNotInitiate: vector.doNotInitiate,
+      protectedTopics: vector.protectedTopics,
+      closeness: newCloseness,
+      trustLevel: newTrust,
+      familiarity: vector.familiarity,
+      interactionCount: vector.interactionCount + 1,
+      proactivityPreference: vector.proactivityPreference,
+      topicBoundaries: vector.topicBoundaries,
+    });
+  }
+
   private async findProfile(guildId: string, userId: string): Promise<RelationshipProfileRecord | null> {
     return this.profiles.findUnique({
       where: {
@@ -164,6 +196,47 @@ export class RelationshipService {
         },
       },
     });
+  }
+
+  /**
+   * Seed initial relationship profiles for users discovered during chat import.
+   * @param userMessageCounts map of userId -> number of imported messages
+   */
+  async seedFromImportedHistory(
+    guildId: string,
+    userMessageCounts: Map<string, number>,
+  ): Promise<number> {
+    let seeded = 0;
+
+    for (const [userId, msgCount] of userMessageCounts) {
+      const existing = await this.findProfile(guildId, userId);
+      if (existing) continue;
+
+      const familiarity = Math.min(1, msgCount / 200);
+      const closeness = Math.min(0.5, msgCount / 400);
+
+      await this.upsertRelationship({
+        guildId,
+        userId,
+        toneBias: "neutral",
+        roastLevel: 0,
+        praiseBias: 0,
+        interruptPriority: 0,
+        doNotMock: false,
+        doNotInitiate: false,
+        protectedTopics: [],
+        closeness,
+        trustLevel: DEFAULT_SIGNALS.trustLevel,
+        familiarity,
+        interactionCount: msgCount,
+        proactivityPreference: DEFAULT_SIGNALS.proactivityPreference,
+        topicBoundaries: DEFAULT_SIGNALS.topicBoundaries,
+      });
+
+      seeded++;
+    }
+
+    return seeded;
   }
 
   private toOverlay(profile: RelationshipProfileRecord): RelationshipOverlay {

@@ -15,7 +15,7 @@ export interface ConflictDetection {
   reasons: string[];
 }
 
-export type ConflictStrategy = "joke" | "peacemake" | "fuel" | "ignore";
+export type ConflictStrategy = "joke" | "peacemake" | "confront" | "ignore";
 
 const insultPatterns = [
   unicodeWordPattern("дурак|идиот|дебил|тупой|мразь|придурок"),
@@ -98,7 +98,7 @@ export function chooseConflictStrategy(mood: EmotionLabel | string, score: numbe
   }
 
   if (mood === EmotionLabel.SUPER_AGGRESSIVE || mood === EmotionLabel.SUPER_IRONIC) {
-    return score >= 0.4 ? "fuel" : "joke";
+    return "confront";
   }
 
   return score >= 0.55 ? "peacemake" : "ignore";
