@@ -235,19 +235,6 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
         await interaction.reply({ content, flags: MessageFlags.Ephemeral });
         return;
       }
-      case "bot-voice": {
-        const subcommand = interaction.options.getSubcommand();
-        if (subcommand === "join") {
-          await runtime.voice.handleJoinChannelCommand(interaction);
-          return;
-        }
-        if (subcommand === "leave") {
-          await runtime.voice.handleLeaveChannelCommand(interaction);
-          return;
-        }
-        await runtime.voice.handleStatusCommand(interaction);
-        return;
-      }
       default:
         await interaction.reply({ content: "Не знаю такую команду.", flags: MessageFlags.Ephemeral });
         return;

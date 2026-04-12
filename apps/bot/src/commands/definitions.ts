@@ -226,23 +226,7 @@ export const slashCommandDefinitions = [
   new SlashCommandBuilder()
     .setName("bot-ai-url")
     .setDescription("Сменить Ollama URL (только владелец бота)")
-    .addStringOption((option) => option.setName("url").setDescription("Новый URL (https://...)").setRequired(true)),
-  new SlashCommandBuilder()
-    .setName("bot-voice")
-    .setDescription("Управлять voice-режимом Хори")
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName("join")
-        .setDescription("Зайти в ваш voice channel и слушать речь")
-        .addChannelOption((option) =>
-          option
-            .setName("text-channel")
-            .setDescription("Куда отправлять текстовые ответы")
-            .addChannelTypes(ChannelType.GuildText, ChannelType.PublicThread, ChannelType.PrivateThread)
-        )
-    )
-    .addSubcommand((subcommand) => subcommand.setName("leave").setDescription("Выйти из voice channel"))
-    .addSubcommand((subcommand) => subcommand.setName("status").setDescription("Показать текущий voice status"))
+    .addStringOption((option) => option.setName("url").setDescription("Новый URL (https://...)").setRequired(true))
 ].map((command) => command.toJSON());
 
 export const contextMenuDefinitions = [
