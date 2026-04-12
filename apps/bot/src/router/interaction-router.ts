@@ -241,8 +241,7 @@ export async function routeInteraction(
         if (subcommand === "panel") {
           const status = await runtime.runtimeConfig.getPowerProfileStatus();
           await interaction.reply({
-            content: await runtime.slashAdmin.powerPanel(),
-            components: buildPowerPanelRows(status.activeProfile),
+            ...buildPowerPanelResponse(await runtime.slashAdmin.powerPanel(), status.activeProfile),
             flags: MessageFlags.Ephemeral
           });
           return;
@@ -826,8 +825,7 @@ async function handleHoriCommand(
     if (action === "panel") {
       const status = await runtime.runtimeConfig.getPowerProfileStatus();
       await interaction.reply({
-        content: await runtime.slashAdmin.powerPanel(),
-        components: buildPowerPanelRows(status.activeProfile),
+        ...buildPowerPanelResponse(await runtime.slashAdmin.powerPanel(), status.activeProfile),
         flags: MessageFlags.Ephemeral
       });
       return;
@@ -870,16 +868,47 @@ async function handleHoriSearchCommand(
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const query = interaction.options.getString("query", true).trim();
-  const routingConfig = await runtime.runtimeConfig.getRoutingConfig(interaction.guildId, interaction.channelId);
-  const envelope: MessageEnvelope = {
-    messageId: `slash:hori-search:${interaction.id}`,
+  const reply = await executeHoriSearch(runtime, {
     guildId: interaction.guildId,
     channelId: interaction.channelId,
+    interactionId: interaction.id,
     userId: interaction.user.id,
     username: interaction.user.username,
     displayName: getInteractionDisplayName(interaction),
     channelName: interaction.channel && "name" in interaction.channel ? interaction.channel.name : null,
-    content: `Хори найди в интернете: ${query}`,
+    query,
+    isModerator
+  });
+
+  await interaction.editReply({
+    content: reply?.trim() || "Поиск не дал нормального ответа. Открой `/hori panel` -> Поиск -> Диагностика, там будет видно где затык."
+  });
+}
+
+async function executeHoriSearch(
+  runtime: BotRuntime,
+  input: {
+    guildId: string;
+    channelId: string;
+    interactionId: string;
+    userId: string;
+    username: string;
+    displayName?: string | null;
+    channelName?: string | null;
+    query: string;
+    isModerator: boolean;
+  }
+) {
+  const routingConfig = await runtime.runtimeConfig.getRoutingConfig(input.guildId, input.channelId);
+  const envelope: MessageEnvelope = {
+    messageId: `slash:hori-search:${input.interactionId}`,
+    guildId: input.guildId,
+    channelId: input.channelId,
+    userId: input.userId,
+    username: input.username,
+    displayName: input.displayName,
+    channelName: input.channelName,
+    content: `Хори найди в интернете: ${input.query}`,
     createdAt: new Date(),
     replyToMessageId: null,
     mentionCount: 0,
@@ -887,15 +916,11 @@ async function handleHoriSearchCommand(
     mentionsBotByName: true,
     mentionedUserIds: [],
     triggerSource: "name",
-    isModerator,
+    isModerator: input.isModerator,
     explicitInvocation: true
   };
   const result = await runtime.orchestrator.handleMessage(envelope, routingConfig);
-  const reply = typeof result.reply === "string" ? result.reply : result.reply?.text;
-
-  await interaction.editReply({
-    content: reply?.trim() || "Поиск не дал нормального ответа. Открой `/hori panel` -> Поиск -> Диагностика, там будет видно где затык."
-  });
+  return typeof result.reply === "string" ? result.reply : result.reply?.text;
 }
 
 async function handleHoriAiUrlCommand(
@@ -1345,6 +1370,33 @@ async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubm
     return;
   }
 
+  if (modalKind === "search") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const query = interaction.fields.getTextInputValue("query").trim();
+
+    if (!query) {
+      await interaction.editReply({ content: "Запрос пустой." });
+      return;
+    }
+
+    const reply = await executeHoriSearch(runtime, {
+      guildId: interaction.guildId,
+      channelId: interaction.channelId,
+      interactionId: interaction.id,
+      userId: interaction.user.id,
+      username: interaction.user.username,
+      displayName: getInteractionMemberDisplayName(interaction),
+      channelName: interaction.channel && "name" in interaction.channel ? interaction.channel.name : null,
+      query,
+      isModerator
+    });
+
+    await interaction.editReply({
+      content: reply?.trim() || "Поиск не дал нормального ответа. Открой `/hori panel` -> Поиск -> Диагностика, там будет видно где затык."
+    });
+    return;
+  }
+
   if (modalKind === "relationship") {
     if (!isOwner) {
       await interaction.reply({ content: "Relationship-цифры только для владельца.", flags: MessageFlags.Ephemeral });
@@ -1447,11 +1499,7 @@ async function routeButtonInteraction(runtime: BotRuntime, interaction: ButtonIn
   const content = await runtime.slashAdmin.powerApply(profile, interaction.user.id);
   const status = await runtime.runtimeConfig.getPowerProfileStatus();
 
-  await interaction.update({
-    content,
-    embeds: [],
-    components: buildPowerPanelRows(status.activeProfile)
-  });
+  await interaction.update(buildPowerPanelResponse(content, status.activeProfile));
 }
 
 async function handleHoriPanelAction(
@@ -1477,6 +1525,27 @@ async function handleHoriPanelAction(
     return;
   }
 
+  if (action === "panel_home") {
+    await interaction.update(buildHoriPanelResponse("main", isOwner, isModerator));
+    return;
+  }
+
+  if (action.startsWith("state_")) {
+    if (!isOwner) {
+      await interaction.reply({ content: "Панель состояния только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const tab = parseHoriStateTab(action.replace("state_", ""));
+    if (!tab) {
+      await interaction.reply({ content: "Неизвестная вкладка state panel.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.update(await buildHoriStatePanelResponse(runtime, tab, interaction.guildId, interaction.channelId));
+    return;
+  }
+
   if (action === "ai_url_modal") {
     if (!isOwner) {
       await interaction.reply({ content: "AI URL только для владельца.", flags: MessageFlags.Ephemeral });
@@ -1484,6 +1553,11 @@ async function handleHoriPanelAction(
     }
 
     await interaction.showModal(buildAiUrlModal(runtime.env.OLLAMA_BASE_URL));
+    return;
+  }
+
+  if (action === "search_query_modal") {
+    await interaction.showModal(buildSearchModal());
     return;
   }
 
@@ -1524,11 +1598,7 @@ async function handleHoriPanelAction(
     }
 
     const status = await runtime.runtimeConfig.getPowerProfileStatus();
-    await interaction.update({
-      content: await runtime.slashAdmin.powerPanel(),
-      embeds: [],
-      components: buildPowerPanelRows(status.activeProfile)
-    });
+    await interaction.update(buildPowerPanelResponse(await runtime.slashAdmin.powerPanel(), status.activeProfile));
     return;
   }
 
@@ -1541,24 +1611,32 @@ async function handleHoriPanelAction(
     const mode = action.replace("lockdown_", "");
     if (mode === "status") {
       const state = await getOwnerLockdownState(runtime, true);
-      await interaction.update({
-        content: `Owner lockdown: ${state.enabled ? "on" : "off"}${state.updatedBy ? `\nПоследнее изменение: ${state.updatedBy}` : ""}`,
-        embeds: [],
-        components: buildHoriPanelRows("owner", isOwner, isModerator)
-      });
+      await interaction.update(
+        buildHoriPanelDetailResponse(
+          "owner",
+          isOwner,
+          isModerator,
+          "Owner Lockdown",
+          `Owner lockdown: ${state.enabled ? "on" : "off"}${state.updatedBy ? `\nПоследнее изменение: ${state.updatedBy}` : ""}`
+        )
+      );
       return;
     }
 
     const enabled = mode === "on";
     await setOwnerLockdownState(runtime, enabled, interaction.user.id);
     const cleared = enabled ? await runtime.replyQueue.clearAll() : { count: 0 };
-    await interaction.update({
-      content: enabled
-        ? `Локдаун включён. Все кроме владельца молча игнорируются. Очередь сброшена: ${cleared.count}.`
-        : "Локдаун выключен.",
-      embeds: [],
-      components: buildHoriPanelRows("owner", isOwner, isModerator)
-    });
+    await interaction.update(
+      buildHoriPanelDetailResponse(
+        "owner",
+        isOwner,
+        isModerator,
+        enabled ? "Lockdown включён" : "Lockdown выключен",
+        enabled
+          ? `Локдаун включён. Все кроме владельца молча игнорируются. Очередь сброшена: ${cleared.count}.`
+          : "Локдаун выключен."
+      )
+    );
     return;
   }
 
@@ -1573,20 +1651,20 @@ async function handleHoriPanelAction(
     }
 
     await interaction.update({
-      content: await startMemoryBuildRun(runtime, interaction.guildId, scope === "channel" ? interaction.channelId : null, scope, "recent", interaction.user.id),
-      embeds: [],
-      components: buildHoriPanelRows("memory", isOwner, isModerator)
+      ...buildHoriPanelDetailResponse(
+        "memory",
+        isOwner,
+        isModerator,
+        scope === "server" ? "Memory-build сервера" : "Memory-build канала",
+        await startMemoryBuildRun(runtime, interaction.guildId, scope === "channel" ? interaction.channelId : null, scope, "recent", interaction.user.id)
+      )
     });
     return;
   }
 
   const content = await resolveHoriActionContent(runtime, interaction, action, isOwner, isModerator);
   const tab = inferTabForHoriAction(action);
-  await interaction.update({
-    content,
-    embeds: [],
-    components: buildHoriPanelRows(tab, isOwner, isModerator)
-  });
+  await interaction.update(buildHoriPanelDetailResponse(tab, isOwner, isModerator, horiActionTitle(action), content));
 }
 
 async function resolveHoriActionContent(
@@ -1626,6 +1704,11 @@ async function resolveHoriActionContent(
         return "Это только для модеров.";
       }
       return runtime.slashAdmin.updateFeature(guildId, "natural_message_splitting_enabled", true);
+    case "natural_split_off":
+      if (!isModerator && !isOwner) {
+        return "Это только для модеров.";
+      }
+      return runtime.slashAdmin.updateFeature(guildId, "natural_message_splitting_enabled", false);
     case "read_chat_on":
       if (!isModerator && !isOwner) {
         return "Это только для модеров.";
@@ -1636,13 +1719,59 @@ async function resolveHoriActionContent(
         isMuted: false,
         topicInterestTags: null
       });
+    case "read_chat_off":
+      if (!isModerator && !isOwner) {
+        return "Это только для модеров.";
+      }
+      return runtime.slashAdmin.channelConfig(guildId, interaction.channelId, {
+        allowBotReplies: false,
+        allowInterjections: false,
+        isMuted: false,
+        topicInterestTags: null
+      });
     case "media_sync":
       if (!isOwner) {
         return "Media sync-pack только для владельца.";
       }
       return runtime.slashAdmin.mediaSyncPack();
+    case "media_list":
+      return runtime.slashAdmin.mediaList();
     case "memory_status":
       return runtime.slashAdmin.channelMemoryStatus(guildId, interaction.channelId);
+    case "summary_current":
+      return runtime.slashAdmin.summary(guildId, interaction.channelId);
+    case "stats_week":
+      return runtime.slashAdmin.stats(guildId);
+    case "topic_status":
+      return runtime.slashAdmin.topicStatus(guildId, interaction.channelId);
+    case "topic_reset":
+      if (!isModerator && !isOwner) {
+        return "Это только для модеров.";
+      }
+      return runtime.slashAdmin.topicReset(guildId, interaction.channelId);
+    case "queue_status":
+      return runtime.slashAdmin.queueStatus(guildId, interaction.channelId);
+    case "queue_clear":
+      if (!isModerator && !isOwner) {
+        return "Это только для модеров.";
+      }
+      return runtime.slashAdmin.queueClear(guildId, interaction.channelId);
+    case "mood_status":
+      return runtime.slashAdmin.moodStatus(guildId);
+    case "mood_normal":
+      if (!isModerator && !isOwner) {
+        return "Это только для модеров.";
+      }
+      return runtime.slashAdmin.moodSet(guildId, "normal", 60, "panel quick action");
+    case "mood_playful":
+      if (!isModerator && !isOwner) {
+        return "Это только для модеров.";
+      }
+      return runtime.slashAdmin.moodSet(guildId, "playful", 60, "panel quick action");
+    case "reflection_status":
+      return runtime.slashAdmin.reflectionStatus(guildId);
+    case "reflection_list":
+      return runtime.slashAdmin.reflectionList(guildId, 8);
     case "search_diagnose":
       return diagnoseSearch(runtime);
     case "feature_status":
@@ -1660,6 +1789,20 @@ function buildHoriPanelResponse(tab: HoriPanelTab, isOwner: boolean, isModerator
   return {
     content: "",
     embeds: [buildHoriPanelEmbed(tab, isOwner, isModerator)],
+    components: buildHoriPanelRows(tab, isOwner, isModerator)
+  };
+}
+
+function buildHoriPanelDetailResponse(
+  tab: HoriPanelTab,
+  isOwner: boolean,
+  isModerator: boolean,
+  title: string,
+  body: string
+) {
+  return {
+    content: "",
+    embeds: [buildHoriPanelEmbed(tab, isOwner, isModerator), buildHoriDetailEmbed(title, body)],
     components: buildHoriPanelRows(tab, isOwner, isModerator)
   };
 }
@@ -1763,6 +1906,28 @@ function buildHoriStatePanelRows(tab: HoriStateTab) {
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
+        .setCustomId(`${HORI_ACTION_PREFIX}:panel_home`)
+        .setLabel("Panel")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${HORI_ACTION_PREFIX}:state_brain`)
+        .setLabel("Brain")
+        .setStyle(tab === "brain" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${HORI_ACTION_PREFIX}:state_trace`)
+        .setLabel("Trace")
+        .setStyle(tab === "trace" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${HORI_ACTION_PREFIX}:state_tokens`)
+        .setLabel("Tokens")
+        .setStyle(tab === "tokens" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${HORI_ACTION_PREFIX}:power_panel`)
+        .setLabel("Power")
+        .setStyle(ButtonStyle.Primary)
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
         .setCustomId(`${HORI_ACTION_PREFIX}:debug_latest`)
         .setLabel("Latest trace")
         .setStyle(ButtonStyle.Secondary),
@@ -1771,9 +1936,13 @@ function buildHoriStatePanelRows(tab: HoriStateTab) {
         .setLabel("Search diag")
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
-        .setCustomId(`${HORI_ACTION_PREFIX}:power_panel`)
-        .setLabel("Power")
-        .setStyle(ButtonStyle.Primary)
+        .setCustomId(`${HORI_ACTION_PREFIX}:state_search`)
+        .setLabel("Search state")
+        .setStyle(tab === "search" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${HORI_ACTION_PREFIX}:state_features`)
+        .setLabel("Features")
+        .setStyle(tab === "features" ? ButtonStyle.Primary : ButtonStyle.Secondary)
     )
   ];
 }
@@ -1782,6 +1951,9 @@ function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boo
   const common = [
     { id: "status", label: "Статус", style: ButtonStyle.Primary },
     { id: "help", label: "Help" },
+    { id: "search_query_modal", label: "Search" },
+    { id: "queue_status", label: "Queue" },
+    { id: "mood_status", label: "Mood" },
     { id: "profile_self", label: "Мой профиль" },
     { id: "memory_self", label: "Моя память" }
   ];
@@ -1790,36 +1962,52 @@ function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boo
     main: common,
     owner: [
       { id: "state_panel", label: "State", ownerOnly: true, style: ButtonStyle.Primary },
+      { id: "state_trace", label: "Trace", ownerOnly: true },
+      { id: "state_tokens", label: "Tokens", ownerOnly: true },
       { id: "power_panel", label: "Power", ownerOnly: true, style: ButtonStyle.Primary },
       { id: "ai_url_modal", label: "AI URL", ownerOnly: true },
       { id: "relationship_edit_modal", label: "Edit relation", ownerOnly: true },
       { id: "lockdown_status", label: "Lockdown?", ownerOnly: true },
       { id: "lockdown_on", label: "Lockdown on", ownerOnly: true, style: ButtonStyle.Danger },
       { id: "lockdown_off", label: "Lockdown off", ownerOnly: true },
-      { id: "media_sync", label: "Media sync", ownerOnly: true }
+      { id: "media_sync", label: "Media sync", ownerOnly: true },
+      { id: "media_list", label: "Media list", ownerOnly: true },
+      { id: "memory_build_server", label: "Build сервер", ownerOnly: true }
     ],
     style: [
       { id: "style_default", label: "Живой preset", modOnly: true, style: ButtonStyle.Primary },
       { id: "style_edit_modal", label: "Edit style", modOnly: true },
+      { id: "mood_playful", label: "Mood playful", modOnly: true },
+      { id: "mood_normal", label: "Mood normal", modOnly: true },
       { id: "natural_split_on", label: "Sprinting on", modOnly: true },
+      { id: "natural_split_off", label: "Sprinting off", modOnly: true },
       { id: "feature_status", label: "Фичи" },
       { id: "status", label: "Статус" }
     ],
     liveliness: [
       { id: "read_chat_on", label: "Читать чат", modOnly: true, style: ButtonStyle.Primary },
+      { id: "read_chat_off", label: "Тихий канал", modOnly: true },
       { id: "natural_split_on", label: "2 чанка", modOnly: true },
+      { id: "natural_split_off", label: "1 chunk", modOnly: true },
+      { id: "mood_status", label: "Mood" },
+      { id: "queue_status", label: "Queue" },
       { id: "media_sync", label: "GIF pack", ownerOnly: true },
+      { id: "reflection_status", label: "Reflection" },
       { id: "feature_status", label: "Фичи" }
     ],
     memory: [
       { id: "memory_status", label: "Memory status", style: ButtonStyle.Primary },
       { id: "memory_build_channel", label: "Build канал", modOnly: true },
       { id: "memory_build_server", label: "Build сервер", ownerOnly: true },
+      { id: "summary_current", label: "Summary" },
+      { id: "topic_status", label: "Topic" },
+      { id: "reflection_list", label: "Lessons" },
       { id: "memory_self", label: "Моя память" }
     ],
     people: [
       { id: "profile_self", label: "Мой профиль", style: ButtonStyle.Primary },
       { id: "relationship_self", label: "Отношение ко мне" },
+      { id: "relationship_edit_modal", label: "Edit relation", ownerOnly: true },
       { id: "relationship_hint", label: "Owner edit", ownerOnly: true },
       { id: "memory_self", label: "Моя память" }
     ],
@@ -1827,21 +2015,39 @@ function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boo
       { id: "channel_policy", label: "Policy", style: ButtonStyle.Primary },
       { id: "channel_edit_modal", label: "Edit channel", modOnly: true },
       { id: "read_chat_on", label: "Interject on", modOnly: true },
+      { id: "read_chat_off", label: "Quiet mode", modOnly: true },
+      { id: "topic_status", label: "Topic" },
+      { id: "topic_reset", label: "Reset topic", modOnly: true },
+      { id: "queue_status", label: "Queue" },
+      { id: "queue_clear", label: "Clear queue", modOnly: true },
+      { id: "summary_current", label: "Summary" },
       { id: "memory_status", label: "Channel memory" }
     ],
     search: [
+      { id: "search_query_modal", label: "Search", style: ButtonStyle.Primary },
       { id: "search_diagnose", label: "Диагностика", style: ButtonStyle.Primary },
-      { id: "feature_status", label: "Фичи" }
+      { id: "feature_status", label: "Фичи" },
+      { id: "state_search", label: "Search state", ownerOnly: true },
+      { id: "state_tokens", label: "Tokens", ownerOnly: true }
     ],
     experiments: [
       { id: "natural_split_on", label: "Sprinting on", modOnly: true, style: ButtonStyle.Primary },
+      { id: "natural_split_off", label: "Sprinting off", modOnly: true },
+      { id: "mood_playful", label: "Mood playful", modOnly: true },
       { id: "feature_status", label: "Фичи" },
+      { id: "media_list", label: "Media list" },
+      { id: "reflection_status", label: "Reflection" },
+      { id: "reflection_list", label: "Lessons" },
       { id: "media_sync", label: "Media sync", ownerOnly: true }
     ],
     diagnostics: [
       { id: "debug_latest", label: "Latest trace", style: ButtonStyle.Primary },
       { id: "search_diagnose", label: "Search diag" },
       { id: "feature_status", label: "Фичи" },
+      { id: "queue_status", label: "Queue" },
+      { id: "stats_week", label: "Stats" },
+      { id: "state_trace", label: "Trace state", ownerOnly: true },
+      { id: "state_tokens", label: "Token state", ownerOnly: true },
       { id: "status", label: "Статус" }
     ]
   };
@@ -1882,10 +2088,73 @@ function inferTabForHoriAction(action: string): HoriPanelTab {
   if (action.startsWith("search")) return "search";
   if (action.startsWith("lockdown") || action === "power_panel" || action === "state_panel" || action === "ai_url_modal") return "owner";
   if (action.startsWith("relationship") || action.startsWith("profile")) return "people";
-  if (action.startsWith("channel") || action === "read_chat_on") return "channels";
+  if (action.startsWith("channel") || action === "read_chat_on" || action === "read_chat_off" || action.startsWith("topic") || action.startsWith("queue") || action === "summary_current") return "channels";
   if (action.startsWith("debug") || action === "feature_status") return "diagnostics";
-  if (action.startsWith("style") || action.startsWith("natural")) return "style";
+  if (action.startsWith("style") || action.startsWith("natural") || action.startsWith("mood")) return "style";
+  if (action.startsWith("reflection") || action === "media_list") return "experiments";
   return "main";
+}
+
+function horiActionTitle(action: string) {
+  const titles: Record<string, string> = {
+    status: "Быстрый статус",
+    help: "Help",
+    search_query_modal: "Поиск",
+    profile_self: "Мой профиль",
+    memory_self: "Моя память",
+    relationship_self: "Отношение ко мне",
+    relationship_hint: "Relationship hint",
+    style_default: "Живой preset",
+    natural_split_on: "Natural splitting: on",
+    natural_split_off: "Natural splitting: off",
+    read_chat_on: "Чтение чата: on",
+    read_chat_off: "Чтение чата: off",
+    media_sync: "Media sync-pack",
+    media_list: "Media list",
+    memory_status: "Memory status",
+    summary_current: "Summary",
+    stats_week: "Недельная статистика",
+    topic_status: "Topic status",
+    topic_reset: "Topic reset",
+    queue_status: "Queue status",
+    queue_clear: "Queue clear",
+    mood_status: "Mood status",
+    mood_normal: "Mood: normal",
+    mood_playful: "Mood: playful",
+    reflection_status: "Reflection status",
+    reflection_list: "Reflection lessons",
+    search_diagnose: "Search diagnostics",
+    feature_status: "Feature flags",
+    channel_policy: "Channel policy",
+    debug_latest: "Latest trace"
+  };
+
+  return titles[action] ?? "Panel action";
+}
+
+function buildHoriDetailEmbed(title: string, body: string) {
+  return new EmbedBuilder()
+    .setTitle(title)
+    .setDescription(clipPanelText(body));
+}
+
+function buildPowerPanelResponse(content: string, activeProfile: (typeof POWER_PROFILES)[number]) {
+  return {
+    content: "",
+    embeds: [buildHoriDetailEmbed("Hori Power Panel", content)],
+    components: [
+      ...buildPowerPanelRows(activeProfile),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:panel_home`).setLabel("Panel").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_brain`).setLabel("Brain").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_tokens`).setLabel("Tokens").setStyle(ButtonStyle.Secondary)
+      )
+    ]
+  };
+}
+
+function clipPanelText(value: string, max = 4000) {
+  return value.length > max ? `${value.slice(0, max - 3)}...` : value || "none";
 }
 
 async function buildHoriStatus(runtime: BotRuntime, guildId: string, channelId: string) {
@@ -2017,6 +2286,12 @@ function getInteractionDisplayName(interaction: ChatInputCommandInteraction) {
     : interaction.user.globalName;
 }
 
+function getInteractionMemberDisplayName(interaction: ModalSubmitInteraction) {
+  return interaction.member && "displayName" in interaction.member
+    ? interaction.member.displayName
+    : interaction.user.globalName;
+}
+
 function hasManageGuild(interaction: ButtonInteraction | StringSelectMenuInteraction) {
   return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
 }
@@ -2070,6 +2345,26 @@ function buildAiUrlModal(currentUrl?: string) {
         .setRequired(true)
         .setMaxLength(300)
         .setStyle(TextInputStyle.Short)
+    )
+  );
+
+  return modal;
+}
+
+function buildSearchModal() {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:search`)
+    .setTitle("Hori Search");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("query")
+        .setLabel("Что искать")
+        .setPlaceholder("например: лучшие практики discord button ux")
+        .setRequired(true)
+        .setMaxLength(300)
+        .setStyle(TextInputStyle.Paragraph)
     )
   );
 

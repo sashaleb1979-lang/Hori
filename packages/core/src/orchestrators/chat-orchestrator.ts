@@ -669,7 +669,7 @@ export class ChatOrchestrator {
     const overview = await this.deps.analytics.getOverview(guildId, window);
     const analyticsText = formatAnalyticsOverview(overview);
 
-    const messages = [{ role: "system", content: systemPrompt }, ...buildAnalyticsNarrationPrompt(analyticsText, request)];
+    const messages: LlmChatMessage[] = [{ role: "system", content: systemPrompt }, ...buildAnalyticsNarrationPrompt(analyticsText, request)];
     const response = await this.deps.llmClient.chat({
       model: llm.model,
       messages,

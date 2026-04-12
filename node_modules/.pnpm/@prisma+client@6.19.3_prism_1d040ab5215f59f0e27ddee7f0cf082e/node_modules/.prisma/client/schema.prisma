@@ -312,6 +312,10 @@ model BotEventLog {
   contextMessages     Int?
   memoryLayers        Json?
   latencyMs           Int?
+  promptTokens        Int?
+  completionTokens    Int?
+  totalTokens         Int?
+  tokenSource         String?
   relationshipApplied Boolean  @default(false)
   debugTrace          Json?
   createdAt           DateTime @default(now())
@@ -319,6 +323,7 @@ model BotEventLog {
 
   @@index([messageId])
   @@index([guildId, createdAt])
+  @@index([guildId, totalTokens, createdAt])
 }
 
 model InterjectionLog {

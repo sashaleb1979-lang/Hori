@@ -57,6 +57,26 @@ describe("parseOllamaChatResponseBody", () => {
       }
     ]);
   });
+
+  it("extracts Ollama usage counters from the final chunk", () => {
+    const response = parseOllamaChatResponseBody(
+      [
+        '{"message":{"role":"assistant","content":"При"}}',
+        '{"message":{"role":"assistant","content":"вет"}}',
+        '{"done":true,"prompt_eval_count":3210,"eval_count":44,"total_duration":2500000000,"prompt_eval_duration":1800000000,"eval_duration":320000000}'
+      ].join("\n")
+    );
+
+    expect(response.message.content).toBe("Привет");
+    expect(response.usage).toEqual({
+      promptTokens: 3210,
+      completionTokens: 44,
+      totalTokens: 3254,
+      totalDurationMs: 2500,
+      promptEvalDurationMs: 1800,
+      evalDurationMs: 320
+    });
+  });
 });
 
 describe("OllamaClient", () => {
