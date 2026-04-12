@@ -226,7 +226,11 @@ export const slashCommandDefinitions = [
   new SlashCommandBuilder()
     .setName("bot-ai-url")
     .setDescription("Сменить Ollama URL (только владелец бота)")
-    .addStringOption((option) => option.setName("url").setDescription("Новый URL (https://...)").setRequired(true))
+    .addStringOption((option) => option.setName("url").setDescription("Новый URL (https://...)").setRequired(true)),
+  new SlashCommandBuilder()
+    .setName("bot-import")
+    .setDescription("Импортировать историю чата из JSON файла")
+    .addAttachmentOption((option) => option.setName("file").setDescription(".json файл с историей чата").setRequired(true))
 ].map((command) => command.toJSON());
 
 export const contextMenuDefinitions = [

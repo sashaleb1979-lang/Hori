@@ -7,6 +7,7 @@ import { createLogger, createPrismaClient, createRedisClient, ensureInfrastructu
 import { registerAdminRoutes } from "./routes/admin";
 import { registerDebugRoutes } from "./routes/debug";
 import { registerHealthRoutes } from "./routes/health";
+import { registerImportRoutes } from "./routes/import";
 import { registerMetricsRoutes } from "./routes/metrics";
 
 declare module "fastify" {
@@ -53,6 +54,7 @@ export async function bootstrapApi() {
   await registerMetricsRoutes(app);
   await registerAdminRoutes(app);
   await registerDebugRoutes(app);
+  await registerImportRoutes(app);
 
   return app;
 }
