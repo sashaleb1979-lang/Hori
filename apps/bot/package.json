@@ -10,6 +10,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@discordjs/voice": "^0.18.0",
     "@hori/analytics": "workspace:*",
     "@hori/config": "workspace:*",
     "@hori/core": "workspace:*",
@@ -17,7 +18,8 @@
     "@hori/memory": "workspace:*",
     "@hori/search": "workspace:*",
     "@hori/shared": "workspace:*",
-    "discord.js": "^14.17.3"
+    "discord.js": "^14.17.3",
+    "opusscript": "^0.1.1"
   }
 }
 

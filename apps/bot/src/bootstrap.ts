@@ -10,6 +10,8 @@ import { createLogger, createPrismaClient, createRedisClient, createAppQueues, e
 
 import { createDiscordClient } from "./gateway/create-discord-client";
 import { registerEvents } from "./events/register-events";
+import { dispatchVoiceTranscription } from "./voice/voice-dispatch";
+import { VoiceManager } from "./voice/voice-manager";
 
 interface BotQueueHandle {
   add(jobName: string, payload?: unknown, options?: unknown): Promise<unknown>;
@@ -38,6 +40,7 @@ export interface BotRuntime {
   runtimeConfig: RuntimeConfigService;
   orchestrator: ReturnType<typeof createChatOrchestrator>;
   replyQueue: ReplyQueueService;
+  voice: VoiceManager;
 }
 
 function createNoopQueues(logger: ReturnType<typeof createLogger>, prefix: string): BotQueues {
@@ -157,6 +160,24 @@ export async function bootstrapBot() {
     mood: moodService,
     media: mediaReactionService
   });
+  const voice = new VoiceManager(client, logger, env, (payload) =>
+    dispatchVoiceTranscription(
+      {
+        client,
+        env,
+        logger,
+        ingestService,
+        runtimeConfig,
+        orchestrator,
+        queues,
+      },
+      payload,
+    )
+  );
+
+  if (!env.OPENAI_STT_API_KEY) {
+    logger.warn("OPENAI_STT_API_KEY not set — voice capture can join channels but transcription is disabled");
+  }
 
   const runtime: BotRuntime = {
     env,
@@ -170,7 +191,8 @@ export async function bootstrapBot() {
     slashAdmin,
     runtimeConfig,
     orchestrator,
-    replyQueue: replyQueueService
+    replyQueue: replyQueueService,
+    voice
   };
 
   registerEvents(runtime);

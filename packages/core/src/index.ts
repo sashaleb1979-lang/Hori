@@ -20,6 +20,7 @@ export * from "./brain/emotion-state";
 export * from "./brain/emotion-engine";
 export * from "./brain/activation-policy";
 export * from "./brain/response-budget";
+export * from "./brain/conflict-detector";
 
 // --- Phase 2: Relationships + Busy Engine ---
 export * from "./persona/personality-traits";

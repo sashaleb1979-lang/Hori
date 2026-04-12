@@ -1,4 +1,6 @@
 export * from "./context/context-service";
+export * from "./compaction/compaction-prompt";
+export * from "./compaction/memory-formation";
 export * from "./profiles/profile-service";
 export * from "./relationships/relationship-service";
 export * from "./relationships/relationship-vector";

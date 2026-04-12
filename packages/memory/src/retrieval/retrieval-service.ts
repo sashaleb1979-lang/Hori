@@ -14,9 +14,12 @@ export class RetrievalService {
         orderBy: { createdAt: "desc" },
         take: limit,
         select: {
+          id: true,
           key: true,
           value: true,
-          type: true
+          type: true,
+          createdAt: true,
+          updatedAt: true
         }
       });
     }
@@ -24,10 +27,10 @@ export class RetrievalService {
     const vectorLiteral = toVectorLiteral(queryEmbedding);
 
     return this.prisma.$queryRawUnsafe<
-      Array<{ key: string; value: string; type: string }>
+      Array<{ id: string; key: string; value: string; type: string; createdAt: Date; updatedAt: Date }>
     >(
       `
-        SELECT key, value, type
+        SELECT id, key, value, type, "createdAt", "updatedAt"
         FROM "ServerMemory"
         WHERE "guildId" = $1
           AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
@@ -58,10 +61,10 @@ export class RetrievalService {
     const vectorLiteral = toVectorLiteral(queryEmbedding);
 
     return this.prisma.$queryRawUnsafe<
-      Array<{ id: string; key: string; value: string }>
+      Array<{ id: string; key: string; value: string; createdAt: Date }>
     >(
       `
-        SELECT id, key, value
+        SELECT id, key, value, "createdAt"
         FROM "UserMemoryNote"
         WHERE "guildId" = $1
           AND "userId" = $2

@@ -5,68 +5,8 @@ import { trackIngestedMessage } from "@hori/analytics";
 import { asErrorMessage, type ReplyQueueTrace, type TriggerSource } from "@hori/shared";
 
 import type { BotRuntime } from "../bootstrap";
+import { enqueueBackgroundJobs } from "./background-jobs";
 import { sendReply } from "../responders/message-responder";
-
-async function enqueueBackgroundJobs(runtime: BotRuntime, envelope: {
-  guildId: string;
-  channelId: string;
-  userId: string;
-  messageId: string;
-  content: string;
-}) {
-  const jobs = [
-    {
-      queue: "summary",
-      task: runtime.queues.summary.add(
-        "summary",
-        { guildId: envelope.guildId, channelId: envelope.channelId },
-        { jobId: `summary:${envelope.guildId}:${envelope.channelId}` }
-      )
-    },
-    {
-      queue: "profile",
-      task: runtime.queues.profile.add(
-        "profile",
-        { guildId: envelope.guildId, userId: envelope.userId },
-        { jobId: `profile:${envelope.guildId}:${envelope.userId}` }
-      )
-    },
-    {
-      queue: "embedding",
-      task:
-        envelope.content.length >= runtime.env.MESSAGE_EMBED_MIN_CHARS
-          ? runtime.queues.embedding.add(
-              "embedding",
-              { entityType: "message", entityId: envelope.messageId },
-              { jobId: `embedding:${envelope.messageId}` }
-            )
-          : Promise.resolve()
-    },
-    {
-      queue: "topic",
-      task: runtime.queues.topic.add(
-        "topic",
-        { guildId: envelope.guildId, channelId: envelope.channelId, messageId: envelope.messageId },
-        { jobId: `topic:${envelope.messageId}` }
-      )
-    }
-  ];
-
-  const results = await Promise.allSettled(jobs.map((job) => job.task));
-
-  for (const [index, result] of results.entries()) {
-    if (result.status === "rejected") {
-      runtime.logger.warn(
-        {
-          queue: jobs[index]?.queue,
-          messageId: envelope.messageId,
-          error: asErrorMessage(result.reason)
-        },
-        "background queue enqueue failed"
-      );
-    }
-  }
-}
 
 async function detectTriggerSource(message: Message, botName: string, botId: string): Promise<TriggerSource | undefined> {
   const content = message.content.trim();

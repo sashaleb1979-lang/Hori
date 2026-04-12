@@ -16,6 +16,19 @@ export async function sendReply(message: Message, reply: string | BotReplyPayloa
   }
 }
 
+export async function sendReplyToChannel(
+  channel: { send(payload: unknown): Promise<unknown> },
+  reply: string | BotReplyPayload
+) {
+  const text = typeof reply === "string" ? reply : reply.text;
+  const media = typeof reply === "string" ? null : reply.media;
+  const chunks = splitLongMessage(text);
+
+  for (const chunk of chunks) {
+    await channel.send(media ? mediaReplyPayload(chunk, media.filePath) : chunk);
+  }
+}
+
 function mediaReplyPayload(content: string, filePath: string) {
   return content ? { content, files: [filePath] } : { files: [filePath] };
 }
