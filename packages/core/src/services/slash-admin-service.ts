@@ -1,9 +1,12 @@
-import type { AppPrismaClient } from "@hori/shared";
+import type { AppPrismaClient, PersonaMode } from "@hori/shared";
 import { parseCsv } from "@hori/shared";
 
 import { defaultPersonaSettings } from "@hori/config";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
 import { RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
+import type { MoodService } from "./mood-service";
+import type { ReplyQueueService } from "./reply-queue-service";
+import type { RuntimeConfigService } from "./runtime-config-service";
 
 export class SlashAdminService {
   constructor(
@@ -11,11 +14,14 @@ export class SlashAdminService {
     private readonly analytics: AnalyticsQueryService,
     private readonly relationships: RelationshipService,
     private readonly retrieval: RetrievalService,
-    private readonly summaries: SummaryService
+    private readonly summaries: SummaryService,
+    private readonly runtimeConfig?: RuntimeConfigService,
+    private readonly mood?: MoodService,
+    private readonly replyQueue?: ReplyQueueService
   ) {}
 
   async handleHelp() {
-    return "Команды админки: /bot-style, /bot-memory, /bot-relationship, /bot-feature, /bot-debug, /bot-profile, /bot-channel, /bot-summary, /bot-stats.";
+    return "Команды админки: /bot-style, /bot-memory, /bot-relationship, /bot-feature, /bot-debug, /bot-profile, /bot-channel, /bot-summary, /bot-stats, /bot-topic, /bot-mood, /bot-queue, /bot-media.";
   }
 
   async updateStyle(
@@ -82,6 +88,7 @@ export class SlashAdminService {
       }
     });
 
+    this.runtimeConfig?.invalidate(guildId);
     return `Фича ${key}: ${enabled ? "on" : "off"}.`;
   }
 
@@ -157,7 +164,139 @@ export class SlashAdminService {
       }
     });
 
+    this.runtimeConfig?.invalidate(guildId, channelId);
     return `Настройки канала ${channelId} обновлены.`;
+  }
+
+  async topicStatus(guildId: string, channelId: string) {
+    const topic = await this.prisma.topicSession.findFirst({
+      where: {
+        guildId,
+        channelId,
+        closedAt: null
+      },
+      orderBy: { lastActiveAt: "desc" }
+    });
+
+    if (!topic) {
+      return "Активной темы нет.";
+    }
+
+    return `Тема: ${topic.title}\nConfidence: ${topic.confidence}\nОбновлена: ${topic.lastActiveAt.toISOString()}\n${topic.summaryShort}`;
+  }
+
+  async topicReset(guildId: string, channelId: string) {
+    const result = await this.prisma.topicSession.updateMany({
+      where: {
+        guildId,
+        channelId,
+        closedAt: null
+      },
+      data: {
+        closedAt: new Date(),
+        closedReason: "manual"
+      }
+    });
+
+    return `Закрыла активные темы: ${result.count}.`;
+  }
+
+  async moodStatus(guildId: string) {
+    const mood = await this.mood?.status(guildId);
+
+    if (!mood) {
+      return "Mood сейчас neutral.";
+    }
+
+    return `Mood=${mood.mood}, intensity=${mood.intensity}, до ${mood.endsAt.toISOString()}.`;
+  }
+
+  async moodSet(guildId: string, mood: PersonaMode, minutes: number, reason?: string | null) {
+    await this.mood?.setMood(guildId, mood, minutes, reason);
+    return `Mood=${mood} на ${minutes} мин.`;
+  }
+
+  async moodClear(guildId: string) {
+    const result = await this.mood?.clearMood(guildId);
+    return `Mood сброшен: ${result?.count ?? 0}.`;
+  }
+
+  async queueStatus(guildId: string, channelId?: string | null) {
+    const status = await this.replyQueue?.status(guildId, channelId);
+
+    if (!status) {
+      return "Reply queue недоступна.";
+    }
+
+    return `Queue: queued=${status.queued}, processing=${status.processing}, dropped=${status.dropped}.`;
+  }
+
+  async queueClear(guildId: string, channelId?: string | null) {
+    const result = await this.replyQueue?.clear(guildId, channelId);
+    return `Queue очищена: ${result?.count ?? 0}.`;
+  }
+
+  async mediaAdd(input: {
+    mediaId: string;
+    type: string;
+    filePath: string;
+    toneTags?: string | null;
+    triggerTags?: string | null;
+    allowedChannels?: string | null;
+    allowedMoods?: string | null;
+    nsfw?: boolean | null;
+  }) {
+    await this.prisma.mediaMetadata.upsert({
+      where: { mediaId: input.mediaId },
+      update: {
+        type: input.type,
+        filePath: input.filePath,
+        toneTags: input.toneTags ? parseCsv(input.toneTags) : undefined,
+        triggerTags: input.triggerTags ? parseCsv(input.triggerTags) : undefined,
+        allowedChannels: input.allowedChannels ? parseCsv(input.allowedChannels) : undefined,
+        allowedMoods: input.allowedMoods ? parseCsv(input.allowedMoods) : undefined,
+        nsfw: input.nsfw ?? undefined,
+        enabled: true
+      },
+      create: {
+        mediaId: input.mediaId,
+        type: input.type,
+        filePath: input.filePath,
+        toneTags: input.toneTags ? parseCsv(input.toneTags) : [],
+        triggerTags: input.triggerTags ? parseCsv(input.triggerTags) : [],
+        allowedChannels: input.allowedChannels ? parseCsv(input.allowedChannels) : [],
+        allowedMoods: input.allowedMoods ? parseCsv(input.allowedMoods) : [],
+        nsfw: input.nsfw ?? false
+      }
+    });
+
+    return `Media ${input.mediaId} зарегистрирована.`;
+  }
+
+  async mediaList() {
+    const entries = await this.prisma.mediaMetadata.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 10
+    });
+
+    if (!entries.length) {
+      return "Media registry пуст.";
+    }
+
+    return entries.map((entry) => `${entry.enabled ? "on" : "off"} ${entry.mediaId} (${entry.type}) -> ${entry.filePath}`).join("\n");
+  }
+
+  async mediaDisable(mediaId: string) {
+    const result = await this.prisma.mediaMetadata.updateMany({
+      where: { mediaId },
+      data: { enabled: false }
+    });
+
+    if (!result.count) {
+      return `Media ${mediaId} не нашла.`;
+    }
+
+    return `Media ${mediaId}: off.`;
   }
 
   async debugTrace(messageId: string) {

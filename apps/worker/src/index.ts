@@ -2,7 +2,7 @@ import { AnalyticsQueryService } from "@hori/analytics";
 import { assertEnvForRole, loadEnv } from "@hori/config";
 import { EmbeddingAdapter, OllamaClient } from "@hori/llm";
 import type { LlmClient } from "@hori/llm";
-import { ProfileService, RetrievalService, SummaryService } from "@hori/memory";
+import { ProfileService, RetrievalService, SummaryService, TopicService } from "@hori/memory";
 import { SearchCacheService } from "@hori/search";
 import {
   createAppQueues,
@@ -22,6 +22,7 @@ import { createEmbeddingJob } from "./jobs/embeddings";
 import { createProfileJob } from "./jobs/profiles";
 import { createSearchCacheCleanupJob } from "./jobs/search-cache";
 import { createSummaryJob } from "./jobs/summaries";
+import { createTopicJob } from "./jobs/topics";
 
 export interface WorkerRuntime {
   env: ReturnType<typeof loadEnv>;
@@ -33,6 +34,7 @@ export interface WorkerRuntime {
   summaryService: SummaryService;
   profileService: ProfileService;
   retrievalService: RetrievalService;
+  topicService: TopicService;
   searchCache: SearchCacheService;
   llmClient: LlmClient;
   embeddingAdapter: EmbeddingAdapter;
@@ -72,6 +74,10 @@ async function main() {
   const summaryService = new SummaryService(prisma);
   const profileService = new ProfileService(prisma, env);
   const retrievalService = new RetrievalService(prisma);
+  const topicService = new TopicService(prisma, {
+    topicTtlMinutes: env.TOPIC_TTL_MINUTES,
+    similarityThreshold: env.TOPIC_SIM_THRESHOLD
+  });
   const searchCache = new SearchCacheService(prisma, redis);
   const llmClient = new OllamaClient(env, logger);
   const embeddingAdapter = new EmbeddingAdapter(llmClient, env);
@@ -86,6 +92,7 @@ async function main() {
     summaryService,
     profileService,
     retrievalService,
+    topicService,
     searchCache,
     llmClient,
     embeddingAdapter
@@ -95,6 +102,7 @@ async function main() {
     createWorker(QUEUE_NAMES.summary, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSummaryJob(runtime), env.JOB_CONCURRENCY_SUMMARIES),
     createWorker(QUEUE_NAMES.profile, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createProfileJob(runtime), env.JOB_CONCURRENCY_PROFILES),
     createWorker(QUEUE_NAMES.embedding, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createEmbeddingJob(runtime), env.JOB_CONCURRENCY_EMBEDDINGS),
+    createWorker(QUEUE_NAMES.topic, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createTopicJob(runtime), 1),
     createWorker(QUEUE_NAMES.searchCache, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSearchCacheCleanupJob(runtime), 1),
     createWorker(QUEUE_NAMES.cleanup, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createCleanupJob(runtime), 1)
   ];

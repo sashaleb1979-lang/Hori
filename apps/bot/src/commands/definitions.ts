@@ -70,6 +70,15 @@ export const slashCommandDefinitions = [
           { name: "user_profiles", value: "user_profiles" },
           { name: "context_actions", value: "context_actions" },
           { name: "roast", value: "roast" },
+          { name: "context_v2_enabled", value: "context_v2_enabled" },
+          { name: "context_confidence_enabled", value: "context_confidence_enabled" },
+          { name: "topic_engine_enabled", value: "topic_engine_enabled" },
+          { name: "affinity_signals_enabled", value: "affinity_signals_enabled" },
+          { name: "mood_engine_enabled", value: "mood_engine_enabled" },
+          { name: "reply_queue_enabled", value: "reply_queue_enabled" },
+          { name: "media_reactions_enabled", value: "media_reactions_enabled" },
+          { name: "runtime_config_cache_enabled", value: "runtime_config_cache_enabled" },
+          { name: "embedding_cache_enabled", value: "embedding_cache_enabled" },
           { name: "channel_aware_mode", value: "channel_aware_mode" },
           { name: "message_kind_aware_mode", value: "message_kind_aware_mode" },
           { name: "anti_slop_strict_mode", value: "anti_slop_strict_mode" },
@@ -115,6 +124,105 @@ export const slashCommandDefinitions = [
         .setRequired(true)
     ),
   new SlashCommandBuilder().setName("bot-stats").setDescription("Показать недельную статистику"),
+  new SlashCommandBuilder()
+    .setName("bot-topic")
+    .setDescription("Посмотреть или сбросить активную тему")
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("status")
+        .setDescription("Активная тема канала")
+        .addChannelOption((option) =>
+          option.setName("channel").setDescription("Канал").addChannelTypes(ChannelType.GuildText, ChannelType.PublicThread, ChannelType.PrivateThread)
+        )
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("reset")
+        .setDescription("Сбросить активную тему")
+        .addChannelOption((option) =>
+          option.setName("channel").setDescription("Канал").addChannelTypes(ChannelType.GuildText, ChannelType.PublicThread, ChannelType.PrivateThread)
+        )
+    ),
+  new SlashCommandBuilder()
+    .setName("bot-mood")
+    .setDescription("Управлять mood Hori")
+    .addSubcommand((subcommand) => subcommand.setName("status").setDescription("Текущий mood"))
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("set")
+        .setDescription("Задать mood")
+        .addStringOption((option) =>
+          option
+            .setName("mode")
+            .setDescription("Режим")
+            .setRequired(true)
+            .addChoices(
+              { name: "normal", value: "normal" },
+              { name: "playful", value: "playful" },
+              { name: "dry", value: "dry" },
+              { name: "irritated", value: "irritated" },
+              { name: "focused", value: "focused" },
+              { name: "sleepy", value: "sleepy" },
+              { name: "detached", value: "detached" }
+            )
+        )
+        .addIntegerOption((option) => option.setName("minutes").setDescription("Сколько минут").setMinValue(1).setMaxValue(1440))
+        .addStringOption((option) => option.setName("reason").setDescription("Причина"))
+    )
+    .addSubcommand((subcommand) => subcommand.setName("clear").setDescription("Сбросить mood")),
+  new SlashCommandBuilder()
+    .setName("bot-queue")
+    .setDescription("Управлять reply queue")
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("status")
+        .setDescription("Статус очереди")
+        .addChannelOption((option) =>
+          option.setName("channel").setDescription("Канал").addChannelTypes(ChannelType.GuildText, ChannelType.PublicThread, ChannelType.PrivateThread)
+        )
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("clear")
+        .setDescription("Очистить очередь")
+        .addChannelOption((option) =>
+          option.setName("channel").setDescription("Канал").addChannelTypes(ChannelType.GuildText, ChannelType.PublicThread, ChannelType.PrivateThread)
+        )
+    ),
+  new SlashCommandBuilder()
+    .setName("bot-media")
+    .setDescription("Управлять media registry")
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("add")
+        .setDescription("Зарегистрировать локальный media-файл")
+        .addStringOption((option) => option.setName("id").setDescription("media id").setRequired(true))
+        .addStringOption((option) =>
+          option
+            .setName("type")
+            .setDescription("Тип")
+            .setRequired(true)
+            .addChoices(
+              { name: "image", value: "image" },
+              { name: "gif", value: "gif" },
+              { name: "video", value: "video" },
+              { name: "audio", value: "audio" }
+            )
+        )
+        .addStringOption((option) => option.setName("path").setDescription("Абсолютный путь к файлу").setRequired(true))
+        .addStringOption((option) => option.setName("trigger-tags").setDescription("CSV trigger tags"))
+        .addStringOption((option) => option.setName("tone-tags").setDescription("CSV tone tags"))
+        .addStringOption((option) => option.setName("channels").setDescription("CSV channel kinds"))
+        .addStringOption((option) => option.setName("moods").setDescription("CSV moods"))
+        .addBooleanOption((option) => option.setName("nsfw").setDescription("NSFW"))
+    )
+    .addSubcommand((subcommand) => subcommand.setName("list").setDescription("Список media"))
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("disable")
+        .setDescription("Отключить media")
+        .addStringOption((option) => option.setName("id").setDescription("media id").setRequired(true))
+    ),
   new SlashCommandBuilder()
     .setName("bot-ai-url")
     .setDescription("Сменить Ollama URL (только владелец бота)")

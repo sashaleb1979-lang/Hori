@@ -69,6 +69,14 @@ export const defaultHoriPersonaConfig: PersonaConfig = {
   },
   politicalFlavour: defaultPoliticalFlavour,
   slangRules: defaultSlangRules,
+  contextualBehavior: {
+    snarkConfidenceThreshold: 0.68,
+    selfInitiatedSnarkConfidenceThreshold: 0.86,
+    staleTakeSensitivity: 0.72,
+    contextPrecisionBias: 0.82,
+    weakModelBrevityBias: 0.9,
+    mediaReactionBias: 0.55
+  },
   responseModeDefaults: defaultModeTunings,
   channelOverrides: defaultChannelOverrides,
   limits: {
@@ -140,6 +148,7 @@ export function normalizePersonaConfig(input?: DeepPartial<PersonaConfig>): Pers
     conversationBiases: { ...base.conversationBiases, ...(input?.conversationBiases ?? {}) },
     politicalFlavour: { ...base.politicalFlavour, ...(input?.politicalFlavour ?? {}) },
     slangRules: { ...base.slangRules, ...(input?.slangRules ?? {}) },
+    contextualBehavior: { ...base.contextualBehavior, ...(input?.contextualBehavior ?? {}) },
     responseModeDefaults: mergeModeDefaults(base.responseModeDefaults, input?.responseModeDefaults),
     channelOverrides: mergeChannelOverrides(base.channelOverrides, input?.channelOverrides),
     limits: { ...base.limits, ...(input?.limits ?? {}) },

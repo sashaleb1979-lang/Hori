@@ -2,7 +2,7 @@ import type { Message } from "discord.js";
 import { PermissionFlagsBits } from "discord.js";
 
 import { trackIngestedMessage } from "@hori/analytics";
-import { asErrorMessage, type TriggerSource } from "@hori/shared";
+import { asErrorMessage, type ReplyQueueTrace, type TriggerSource } from "@hori/shared";
 
 import type { BotRuntime } from "../bootstrap";
 import { sendReply } from "../responders/message-responder";
@@ -41,6 +41,14 @@ async function enqueueBackgroundJobs(runtime: BotRuntime, envelope: {
               { jobId: `embedding:${envelope.messageId}` }
             )
           : Promise.resolve()
+    },
+    {
+      queue: "topic",
+      task: runtime.queues.topic.add(
+        "topic",
+        { guildId: envelope.guildId, channelId: envelope.channelId, messageId: envelope.messageId },
+        { jobId: `topic:${envelope.messageId}` }
+      )
     }
   ];
 
@@ -197,13 +205,46 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
     return;
   }
 
-  const result = await runtime.orchestrator.handleMessage(envelope, routingConfig);
+  let queueItemId: string | null = null;
+  let queueTrace: ReplyQueueTrace = { enabled: false, action: "none" };
+  if (routingConfig.featureFlags.replyQueueEnabled) {
+    queueTrace = await runtime.replyQueue.claimOrQueue({
+      guildId: envelope.guildId,
+      channelId: envelope.channelId,
+      sourceMsgId: envelope.messageId,
+      targetUserId: envelope.userId,
+      triggerSource: envelope.triggerSource,
+      explicitInvocation
+    });
+
+    if (queueTrace.action === "dropped") {
+      return;
+    }
+
+    if (queueTrace.action === "busy_ack") {
+      await sendReply(message, "Ща, я ещё прошлое дожёвываю. Подожди чуть.");
+      return;
+    }
+
+    queueItemId = queueTrace.itemId ?? null;
+  }
+
+  const result = await runtime.orchestrator.handleMessage(envelope, routingConfig, queueTrace);
 
   if (!result.reply) {
+    if (queueItemId) {
+      await runtime.replyQueue.complete(queueItemId);
+      await drainReplyQueue(runtime, message);
+    }
     return;
   }
 
   await sendReply(message, result.reply);
+
+  if (queueItemId) {
+    await runtime.replyQueue.complete(queueItemId);
+    await drainReplyQueue(runtime, message);
+  }
 
   if (autoInterject) {
     await runtime.prisma.interjectionLog.create({
@@ -216,5 +257,24 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
         outcome: "sent"
       }
     });
+  }
+}
+
+async function drainReplyQueue(runtime: BotRuntime, message: Message) {
+  if (!message.guildId) {
+    return;
+  }
+
+  const next = await runtime.replyQueue.nextQueued(message.guildId, message.channelId);
+  if (!next) {
+    return;
+  }
+
+  try {
+    const queuedMessage = await message.channel.messages.fetch(next.sourceMsgId);
+    await routeMessage(runtime, queuedMessage);
+  } catch (error) {
+    await runtime.replyQueue.complete(next.id);
+    runtime.logger.warn({ error, sourceMsgId: next.sourceMsgId }, "queued reply source message could not be fetched");
   }
 }

@@ -17,7 +17,16 @@ export type ReplyLength = "short" | "medium" | "long";
 
 export type TriggerSource = "name" | "mention" | "reply" | "slash" | "context_action" | "auto_interject";
 
-export type MemoryLayer = "recent_messages" | "channel_summaries" | "server_memory" | "user_profile" | "relationship";
+export type MemoryLayer =
+  | "recent_messages"
+  | "channel_summaries"
+  | "server_memory"
+  | "user_profile"
+  | "relationship"
+  | "reply_chain"
+  | "active_topic"
+  | "topic_window"
+  | "entity_memory";
 
 export type PersonaMode = "normal" | "playful" | "dry" | "irritated" | "focused" | "sleepy" | "detached";
 
@@ -53,6 +62,8 @@ export type AntiSlopProfile = "off" | "standard" | "strict";
 
 export type IdeologicalFlavourState = "disabled" | "background" | "enabled";
 
+export type ContextEnergy = "low" | "medium" | "high";
+
 export interface PersonaResponseLimits {
   maxSentences: number;
   maxParagraphs: number;
@@ -76,7 +87,17 @@ export interface PersonaBehaviorTrace {
   ideologicalFlavour: IdeologicalFlavourState;
   analogyBan: boolean;
   slangProfile: string;
+  contextEnergy: ContextEnergy;
   isSelfInitiated: boolean;
+  snarkConfidenceThreshold: number;
+  contextConfidence?: number;
+  mockeryConfidence?: number;
+  activeTopicId?: string | null;
+  replyChainCount?: number;
+  entityTriggers?: string[];
+  contextVersion?: "v1" | "v2";
+  staleTakeDetected: boolean;
+  mediaReactionEligible: boolean;
   maxChars: number;
   maxSentences: number;
   maxParagraphs: number;
@@ -91,6 +112,15 @@ export interface FeatureFlags {
   userProfiles: boolean;
   contextActions: boolean;
   roast: boolean;
+  contextV2Enabled: boolean;
+  contextConfidenceEnabled: boolean;
+  topicEngineEnabled: boolean;
+  affinitySignalsEnabled: boolean;
+  moodEngineEnabled: boolean;
+  replyQueueEnabled: boolean;
+  mediaReactionsEnabled: boolean;
+  runtimeConfigCacheEnabled: boolean;
+  embeddingCacheEnabled: boolean;
   channelAwareMode: boolean;
   messageKindAwareMode: boolean;
   antiSlopStrictMode: boolean;
@@ -211,11 +241,82 @@ export interface BotTrace {
   latencyMs?: number;
   responded: boolean;
   behavior?: PersonaBehaviorTrace;
+  context?: ContextTrace;
+  queue?: ReplyQueueTrace;
+  media?: MediaReactionTrace;
+}
+
+export interface ContextMessage {
+  id?: string;
+  author: string;
+  userId?: string;
+  content: string;
+  createdAt: Date;
+  replyToMessageId?: string | null;
+}
+
+export interface ActiveTopicContext {
+  topicId: string;
+  title: string;
+  summaryShort: string;
+  summaryFacts: string[];
+  lastUpdatedAt: Date;
+  confidence: number;
+}
+
+export interface ContextEntity {
+  type: "person" | "org" | "place" | "concept";
+  surface: string;
+  canonical?: string;
+  score: number;
+}
+
+export interface ContextScores {
+  contextConfidence: number;
+  mockeryConfidence: number;
+  reasons: string[];
+}
+
+export interface ContextTrace {
+  version: "v1" | "v2";
+  contextConfidence?: number;
+  mockeryConfidence?: number;
+  activeTopicId?: string | null;
+  replyChainCount: number;
+  entityTriggers: string[];
+  truncation?: {
+    maxChars: number;
+    droppedRecentMessages: number;
+  };
+  sections: string[];
+}
+
+export interface ReplyQueueTrace {
+  enabled: boolean;
+  action: "none" | "queued" | "processing" | "dropped" | "busy_ack" | "drained";
+  itemId?: string | null;
+  reason?: string;
+}
+
+export interface MediaReactionTrace {
+  enabled: boolean;
+  selected: boolean;
+  mediaId?: string | null;
+  reason?: string;
+}
+
+export interface BotReplyPayload {
+  text: string;
+  media?: {
+    filePath: string;
+    mediaId: string;
+    type: string;
+  } | null;
 }
 
 export interface ContextBundle {
-  recentMessages: Array<{ author: string; content: string; createdAt: Date }>;
-  summaries: Array<{ summaryShort: string; summaryLong: string; rangeStart: Date; rangeEnd: Date }>;
+  recentMessages: ContextMessage[];
+  summaries: Array<{ summaryShort: string; summaryLong: string; rangeStart: Date; rangeEnd: Date; topicTags?: string[] }>;
   serverMemories: Array<{ key: string; value: string; type: string }>;
   userProfile?: {
     summaryShort: string;
@@ -224,6 +325,16 @@ export interface ContextBundle {
     confidenceScore: number;
   } | null;
   relationship?: RelationshipOverlay | null;
+}
+
+export interface ContextBundleV2 extends ContextBundle {
+  version: "v2";
+  replyChain: ContextMessage[];
+  repliedMessageId?: string | null;
+  activeTopic?: ActiveTopicContext | null;
+  topicWindow: ContextMessage[];
+  entities: ContextEntity[];
+  entityMemories: Array<{ key: string; value: string; type: string; score: number }>;
 }
 
 export interface AnalyticsTopItem {
@@ -248,6 +359,7 @@ export interface QueueJobNames {
   summary: "summary.generate";
   profile: "profile.refresh";
   embedding: "embedding.generate";
+  topic: "topic.update";
   cleanup: "cleanup.execute";
   searchCache: "search-cache.cleanup";
 }
@@ -265,6 +377,12 @@ export interface ProfileJobPayload {
 export interface EmbeddingJobPayload {
   entityType: "message" | "server_memory" | "user_memory";
   entityId: string;
+}
+
+export interface TopicJobPayload {
+  guildId: string;
+  channelId: string;
+  messageId: string;
 }
 
 export interface CleanupJobPayload {

@@ -1,4 +1,4 @@
-import type { ChannelKind, MessageKind, PersonaMode, PersonaResponseLimits, RequestedDepth } from "@hori/shared";
+import type { ChannelKind, ContextEnergy, MessageKind, PersonaMode, PersonaResponseLimits, RequestedDepth } from "@hori/shared";
 
 import { buildAnalogySuppressionBlock, buildAntiSlopBlock, resolveAntiSlopProfile } from "./antiSlop";
 import { buildChannelStyleBlock, depthTagValue, modeTagValue, resolveChannelKind } from "./channelStyles";
@@ -123,6 +123,21 @@ function depthFromText(content: string): RequestedDepth | undefined {
   return undefined;
 }
 
+function depthFromContentComplexity(content: string): RequestedDepth | undefined {
+  const lines = content.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const taskMarkers = content.match(/[,;]\s*(и|плюс|ещ[её])\s+|(^|\n)\s*(?:[-*]|\d+[.)])/gi)?.length ?? 0;
+
+  if (content.length > 1200 || lines.length >= 6 || taskMarkers >= 3) {
+    return "long";
+  }
+
+  if (content.length > 650 || lines.length >= 4 || taskMarkers >= 2) {
+    return "normal";
+  }
+
+  return undefined;
+}
+
 function compactest(left: RequestedDepth, right: RequestedDepth) {
   return depthOrder.indexOf(left) <= depthOrder.indexOf(right) ? left : right;
 }
@@ -142,6 +157,7 @@ function resolveRequestedDepth(options: {
   const overrideDepth = options.input.requestedDepth;
   const channelOverrideDepth = options.input.channelPolicy?.responseLengthOverride;
   const explicitTextDepth = depthFromText(options.input.cleanedContent);
+  const complexityDepth = depthFromContentComplexity(options.input.cleanedContent);
   const taggedDepth = depthTagValue(tags);
   const channelDepth = options.persona.channelOverrides[options.channelKind]?.depthBias;
   const messageDepth = messageKindDepthBias[options.messageKind];
@@ -155,6 +171,7 @@ function resolveRequestedDepth(options: {
     (isRequestedDepth(channelOverrideDepth) ? channelOverrideDepth : undefined) ??
     explicitTextDepth ??
     taggedDepth ??
+    complexityDepth ??
     messageDepth ??
     channelDepth ??
     options.input.compactnessBias ??
@@ -190,7 +207,10 @@ function resolveMode(options: {
   requestedDepth: RequestedDepth;
 }) {
   const tags = options.input.channelPolicy?.topicInterestTags ?? [];
-  const selfInitiated = options.input.debugOverrides?.isSelfInitiated ?? options.input.isSelfInitiated ?? false;
+  const selfInitiated =
+    options.input.debugOverrides?.isSelfInitiated ??
+    options.input.isSelfInitiated ??
+    (options.input.message.triggerSource === "auto_interject");
   const taggedMode = modeTagValue(tags);
   const channelModeBias = options.channelKind === "general" ? undefined : options.persona.channelOverrides[options.channelKind]?.modeBias;
   const messageModeBias = messageKindModeBias[options.messageKind];
@@ -264,15 +284,137 @@ function resolveLimits(options: {
   return resolved;
 }
 
+function resolveContextEnergy(options: {
+  mode: PersonaMode;
+  channelKind: ChannelKind;
+  messageKind: MessageKind;
+  isSelfInitiated: boolean;
+  timeOfDayHint?: string;
+}): ContextEnergy {
+  if (
+    options.isSelfInitiated ||
+    options.mode === "sleepy" ||
+    options.mode === "dry" ||
+    options.mode === "detached" ||
+    options.channelKind === "bot" ||
+    options.messageKind === "low_signal_noise" ||
+    options.messageKind === "repeated_question"
+  ) {
+    return "low";
+  }
+
+  if (options.mode === "focused" || options.channelKind === "serious" || options.channelKind === "help") {
+    return "medium";
+  }
+
+  if (options.mode === "playful" || options.channelKind === "memes" || options.messageKind === "meme_bait") {
+    return "high";
+  }
+
+  if (/night|ноч|late/i.test(options.timeOfDayHint ?? "")) {
+    return "low";
+  }
+
+  return "medium";
+}
+
+function detectStaleTake(content: string, messageKind: MessageKind) {
+  return (
+    messageKind === "repeated_question" ||
+    /gotcha|гоча|затаскан|заезж|стар(ый|ое) тейк|опять|снова|мы это уже|коммунизм.*работ|налог.*не.*воров|государств.*нужн/i.test(content)
+  );
+}
+
+function buildWeakModelBrevityBlock(persona: PersonaConfig, requestedDepth: RequestedDepth): BlockResult {
+  return {
+    name: "WEAK MODEL BREVITY BLOCK",
+    content: [
+      "[WEAK MODEL BREVITY BLOCK]",
+      `Brevity=${persona.contextualBehavior.weakModelBrevityBias}, depth=${requestedDepth}. Default 1-3 tight sentences; longer only for explicit depth, long/multi-part input or real complexity.`
+    ].join("\n")
+  };
+}
+
+function buildSnarkConfidenceBlock(options: {
+  threshold: number;
+  isSelfInitiated: boolean;
+  contextPrecisionBias: number;
+  contextConfidence?: number;
+  mockeryConfidence?: number;
+}): BlockResult {
+  return {
+    name: "SNARK CONFIDENCE BLOCK",
+    content: [
+      "[SNARK CONFIDENCE BLOCK]",
+      `Порог=${options.threshold}, точность контекста=${options.contextPrecisionBias}, contextConfidence=${options.contextConfidence ?? "n/a"}, mockeryConfidence=${options.mockeryConfidence ?? "n/a"}. ${
+        options.isSelfInitiated ? "Для самостоятельного подкола нужен чистый уверенный хит." : "Не подкалывай наугад; если контекст мутный, отвечай короче и нейтральнее."
+      }`
+    ].join("\n")
+  };
+}
+
+function buildContextEnergyBlock(energy: ContextEnergy): BlockResult {
+  return {
+    name: "CONTEXT ENERGY BLOCK",
+    content: [
+      "[CONTEXT ENERGY BLOCK]",
+      `Energy=${energy}. ${
+        energy === "high"
+          ? "Можно больше мемной энергии, но всё равно коротко."
+          : energy === "low"
+            ? "Короче, суше, без желания разворачивать."
+            : "Обычная живая краткость, умеренная колкость."
+      }`
+    ].join("\n")
+  };
+}
+
+function buildContextUsageBlock(input: ComposeBehaviorPromptInput): BlockResult | null {
+  if (!input.contextTrace || input.contextTrace.version !== "v2") {
+    return null;
+  }
+
+  return {
+    name: "CONTEXT USAGE BLOCK",
+    content: [
+      "[CONTEXT USAGE BLOCK]",
+      `Версия контекста: ${input.contextTrace.version}. Reply-chain=${input.contextTrace.replyChainCount}. ActiveTopic=${input.contextTrace.activeTopicId ?? "none"}. Entities=${input.contextTrace.entityTriggers.join(", ") || "none"}.`,
+      `contextConfidence=${input.contextScores?.contextConfidence ?? "n/a"}, mockeryConfidence=${input.contextScores?.mockeryConfidence ?? "n/a"}.`,
+      "Сначала используй reply-chain и active topic. Не рестарти тему, если сообщение является reply.",
+      "Если confidence низкий, не делай вид, что всё ясно: отвечай короче, осторожнее, без уверенного подкола.",
+      "Не выдумывай недостающий контекст и не пересказывай чат без нужды."
+    ].join("\n")
+  };
+}
+
+function buildStaleTakeMediaBlock(options: {
+  staleTakeDetected: boolean;
+  mediaReactionEligible: boolean;
+}): BlockResult | null {
+  if (!options.staleTakeDetected && !options.mediaReactionEligible) {
+    return null;
+  }
+
+  return {
+    name: "STALE TAKE / MEDIA REACTION BLOCK",
+    content: [
+      "[STALE TAKE / MEDIA REACTION BLOCK]",
+      `Stale take detected: ${options.staleTakeDetected}. Media reaction eligible: ${options.mediaReactionEligible}.`,
+      "Повторный или gotcha-вброс можно закрывать короче, суше и усталее; не разбирай его с нуля.",
+      "Мемы/GIF тут только extension point: предпочитай их только когда они точнее текста, не наугад."
+    ].join("\n")
+  };
+}
+
 function buildIdentityBlock(persona: PersonaConfig): BlockResult {
   return {
     name: "STABLE IDENTITY BLOCK",
     content: [
       "[STABLE IDENTITY BLOCK]",
-      `You are ${persona.identity.name}. Age: ${persona.identity.age}. Language: ${persona.identity.language}. Platform style: ${persona.identity.platformStyle}.`,
+      `Ты ${persona.identity.name}. Возраст: ${persona.identity.age}. Язык: ${persona.identity.language}. Платформенный стиль: ${persona.identity.platformStyle}.`,
       `Role: ${persona.identity.baselineRoleDescription}.`,
-      "Hori is a live Discord server character, not a neutral assistant, article writer, tutor, support agent or mediator.",
-      "Default voice: short, direct, alive, Russian Discord tone. If she does not know, she says so plainly."
+      "Hori — живой серверный персонаж Discord, не нейтральный ассистент, автор статьи, репетитор, саппорт или медиатор.",
+      "Базовый голос: коротко, прямо, живо, русскоязычный Discord-тон. Если не знает — говорит прямо."
     ].join("\n")
   };
 }
@@ -284,9 +426,9 @@ function buildStyleRulesBlock(persona: PersonaConfig): BlockResult {
       "[STYLE RULES BLOCK]",
       `Core traits: brevity=${persona.coreTraits.brevity}, sarcasm=${persona.coreTraits.sarcasm}, sharpness=${persona.coreTraits.sharpness}, warmth=${persona.coreTraits.warmth}, patience=${persona.coreTraits.patience}, playfulness=${persona.coreTraits.playfulness}.`,
       `Style: sentenceLength=${persona.styleRules.averageSentenceLength}, slang=${persona.styleRules.allowedSlangLevel}, rudeness=${persona.styleRules.allowedRudenessLevel}, explanationDensity=${persona.styleRules.explanationDensity}, analogyBanStrictness=${persona.styleRules.analogyBanStrictness}.`,
-      "Prefer direct openings. Avoid repeating the user's question. Avoid unsolicited lectures, overexplaining, apologetic padding, assistant disclaimers and fake certainty.",
-      "Vary the short Discord rhythm: sometimes one crisp line, sometimes two dense sentences, sometimes a dry aside if context really earns it. Do not force jokes or repeat catchphrases.",
-      "Do not automatically become a kind mediator in conflict. Sharp, dry or cold replies are allowed when context fits, but keep them coherent and controlled."
+      "Начинай прямо. Не повторяй вопрос пользователя. Без непрошеных лекций, переобъяснения, извинительной ваты, ассистентских дисклеймеров и фальшивой уверенности.",
+      "Держи короткий Discord-ритм живым; не форси шутки и не повторяй одни и те же словечки.",
+      "Не становись автоматически доброй медиаторшей в конфликте. Резкий, сухой или холодный ответ допустим по контексту, но связно и собранно."
     ].join("\n")
   };
 }
@@ -435,6 +577,20 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     messageKind,
     isSelfInitiated
   });
+  const contextEnergy = resolveContextEnergy({
+    mode,
+    channelKind,
+    messageKind,
+    isSelfInitiated,
+    timeOfDayHint: input.timeOfDayHint
+  });
+  const staleTakeDetected = detectStaleTake(input.cleanedContent, messageKind);
+  const mediaReactionEligible =
+    !["focused", "serious", "help"].includes(mode) &&
+    (isSelfInitiated || staleTakeDetected || messageKind === "meme_bait" || channelKind === "memes");
+  const snarkConfidenceThreshold = isSelfInitiated
+    ? persona.contextualBehavior.selfInitiatedSnarkConfidenceThreshold
+    : persona.contextualBehavior.snarkConfidenceThreshold;
   const blocks: BlockResult[] = [];
   const add = (block: BlockResult | null) => {
     if (block) {
@@ -447,8 +603,20 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   add(buildToneBlock(mode, persona.responseModeDefaults[mode]));
   add(buildChannelStyleBlock(channelKind, persona.channelOverrides[channelKind]));
   add(buildMessageKindBlock(messageKind));
+  add(buildContextUsageBlock(input));
   add(buildLengthBlock(limits));
+  add(buildWeakModelBrevityBlock(persona, requestedDepth));
   add(buildStylePresetBlock(stylePreset, stylePresets[stylePreset]));
+  add(
+    buildSnarkConfidenceBlock({
+      threshold: snarkConfidenceThreshold,
+      isSelfInitiated,
+      contextPrecisionBias: persona.contextualBehavior.contextPrecisionBias,
+      contextConfidence: input.contextScores?.contextConfidence,
+      mockeryConfidence: input.contextScores?.mockeryConfidence
+    })
+  );
+  add(buildContextEnergyBlock(contextEnergy));
   add(buildSlangBlock({ profile: slangProfile, rules: persona.slangRules }));
   add(buildIdeologicalBlock({ state: ideologicalFlavour, config: persona.politicalFlavour }));
   if (isSelfInitiated) {
@@ -460,6 +628,7 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
       })
     );
   }
+  add(buildStaleTakeMediaBlock({ staleTakeDetected, mediaReactionEligible }));
   add(buildAntiSlopBlock({ profile: antiSlopProfile, rules: persona.antiSlopRules, forbiddenPatterns: persona.forbiddenPatterns }));
   add(buildAnalogySuppressionBlock(analogyBan));
   add(buildLegacyServerOverlay(input));
@@ -483,7 +652,17 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
       ideologicalFlavour,
       analogyBan,
       slangProfile,
+      contextEnergy,
       isSelfInitiated,
+      snarkConfidenceThreshold,
+      contextConfidence: input.contextScores?.contextConfidence,
+      mockeryConfidence: input.contextScores?.mockeryConfidence,
+      activeTopicId: input.contextTrace?.activeTopicId ?? null,
+      replyChainCount: input.contextTrace?.replyChainCount ?? 0,
+      entityTriggers: input.contextTrace?.entityTriggers ?? [],
+      contextVersion: input.contextTrace?.version ?? "v1",
+      staleTakeDetected,
+      mediaReactionEligible,
       maxChars: limits.maxChars,
       maxSentences: limits.maxSentences,
       maxParagraphs: limits.maxParagraphs,

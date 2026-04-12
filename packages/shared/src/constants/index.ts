@@ -2,6 +2,7 @@ export const QUEUE_NAMES = {
   summary: "summary.generate",
   profile: "profile.refresh",
   embedding: "embedding.generate",
+  topic: "topic.update",
   cleanup: "cleanup.execute",
   searchCache: "search-cache.cleanup"
 } as const;
@@ -22,7 +23,12 @@ export const SLASH_COMMANDS = [
   "bot-profile",
   "bot-channel",
   "bot-summary",
-  "bot-stats"
+  "bot-stats",
+  "bot-topic",
+  "bot-mood",
+  "bot-queue",
+  "bot-media",
+  "bot-ai-url"
 ] as const;
 
 export const HALF_HOUR_MS = 30 * 60 * 1000;

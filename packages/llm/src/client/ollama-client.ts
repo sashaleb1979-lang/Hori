@@ -30,7 +30,6 @@ interface OllamaChatChunk {
 
 const MIN_OLLAMA_CHAT_TIMEOUT_MS = 240_000;
 const MIN_OLLAMA_EMBED_TIMEOUT_MS = 180_000;
-const OLLAMA_KEEP_ALIVE = "10m";
 
 function normalizeModelPart(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -148,10 +147,10 @@ export function pickClosestInstalledModel(requestedModel: string, availableModel
   return best.model.name;
 }
 
-function buildChatPayload(options: LlmChatOptions, model: string, maxTokens: number) {
+function buildChatPayload(options: LlmChatOptions, model: string, maxTokens: number, keepAlive: string) {
   return {
     model,
-    keep_alive: OLLAMA_KEEP_ALIVE,
+    keep_alive: keepAlive,
     stream: true,
     ...(shouldDisableThinking(model) ? { think: false } : {}),
     format: options.format,
@@ -297,6 +296,7 @@ export class OllamaClient implements LlmClient {
       const resolvedModel = await this.resolveModelAlias(baseUrl, requestedModel);
       let response = await this.postJson(new URL("/api/embed", baseUrl), {
         model: resolvedModel,
+        keep_alive: this.env.OLLAMA_KEEP_ALIVE,
         input
       }, Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_EMBED_TIMEOUT_MS));
 
@@ -305,6 +305,7 @@ export class OllamaClient implements LlmClient {
         if (fallbackModel) {
           response = await this.postJson(new URL("/api/embed", baseUrl), {
             model: fallbackModel,
+            keep_alive: this.env.OLLAMA_KEEP_ALIVE,
             input
           }, Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_EMBED_TIMEOUT_MS));
         }
@@ -339,7 +340,7 @@ export class OllamaClient implements LlmClient {
   private async sendChatRequest(baseUrl: string, requestedModel: string, model: string, options: LlmChatOptions, maxTokens: number) {
     let response = await this.postJson(
       new URL("/api/chat", baseUrl),
-      buildChatPayload(options, model, maxTokens),
+      buildChatPayload(options, model, maxTokens, this.env.OLLAMA_KEEP_ALIVE),
       Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS)
     );
 
@@ -351,7 +352,7 @@ export class OllamaClient implements LlmClient {
     if (fallbackModel) {
       response = await this.postJson(
         new URL("/api/chat", baseUrl),
-        buildChatPayload(options, fallbackModel, maxTokens),
+        buildChatPayload(options, fallbackModel, maxTokens, this.env.OLLAMA_KEEP_ALIVE),
         Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS)
       );
 

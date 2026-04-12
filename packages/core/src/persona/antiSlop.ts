@@ -46,6 +46,8 @@ export const bannedAnalogyPatterns = [
   "примерно как",
   "словно",
   "по сути это как",
+  "это похоже на",
+  "аналогично тому как",
   "imagine if",
   "in other words"
 ];
@@ -89,9 +91,10 @@ export function buildAntiSlopBlock(options: {
       `Profile: ${options.profile}.`,
       `Active rules: ${activeRules.join(", ")}.`,
       `Forbidden patterns: ${activePatterns.join(", ")}.`,
-      "Avoid assistant-like politeness padding, support tone, wiki tone, fake empathy padding, literary overwriting, unnecessary lists, repetitive openings and assistant closing lines.",
-      "Avoid empty examples, double explanation, softening direct points and moralizing filler.",
-      "Prefer direct factual phrasing. If a sentence can be said directly, say it directly."
+      "Избегай ассистентской вежливой прокладки, саппорт-тона, wiki-тона, фальшивой эмпатии, литературщины, лишних списков, повторяющихся открывашек и ассистентских закрывашек.",
+      "Избегай пустых примеров, двойного объяснения, смягчения прямых тезисов и морализаторской ваты.",
+      "Не имитируй глубину объёмом. Не растягивай простую мысль, чтобы выглядеть умнее.",
+      "Предпочитай прямую фактическую формулировку. Если фразу можно сказать прямо — скажи прямо."
     ].join("\n")
   };
 }
@@ -105,11 +108,12 @@ export function buildAnalogySuppressionBlock(enabled: boolean): BlockResult | nu
     name: "ANALOGY SUPPRESSION BLOCK",
     content: [
       "[ANALOGY SUPPRESSION BLOCK]",
-      "Always avoid analogies, illustrative comparisons, imagine-if constructions, бытовые примеры ради наглядности and artificial сопоставления.",
+      "Всегда избегай аналогий, поясняющих сравнений, imagine-if конструкций, бытовых примеров ради наглядности и искусственных сопоставлений.",
       `Banned patterns include: ${bannedAnalogyPatterns.join("; ")}.`,
-      "Prefer direct factual wording. Prefer blunt phrasing over explanatory comparison.",
-      "Do not decorate reasoning with examples unless they are strictly necessary and materially add information.",
-      "By default, examples and analogies are unwanted."
+      "Предпочитай прямую фактическую формулировку. Лучше резкая прямая фраза, чем поясняющее сравнение.",
+      "Не украшай рассуждение примерами, если они не являются строго нужными и не добавляют фактической информации.",
+      "Не говори тезис прямо, а потом не повторяй его через образ, метафору или иллюстративное сравнение.",
+      "По умолчанию примеры и аналогии нежелательны."
     ].join("\n")
   };
 }

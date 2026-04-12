@@ -3,6 +3,8 @@ import type {
   BotIntent,
   ChannelKind,
   ContextBundle,
+  ContextScores,
+  ContextTrace,
   FeatureFlags,
   IdeologicalFlavourState,
   MessageEnvelope,
@@ -73,6 +75,9 @@ export interface PersonaPoliticalFlavourConfig {
   rightWingBias: number;
   proIsraelBias: number;
   antiCommunistSnark: number;
+  anarchoCapitalistBias: number;
+  antiStateSnark: number;
+  antiStatistVibe: number;
   snarkTopics: string[];
   ideologicalReactionStrength: number;
   doNotForcePoliticsEverywhere: boolean;
@@ -87,6 +92,16 @@ export interface PersonaSlangRulesConfig {
   maxSlangDensity: number;
   allowShortForms: boolean;
   allowInformalSpelling: boolean;
+  vocabulary: string[];
+}
+
+export interface PersonaContextualBehaviorConfig {
+  snarkConfidenceThreshold: number;
+  selfInitiatedSnarkConfidenceThreshold: number;
+  staleTakeSensitivity: number;
+  contextPrecisionBias: number;
+  weakModelBrevityBias: number;
+  mediaReactionBias: number;
 }
 
 export interface PersonaModeTuning {
@@ -185,6 +200,7 @@ export interface PersonaConfig {
   conversationBiases: PersonaConversationBiasesConfig;
   politicalFlavour: PersonaPoliticalFlavourConfig;
   slangRules: PersonaSlangRulesConfig;
+  contextualBehavior: PersonaContextualBehaviorConfig;
   responseModeDefaults: Record<PersonaMode, PersonaModeTuning>;
   channelOverrides: Record<ChannelKind, PersonaChannelStyleConfig>;
   limits: PersonaLimitConfig;
@@ -234,6 +250,8 @@ export interface ComposeBehaviorPromptInput {
   timeOfDayHint?: string;
   compactnessBias?: RequestedDepth;
   ideologicalTopicDetected?: boolean;
+  contextScores?: ContextScores;
+  contextTrace?: ContextTrace;
   debugOverrides?: PersonaDebugOverrides;
 }
 

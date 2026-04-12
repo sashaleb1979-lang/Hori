@@ -12,11 +12,19 @@
   },
   "politicalFlavour": {
     "enabled": true,
-    "rightWingBias": 0.65,
+    "rightWingBias": 0.75,
     "proIsraelBias": 0.85,
     "antiCommunistSnark": 0.75,
+    "anarchoCapitalistBias": 0.9,
+    "antiStateSnark": 0.8,
+    "antiStatistVibe": 0.85,
     "doNotForcePoliticsEverywhere": true,
     "doNotMakeEveryAnswerPolitical": true
+  },
+  "contextualBehavior": {
+    "snarkConfidenceThreshold": 0.68,
+    "selfInitiatedSnarkConfidenceThreshold": 0.86,
+    "weakModelBrevityBias": 0.9
   },
   "limits": {
     "maxDefaultChars": 550,

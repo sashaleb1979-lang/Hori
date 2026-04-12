@@ -5,7 +5,7 @@ import {
   PermissionFlagsBits
 } from "discord.js";
 
-import { CONTEXT_ACTIONS, asErrorMessage, persistOllamaBaseUrl } from "@hori/shared";
+import { CONTEXT_ACTIONS, asErrorMessage, persistOllamaBaseUrl, type PersonaMode } from "@hori/shared";
 
 import type { BotRuntime } from "../bootstrap";
 
@@ -181,6 +181,60 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
       case "bot-stats":
         await interaction.reply({ content: await runtime.slashAdmin.stats(interaction.guildId), flags: MessageFlags.Ephemeral });
         return;
+      case "bot-topic": {
+        const channelId = interaction.options.getChannel("channel")?.id ?? interaction.channelId;
+        const content =
+          interaction.options.getSubcommand() === "reset"
+            ? await runtime.slashAdmin.topicReset(interaction.guildId, channelId)
+            : await runtime.slashAdmin.topicStatus(interaction.guildId, channelId);
+        await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      case "bot-mood": {
+        const subcommand = interaction.options.getSubcommand();
+        const content =
+          subcommand === "set"
+            ? await runtime.slashAdmin.moodSet(
+                interaction.guildId,
+                interaction.options.getString("mode", true) as PersonaMode,
+                interaction.options.getInteger("minutes") ?? 60,
+                interaction.options.getString("reason")
+              )
+            : subcommand === "clear"
+              ? await runtime.slashAdmin.moodClear(interaction.guildId)
+              : await runtime.slashAdmin.moodStatus(interaction.guildId);
+        await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      case "bot-queue": {
+        const channelId = interaction.options.getChannel("channel")?.id ?? null;
+        const content =
+          interaction.options.getSubcommand() === "clear"
+            ? await runtime.slashAdmin.queueClear(interaction.guildId, channelId)
+            : await runtime.slashAdmin.queueStatus(interaction.guildId, channelId);
+        await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      case "bot-media": {
+        const subcommand = interaction.options.getSubcommand();
+        const content =
+          subcommand === "add"
+            ? await runtime.slashAdmin.mediaAdd({
+                mediaId: interaction.options.getString("id", true),
+                type: interaction.options.getString("type", true),
+                filePath: interaction.options.getString("path", true),
+                triggerTags: interaction.options.getString("trigger-tags"),
+                toneTags: interaction.options.getString("tone-tags"),
+                allowedChannels: interaction.options.getString("channels"),
+                allowedMoods: interaction.options.getString("moods"),
+                nsfw: interaction.options.getBoolean("nsfw")
+              })
+            : subcommand === "disable"
+              ? await runtime.slashAdmin.mediaDisable(interaction.options.getString("id", true))
+              : await runtime.slashAdmin.mediaList();
+        await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+        return;
+      }
       default:
         await interaction.reply({ content: "Не знаю такую команду.", flags: MessageFlags.Ephemeral });
         return;

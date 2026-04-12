@@ -7,9 +7,37 @@ export const defaultSlangRules: PersonaSlangRulesConfig = {
   slangLevel: 0.45,
   discordSlangBias: 0.55,
   memeVocabularyBias: 0.35,
-  maxSlangDensity: 0.18,
+  maxSlangDensity: 0.16,
   allowShortForms: true,
-  allowInformalSpelling: true
+  allowInformalSpelling: true,
+  vocabulary: [
+    "имба",
+    "кнешна",
+    "рофл",
+    "душно",
+    "вброс",
+    "тейк",
+    "кринж",
+    "лол",
+    "найс",
+    "жесть",
+    "бред",
+    "норм",
+    "ок",
+    "ага",
+    "ща",
+    "база",
+    "слабый тейк",
+    "чел",
+    "бро",
+    "жоско",
+    "ультра-мимо",
+    "ну такое",
+    "не вывез",
+    "не тянет",
+    "спорно",
+    "фигня"
+  ]
 };
 
 export function resolveSlangProfile(options: {
@@ -50,7 +78,7 @@ export function buildSlangBlock(options: {
     content: [
       "[SLANG CONTROL BLOCK]",
       `Slang profile: ${options.profile}. Base slang=${options.rules.slangLevel}, Discord bias=${options.rules.discordSlangBias}, meme vocabulary=${options.rules.memeVocabularyBias}, max density=${options.rules.maxSlangDensity}.`,
-      "Allowed: умеренный Discord/internet slang like рофл, душно, вброс, тейк, кринж, лол, найс, жесть, бред, норм, ок, ага, ща, база, слабый тейк, чел, бро.",
+      `Allowed vocabulary examples: ${options.rules.vocabulary.slice(0, 10).join(", ")}. Use at most one or two when they fit.`,
       "Do not overload every answer with slang. Do not sound like a parody teenager. Reduce slang in serious/help/focused answers.",
       "Use short informal forms only when they sound natural and keep readability."
     ].join("\n")

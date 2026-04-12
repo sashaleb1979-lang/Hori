@@ -1,5 +1,5 @@
 import type { AppEnv } from "@hori/config";
-import type { AppLogger, AppPrismaClient, BotTrace, MessageEnvelope, SearchHit } from "@hori/shared";
+import type { AppLogger, AppPrismaClient, BotReplyPayload, BotTrace, MessageEnvelope, SearchHit } from "@hori/shared";
 import { botLatencyHistogram, botRepliesCounter, buildMemoryKey, clamp, normalizeWhitespace } from "@hori/shared";
 
 import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet } from "@hori/llm";
@@ -8,11 +8,16 @@ import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics"
 import { ContextService, RetrievalService } from "@hori/memory";
 import { BraveSearchClient, buildSourceDigest, fetchWebPage } from "@hori/search";
 import { IntentRouter } from "../intents/intent-router";
+import { detectMessageKind } from "../persona/messageKinds";
 import { PersonaService } from "../persona/persona-service";
 import { HELP_TEXT } from "../prompts/system-prompts";
 import { ResponseGuard } from "../safety/response-guard";
 import { RoastPolicy } from "../safety/roast-policy";
 import { ContextBuilderService } from "../services/context-builder";
+import { ContextScoringService } from "../services/context-scoring-service";
+import type { AffinityService } from "../services/affinity-service";
+import type { MediaReactionService } from "../services/media-reaction-service";
+import type { MoodService } from "../services/mood-service";
 import type { EffectiveRoutingConfig } from "../services/runtime-config-service";
 import { RuntimeConfigService } from "../services/runtime-config-service";
 
@@ -29,6 +34,9 @@ interface OrchestratorDeps {
   searchClient: BraveSearchClient;
   embeddingAdapter: EmbeddingAdapter;
   runtimeConfig: RuntimeConfigService;
+  affinity?: AffinityService;
+  mood?: MoodService;
+  media?: MediaReactionService;
 }
 
 export interface DebugTraceRecord {
@@ -54,10 +62,12 @@ export class ChatOrchestrator {
   private readonly roastPolicy = new RoastPolicy();
   private readonly responseGuard = new ResponseGuard();
   private readonly contextBuilder = new ContextBuilderService();
+  private readonly contextScoring = new ContextScoringService();
+  private readonly embeddingCache = new Map<string, { expiresAt: number; value: number[] }>();
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
-  async handleMessage(message: MessageEnvelope, prefetchedConfig?: EffectiveRoutingConfig) {
+  async handleMessage(message: MessageEnvelope, prefetchedConfig?: EffectiveRoutingConfig, queueTrace?: BotTrace["queue"]) {
     const startedAt = Date.now();
     const runtimeConfig = prefetchedConfig ?? (await this.deps.runtimeConfig.getRoutingConfig(message.guildId, message.channelId));
     const guildSettings = runtimeConfig.guildSettings;
@@ -75,7 +85,8 @@ export class ChatOrchestrator {
           contextMessages: 0,
           memoryLayers: [],
           relationshipApplied: false,
-          responded: false
+          responded: false,
+          queue: queueTrace
         },
         startedAt
       );
@@ -88,9 +99,37 @@ export class ChatOrchestrator {
       channelId: message.channelId,
       userId: message.userId,
       limit: this.deps.env.LLM_MAX_CONTEXT_MESSAGES,
-      queryEmbedding
+      queryEmbedding,
+      message,
+      intent: intent.intent
     });
-    const { contextText, memoryLayers } = this.contextBuilder.buildPromptContext(contextBundle);
+    const messageKind = runtimeConfig.featureFlags.messageKindAwareMode
+      ? detectMessageKind({
+          content: intent.cleanedContent,
+          intent: intent.intent,
+          message,
+          context: contextBundle
+        })
+      : /\?/.test(intent.cleanedContent)
+        ? "info_question"
+        : "casual_address";
+    const affinityRelationship = runtimeConfig.featureFlags.affinitySignalsEnabled
+      ? await this.deps.affinity?.applyRecentOverlay(message.guildId, message.userId, contextBundle.relationship)
+      : contextBundle.relationship;
+    const contextScores = runtimeConfig.featureFlags.contextConfidenceEnabled
+      ? this.contextScoring.score({
+          bundle: contextBundle,
+          message,
+          messageKind,
+          relationship: affinityRelationship
+        })
+      : undefined;
+    const { contextText, memoryLayers, trace: contextTrace } = this.contextBuilder.buildPromptContext(contextBundle, {
+      message,
+      intent: intent.intent,
+      maxChars: this.deps.env.CONTEXT_V2_MAX_CHARS,
+      contextV2Enabled: runtimeConfig.featureFlags.contextV2Enabled
+    });
     const moderatorOverlay = await this.deps.prisma.moderatorPreference.findUnique({
       where: {
         guildId_moderatorUserId: {
@@ -101,8 +140,42 @@ export class ChatOrchestrator {
     });
 
     const effectiveRoast = runtimeConfig.featureFlags.roast
-      ? this.roastPolicy.resolveRoastLevel(guildSettings.roastLevel, contextBundle.relationship)
+      ? this.roastPolicy.resolveRoastLevel(guildSettings.roastLevel, affinityRelationship)
       : 0;
+    const activeMood = runtimeConfig.featureFlags.moodEngineEnabled ? await this.deps.mood?.getActiveMode(message.guildId) : null;
+
+    if (
+      runtimeConfig.featureFlags.contextConfidenceEnabled &&
+      (message.triggerSource === "auto_interject" || !message.explicitInvocation) &&
+      contextScores &&
+      contextScores.mockeryConfidence < this.deps.env.AUTOINTERJECT_MIN_CONFIDENCE
+    ) {
+      return this.finish(
+        {
+          triggerSource: message.triggerSource,
+          explicitInvocation: message.explicitInvocation,
+          intent: "ignore",
+          routeReason: "self_interject_low_context_confidence",
+          modelKind: this.deps.modelRouter.pickKind(intent.intent),
+          usedSearch: false,
+          toolNames: [],
+          contextMessages: contextBundle.recentMessages.length,
+          memoryLayers,
+          relationshipApplied: Boolean(affinityRelationship),
+          responded: false,
+          queue: queueTrace,
+          context: {
+            ...contextTrace,
+            contextConfidence: contextScores.contextConfidence,
+            mockeryConfidence: contextScores.mockeryConfidence
+          }
+        },
+        startedAt,
+        undefined,
+        message
+      );
+    }
+
     const behavior = this.persona.composeBehavior({
       guildSettings: {
         ...guildSettings,
@@ -115,7 +188,11 @@ export class ChatOrchestrator {
       cleanedContent: intent.cleanedContent,
       context: contextBundle,
       moderatorOverlay,
-      relationship: contextBundle.relationship,
+      relationship: affinityRelationship,
+      activeMode: activeMood ?? undefined,
+      messageKind,
+      contextScores,
+      contextTrace,
       userLanguage: guildSettings.preferredLanguage,
       isMention: message.mentionedBot || message.mentionsBotByName,
       isReplyToBot: message.triggerSource === "reply",
@@ -133,9 +210,15 @@ export class ChatOrchestrator {
       toolNames: [],
       contextMessages: contextBundle.recentMessages.length,
       memoryLayers,
-      relationshipApplied: Boolean(contextBundle.relationship),
+      relationshipApplied: Boolean(affinityRelationship),
       responded: true,
-      behavior: behavior.trace
+      behavior: behavior.trace,
+      queue: queueTrace,
+      context: {
+        ...contextTrace,
+        contextConfidence: contextScores?.contextConfidence,
+        mockeryConfidence: contextScores?.mockeryConfidence
+      }
     };
 
     let reply = "";
@@ -196,9 +279,36 @@ export class ChatOrchestrator {
       forbiddenWords: guildSettings.forbiddenWords
     });
 
+    await this.recordAffinitySignal(runtimeConfig.featureFlags.affinitySignalsEnabled, {
+      guildId: message.guildId,
+      userId: message.userId,
+      messageId: message.messageId,
+      messageKind
+    });
+
+    let replyPayload: string | BotReplyPayload = reply;
+
+    if (runtimeConfig.featureFlags.mediaReactionsEnabled && this.deps.media && behavior.trace.mediaReactionEligible) {
+      const mediaResult = await this.deps.media.maybeAttachMedia({
+        enabled: true,
+        replyText: reply,
+        channelKind: behavior.trace.channelKind,
+        mode: behavior.trace.activeMode,
+        stylePreset: behavior.trace.stylePreset,
+        triggerTags: [
+          behavior.trace.messageKind,
+          behavior.trace.channelKind,
+          behavior.trace.activeMode,
+          ...(behavior.trace.staleTakeDetected ? ["stale_take"] : [])
+        ]
+      });
+      replyPayload = mediaResult.payload;
+      trace.media = mediaResult.trace;
+    }
+
     botRepliesCounter.inc({ intent: intent.intent });
 
-    return this.finish(trace, startedAt, reply, message);
+    return this.finish(trace, startedAt, replyPayload, message);
   }
 
   async handleContextAction(input: {
@@ -244,7 +354,7 @@ export class ChatOrchestrator {
     }
 
     const result = await this.handleMessage(envelope);
-    return result.reply ?? "Нечего сказать.";
+    return typeof result.reply === "string" ? result.reply : (result.reply?.text ?? "Нечего сказать.");
   }
 
   async explainTrace(messageId: string): Promise<DebugTraceRecord | null> {
@@ -495,15 +605,50 @@ export class ChatOrchestrator {
   }
 
   private async safeEmbed(text: string) {
+    const key = normalizeWhitespace(text).toLowerCase();
+
+    if (!key) {
+      return undefined;
+    }
+
+    const cached = this.embeddingCache.get(key);
+
+    if (this.deps.env.FEATURE_EMBEDDING_CACHE_ENABLED && cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+
     try {
-      return await this.deps.embeddingAdapter.embedOne(text);
+      const value = await this.deps.embeddingAdapter.embedOne(text);
+      if (this.deps.env.FEATURE_EMBEDDING_CACHE_ENABLED && value.length) {
+        this.embeddingCache.set(key, {
+          value,
+          expiresAt: Date.now() + this.deps.env.EMBEDDING_CACHE_TTL_SEC * 1000
+        });
+      }
+
+      return value;
     } catch (error) {
       this.deps.logger.warn({ error }, "failed to build embedding");
       return undefined;
     }
   }
 
-  private async finish(trace: BotTrace, startedAt: number, reply?: string, message?: MessageEnvelope) {
+  private async recordAffinitySignal(
+    enabled: boolean,
+    input: Parameters<AffinityService["recordMessageSignal"]>[0]
+  ) {
+    if (!enabled || !this.deps.affinity) {
+      return;
+    }
+
+    try {
+      await this.deps.affinity.recordMessageSignal(input);
+    } catch (error) {
+      this.deps.logger.warn({ error }, "failed to record affinity signal");
+    }
+  }
+
+  private async finish(trace: BotTrace, startedAt: number, reply?: string | BotReplyPayload, message?: MessageEnvelope) {
     trace.latencyMs = Date.now() - startedAt;
 
     if (trace.responded) {

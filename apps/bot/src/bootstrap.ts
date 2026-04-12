@@ -2,7 +2,7 @@ import type { Client } from "discord.js";
 
 import { AnalyticsQueryService, MessageIngestService } from "@hori/analytics";
 import { assertEnvForRole, loadEnv } from "@hori/config";
-import { createChatOrchestrator, RuntimeConfigService, SlashAdminService } from "@hori/core";
+import { AffinityService, createChatOrchestrator, MediaReactionService, MoodService, ReplyQueueService, RuntimeConfigService, SlashAdminService } from "@hori/core";
 import { EmbeddingAdapter, ModelRouter, OllamaClient, ToolOrchestrator } from "@hori/llm";
 import { ContextService, ProfileService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
 import { BraveSearchClient, SearchCacheService } from "@hori/search";
@@ -19,6 +19,7 @@ interface BotQueues {
   summary: BotQueueHandle;
   profile: BotQueueHandle;
   embedding: BotQueueHandle;
+  topic: BotQueueHandle;
   cleanup: BotQueueHandle;
   searchCache: BotQueueHandle;
   prefix: string;
@@ -36,6 +37,7 @@ export interface BotRuntime {
   slashAdmin: SlashAdminService;
   runtimeConfig: RuntimeConfigService;
   orchestrator: ReturnType<typeof createChatOrchestrator>;
+  replyQueue: ReplyQueueService;
 }
 
 function createNoopQueues(logger: ReturnType<typeof createLogger>, prefix: string): BotQueues {
@@ -59,6 +61,7 @@ function createNoopQueues(logger: ReturnType<typeof createLogger>, prefix: strin
     summary: createNoopQueue("summary"),
     profile: createNoopQueue("profile"),
     embedding: createNoopQueue("embedding"),
+    topic: createNoopQueue("topic"),
     cleanup: createNoopQueue("cleanup"),
     searchCache: createNoopQueue("searchCache"),
     prefix
@@ -102,6 +105,10 @@ export async function bootstrapBot() {
   const retrievalService = new RetrievalService(prisma);
   const profileService = new ProfileService(prisma, env);
   const runtimeConfig = new RuntimeConfigService(prisma, env);
+  const affinityService = new AffinityService(prisma);
+  const moodService = new MoodService(prisma);
+  const mediaReactionService = new MediaReactionService(prisma);
+  const replyQueueService = new ReplyQueueService(prisma, env.REPLY_QUEUE_BUSY_TTL_SEC);
   const contextService = new ContextService(prisma, summaryService, profileService, relationshipService, retrievalService);
   const llmClient = new OllamaClient(env, logger);
 
@@ -132,7 +139,7 @@ export async function bootstrapBot() {
   const searchClient = new BraveSearchClient(env, logger, searchCache);
   const toolOrchestrator = new ToolOrchestrator(llmClient, logger);
   const ingestService = new MessageIngestService(prisma, logger);
-  const slashAdmin = new SlashAdminService(prisma, analytics, relationshipService, retrievalService, summaryService);
+  const slashAdmin = new SlashAdminService(prisma, analytics, relationshipService, retrievalService, summaryService, runtimeConfig, moodService, replyQueueService);
   const orchestrator = createChatOrchestrator({
     env,
     logger,
@@ -145,7 +152,10 @@ export async function bootstrapBot() {
     toolOrchestrator,
     searchClient,
     embeddingAdapter,
-    runtimeConfig
+    runtimeConfig,
+    affinity: affinityService,
+    mood: moodService,
+    media: mediaReactionService
   });
 
   const runtime: BotRuntime = {
@@ -159,7 +169,8 @@ export async function bootstrapBot() {
     analytics,
     slashAdmin,
     runtimeConfig,
-    orchestrator
+    orchestrator,
+    replyQueue: replyQueueService
   };
 
   registerEvents(runtime);

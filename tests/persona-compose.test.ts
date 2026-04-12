@@ -9,6 +9,15 @@ const featureFlags: FeatureFlags = {
   userProfiles: true,
   contextActions: true,
   roast: true,
+  contextV2Enabled: true,
+  contextConfidenceEnabled: true,
+  topicEngineEnabled: true,
+  affinitySignalsEnabled: true,
+  moodEngineEnabled: true,
+  replyQueueEnabled: true,
+  mediaReactionsEnabled: false,
+  runtimeConfigCacheEnabled: true,
+  embeddingCacheEnabled: true,
   channelAwareMode: true,
   messageKindAwareMode: true,
   antiSlopStrictMode: true,
@@ -82,6 +91,13 @@ describe("composeBehaviorPrompt", () => {
     expect(result.trace.channelKind).toBe("general");
     expect(result.trace.messageKind).toBe("casual_address");
     expect(result.trace.compactness).toBe("short");
+    expect(result.trace.contextEnergy).toBe("medium");
+    expect(result.trace.snarkConfidenceThreshold).toBe(0.68);
+    expect(result.trace.mediaReactionEligible).toBe(false);
+    expect(result.prompt).not.toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
+    expect(result.prompt).not.toContain("[SELF-INITIATED INTERJECTION CONSTRAINTS BLOCK]");
+    expect(result.prompt).not.toContain("[STALE TAKE / MEDIA REACTION BLOCK]");
+    expect(result.prompt.length).toBeLessThanOrEqual(5100);
     expect(result.trace.blocksUsed[0]).toBe("STABLE IDENTITY BLOCK");
     expect(uniqueBlocks.size).toBe(result.trace.blocksUsed.length);
   });
@@ -124,11 +140,13 @@ describe("composeBehaviorPrompt", () => {
     expect(result.prompt).toContain("[ANTI-SLOP BLOCK]");
     expect(result.prompt).toContain("[ANALOGY SUPPRESSION BLOCK]");
     expect(result.prompt).toContain("это как если бы");
+    expect(result.prompt).toContain("это похоже на");
+    expect(result.prompt).toContain("аналогично тому как");
     expect(result.prompt).toContain("imagine if");
   });
 
   it("enables ideological flavour only as a topical layer", () => {
-    const political = compose("что думаешь про коммунизм и Израиль?");
+    const political = compose("что думаешь про налоги, государство и Израиль?");
     const nonPoliticalOpinion = compose("что думаешь про этот ноут?");
     const casual = compose("как дела?");
     const disabled = compose("что думаешь про коммунизм и Израиль?", {
@@ -137,6 +155,8 @@ describe("composeBehaviorPrompt", () => {
 
     expect(political.trace.ideologicalFlavour).toBe("enabled");
     expect(political.prompt).toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
+    expect(political.prompt).toContain("anarcho-capitalist");
+    expect(political.prompt).toContain("anti-state");
     expect(nonPoliticalOpinion.trace.ideologicalFlavour).toBe("background");
     expect(nonPoliticalOpinion.prompt).not.toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
     expect(nonPoliticalOpinion.prompt).not.toContain("strong pro-Israel bias");
@@ -157,10 +177,35 @@ describe("composeBehaviorPrompt", () => {
     expect(result.trace.requestedDepth).toBe("tiny");
     expect(result.trace.compactness).toBe("tiny");
     expect(result.trace.stylePreset).toBe("unsolicited_poke");
+    expect(result.trace.contextEnergy).toBe("low");
+    expect(result.trace.snarkConfidenceThreshold).toBe(0.86);
     expect(result.limits.maxSentences).toBe(1);
     expect(result.limits.maxParagraphs).toBe(1);
     expect(result.limits.maxChars).toBeLessThanOrEqual(180);
     expect(result.prompt).toContain("[SELF-INITIATED INTERJECTION CONSTRAINTS BLOCK]");
+  });
+
+  it("keeps depth earned and marks stale/gotcha context separately", () => {
+    const simple = compose("что такое индекс?");
+    const deep = compose("объясни подробно что такое индекс и как его выбирать");
+    const repeated = compose("государство же нужно, кто дороги построит?", {
+      context: {
+        recentMessages: [
+          { author: "u1", content: "государство же нужно, кто дороги построит?", createdAt: new Date() },
+          { author: "u2", content: "государство же нужно, кто дороги построит?", createdAt: new Date() }
+        ],
+        summaries: [],
+        serverMemories: []
+      }
+    });
+
+    expect(simple.trace.requestedDepth).toBe("short");
+    expect(deep.trace.requestedDepth).toBe("long");
+    expect(repeated.trace.messageKind).toBe("repeated_question");
+    expect(repeated.trace.stylePreset).toBe("dismissive_short");
+    expect(repeated.trace.staleTakeDetected).toBe(true);
+    expect(repeated.trace.mediaReactionEligible).toBe(true);
+    expect(repeated.prompt).toContain("[STALE TAKE / MEDIA REACTION BLOCK]");
   });
 
   it("falls back when playful mode is disabled", () => {

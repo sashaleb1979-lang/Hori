@@ -7,6 +7,15 @@ const FEATURE_KEY_MAP = {
   user_profiles: "userProfiles",
   context_actions: "contextActions",
   roast: "roast",
+  context_v2_enabled: "contextV2Enabled",
+  context_confidence_enabled: "contextConfidenceEnabled",
+  topic_engine_enabled: "topicEngineEnabled",
+  affinity_signals_enabled: "affinitySignalsEnabled",
+  mood_engine_enabled: "moodEngineEnabled",
+  reply_queue_enabled: "replyQueueEnabled",
+  media_reactions_enabled: "mediaReactionsEnabled",
+  runtime_config_cache_enabled: "runtimeConfigCacheEnabled",
+  embedding_cache_enabled: "embeddingCacheEnabled",
   channel_aware_mode: "channelAwareMode",
   message_kind_aware_mode: "messageKindAwareMode",
   anti_slop_strict_mode: "antiSlopStrictMode",
@@ -33,10 +42,34 @@ export interface EffectiveRoutingConfig {
 }
 
 export class RuntimeConfigService {
+  private readonly routingCache = new Map<string, { expiresAt: number; value: EffectiveRoutingConfig }>();
+
   constructor(
     private readonly prisma: AppPrismaClient,
     private readonly env: AppEnv
   ) {}
+
+  invalidate(guildId?: string, channelId?: string) {
+    if (!guildId) {
+      this.routingCache.clear();
+      return;
+    }
+
+    if (channelId) {
+      this.routingCache.delete(this.cacheKey(guildId, channelId));
+      return;
+    }
+
+    for (const key of this.routingCache.keys()) {
+      if (key.startsWith(`${guildId}:`)) {
+        this.routingCache.delete(key);
+      }
+    }
+  }
+
+  private cacheKey(guildId: string, channelId?: string) {
+    return `${guildId}:${channelId ?? "*"}`;
+  }
 
   async getFeatureFlags(guildId?: string): Promise<FeatureFlags> {
     const defaults = buildFeatureFlags(this.env);
@@ -118,16 +151,32 @@ export class RuntimeConfigService {
   }
 
   async getRoutingConfig(guildId: string, channelId: string): Promise<EffectiveRoutingConfig> {
+    const cacheKey = this.cacheKey(guildId, channelId);
+    const cached = this.routingCache.get(cacheKey);
+
+    if (this.env.FEATURE_RUNTIME_CONFIG_CACHE_ENABLED && cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+
     const [guildSettings, featureFlags, channelPolicy] = await Promise.all([
       this.getGuildSettings(guildId),
       this.getFeatureFlags(guildId),
       this.getChannelPolicy(guildId, channelId)
     ]);
 
-    return {
+    const value = {
       guildSettings,
       featureFlags,
       channelPolicy
     };
+
+    if (featureFlags.runtimeConfigCacheEnabled) {
+      this.routingCache.set(cacheKey, {
+        expiresAt: Date.now() + this.env.RUNTIME_CONFIG_CACHE_TTL_SEC * 1000,
+        value
+      });
+    }
+
+    return value;
   }
 }

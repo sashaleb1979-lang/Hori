@@ -19,7 +19,25 @@ export function createCleanupJob(runtime: WorkerRuntime) {
       where: { createdAt: { lt: cutoff } }
     });
 
-    return { deleted: result.count, kind: "interjections" };
+    const [expiredMoods, oldQueueItems] = await Promise.all([
+      runtime.prisma.moodState.deleteMany({
+        where: { endsAt: { lt: cutoff } }
+      }),
+      runtime.prisma.replyQueueItem.deleteMany({
+        where: {
+          status: { in: ["done", "dropped"] },
+          updatedAt: { lt: cutoff }
+        }
+      })
+    ]);
+
+    return {
+      deleted: result.count + expiredMoods.count + oldQueueItems.count,
+      kind: "interjections",
+      interjections: result.count,
+      expiredMoods: expiredMoods.count,
+      oldQueueItems: oldQueueItems.count
+    };
   };
 }
 

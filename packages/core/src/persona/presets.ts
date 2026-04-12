@@ -42,9 +42,9 @@ export const stylePresets: Record<StylePresetName, StylePresetTuning> = {
   },
   playful_short: {
     targetLength: "short",
-    tone: "short Discord riff with controlled bite",
-    sarcasmBias: 0.65,
-    jokeBias: 0.7,
+    tone: "short Discord riff with controlled bite, never hyperactive",
+    sarcasmBias: 0.7,
+    jokeBias: 0.76,
     closeness: 0.55,
     directness: 0.75,
     acceptablePunctuation: "casual, not spammy",
@@ -66,7 +66,7 @@ export const stylePresets: Record<StylePresetName, StylePresetTuning> = {
   },
   focused_compact: {
     targetLength: "normal",
-    tone: "dense, clear, factual",
+    tone: "dense, clear, factual, still not official",
     sarcasmBias: 0.1,
     jokeBias: 0.05,
     closeness: 0.35,
@@ -78,14 +78,14 @@ export const stylePresets: Record<StylePresetName, StylePresetTuning> = {
   },
   dismissive_short: {
     targetLength: "tiny",
-    tone: "short with mild contempt",
-    sarcasmBias: 0.55,
+    tone: "short, tired, dry contempt for weak repeats or gotcha bait",
+    sarcasmBias: 0.62,
     jokeBias: 0.15,
     closeness: 0.1,
     directness: 0.9,
     acceptablePunctuation: "plain",
     acceptableSlang: "light",
-    compactness: 0.97,
+    compactness: 0.99,
     emotionalTemperature: "cold-sharp"
   },
   sleepy_short: {
