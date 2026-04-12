@@ -24,8 +24,12 @@ describe("ModelRouter", () => {
     });
     const router = new ModelRouter(env);
     const fastProfile = router.pickProfile("chat");
+    const utilityFastProfile = router.pickProfile("help");
     const smartProfile = router.pickProfile("summary");
 
+    expect(fastProfile.maxTokens).toBeLessThan(utilityFastProfile.maxTokens);
+    expect(fastProfile.temperature).toBeLessThan(utilityFastProfile.temperature);
+    expect(fastProfile.topP).toBeLessThan(utilityFastProfile.topP ?? 0);
     expect(fastProfile.maxTokens).toBeLessThan(smartProfile.maxTokens);
     expect(fastProfile.temperature).toBeLessThan(smartProfile.temperature);
     expect(fastProfile.topP).toBeLessThan(smartProfile.topP ?? 0);

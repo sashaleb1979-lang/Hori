@@ -19,6 +19,12 @@ const modelProfiles: Record<ModelKind, ModelProfile> = {
   }
 };
 
+export const chatModelProfile: ModelProfile = {
+  temperature: 0.17,
+  maxTokens: 160,
+  topP: 0.74
+};
+
 export function getModelProfile(kind: ModelKind): ModelProfile {
   return modelProfiles[kind];
 }

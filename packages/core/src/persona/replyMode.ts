@@ -57,7 +57,7 @@ export function resolveReplyMode(options: {
   }
 
   if (options.mode === "playful") {
-    return weightedPick(["semi_meme", "mocking", "weird_but_relevant", "brief_warm", "lazy"], [3, 3, 2, 1, 1]);
+    return weightedPick(["semi_meme", "mocking", "dry", "lazy", "brief_warm"], [4, 3, 2, 1, 1]);
   }
 
   if (options.mode === "irritated") {
@@ -69,13 +69,13 @@ export function resolveReplyMode(options: {
   }
 
   if (options.mode === "focused") {
-    return weightedPick(["surprisingly_helpful", "dry", "sharp"], [5, 3, 2]);
+    return weightedPick(["dry", "surprisingly_helpful", "sharp"], [5, 3, 2]);
   }
 
   const warmRelationship = options.relationship && options.relationship.toneBias !== "neutral" && options.relationship.praiseBias > 0;
 
   if (warmRelationship) {
-    return weightedPick(chatModes, [2, 2, 2, 1, 1, 1, 3]);
+    return weightedPick(["dry", "brief_warm", "lazy", "mocking", "sharp"], [3, 4, 2, 1, 1]);
   }
 
   if (options.messageKind === "meme_bait") {
@@ -83,10 +83,10 @@ export function resolveReplyMode(options: {
   }
 
   if (options.messageKind === "smalltalk_hangout") {
-    return weightedPick(["dry", "lazy", "brief_warm", "weird_but_relevant"], [4, 3, 2, 1]);
+    return weightedPick(["dry", "lazy", "brief_warm"], [5, 3, 2]);
   }
 
-  return weightedPick(chatModes, [3, 2, 2, 2, 1, 1, 1]);
+  return weightedPick(["dry", "mocking", "lazy", "sharp", "brief_warm"], [4, 2, 2, 2, 1]);
 }
 
 const replyModeDescriptions: Record<ReplyMode, string> = {

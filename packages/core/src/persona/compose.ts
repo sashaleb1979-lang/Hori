@@ -70,7 +70,6 @@ const depthLimits: Record<RequestedDepth, PersonaResponseLimits> = {
 
 const messageKindModeBias: Partial<Record<MessageKind, PersonaMode>> = {
   request_for_explanation: "focused",
-  info_question: "focused",
   command_like_request: "focused",
   meme_bait: "playful",
   provocation: "irritated",
@@ -79,7 +78,7 @@ const messageKindModeBias: Partial<Record<MessageKind, PersonaMode>> = {
 };
 
 const messageKindDepthBias: Partial<Record<MessageKind, RequestedDepth>> = {
-  request_for_explanation: "normal",
+  request_for_explanation: "short",
   info_question: "short",
   command_like_request: "short",
   smalltalk_hangout: "short",
@@ -248,7 +247,9 @@ function detectSmalltalkContextHook(input: ComposeBehaviorPromptInput, messageKi
     tokens.length > 0 &&
     (input.context?.serverMemories ?? []).some((memory) => hasTokenOverlap(`${memory.key} ${memory.value}`, tokens));
 
-  return relationshipHook || replyChainHook || activeTopicHook || entityHook || serverMemoryHook || sharedContextHook;
+  const anchoredRelationshipHook = relationshipHook && (replyChainHook || sharedContextHook || activeTopicHook);
+
+  return replyChainHook || activeTopicHook || entityHook || serverMemoryHook || sharedContextHook || anchoredRelationshipHook;
 }
 
 function resolveRequestedDepth(options: {
@@ -256,6 +257,7 @@ function resolveRequestedDepth(options: {
   channelKind: ChannelKind;
   messageKind: MessageKind;
   smalltalkContextHook: boolean;
+  staleTakeDetected: boolean;
   persona: PersonaConfig;
 }) {
   const tags = options.input.channelPolicy?.topicInterestTags ?? [];
@@ -292,11 +294,15 @@ function resolveRequestedDepth(options: {
   })].targetLength;
 
   if (options.messageKind === "request_for_explanation") {
-    depth = expandToAtLeast(depth, "normal");
+    depth = expandToAtLeast(depth, "short");
   }
 
   if (options.messageKind === "meme_bait" || options.messageKind === "low_signal_noise" || options.messageKind === "repeated_question") {
     depth = compactest(depth, presetMin);
+  }
+
+  if (options.staleTakeDetected && (options.messageKind === "info_question" || options.messageKind === "opinion_question")) {
+    depth = compactest(depth, "short");
   }
 
   if (isSelfInitiated) {
@@ -312,6 +318,7 @@ function resolveMode(options: {
   channelKind: ChannelKind;
   messageKind: MessageKind;
   requestedDepth: RequestedDepth;
+  staleTakeDetected: boolean;
 }) {
   const tags = options.input.channelPolicy?.topicInterestTags ?? [];
   const selfInitiated =
@@ -321,11 +328,17 @@ function resolveMode(options: {
   const taggedMode = modeTagValue(tags);
   const channelModeBias = options.channelKind === "general" ? undefined : options.persona.channelOverrides[options.channelKind]?.modeBias;
   const messageModeBias = messageKindModeBias[options.messageKind];
+  const staleTakeModeBias =
+    options.staleTakeDetected && (options.messageKind === "opinion_question" || options.messageKind === "info_question")
+      ? "dry"
+      : undefined;
   const taskFirst =
     options.messageKind === "request_for_explanation" ||
     options.messageKind === "command_like_request" ||
     options.messageKind === "info_question";
-  const contextualMode = taskFirst ? messageModeBias ?? channelModeBias : channelModeBias ?? messageModeBias;
+  const contextualMode = taskFirst
+    ? messageModeBias ?? staleTakeModeBias ?? channelModeBias
+    : channelModeBias ?? staleTakeModeBias ?? messageModeBias;
   const explicitMode =
     options.input.debugOverrides?.activeMode ??
     options.input.activeMode ??
@@ -347,6 +360,7 @@ function resolveLimits(options: {
   requestedDepth: RequestedDepth;
   messageKind: MessageKind;
   smalltalkContextHook: boolean;
+  staleTakeDetected: boolean;
   isSelfInitiated: boolean;
 }) {
   const base = depthLimits[options.requestedDepth];
@@ -380,11 +394,42 @@ function resolveLimits(options: {
   }
 
   if (options.messageKind === "smalltalk_hangout") {
-    resolved.maxChars = Math.min(resolved.maxChars, options.smalltalkContextHook ? 260 : 220);
-    resolved.maxSentences = Math.min(resolved.maxSentences, options.smalltalkContextHook ? 3 : 2);
+    resolved.maxChars = Math.min(resolved.maxChars, options.smalltalkContextHook ? 220 : 170);
+    resolved.maxSentences = Math.min(resolved.maxSentences, 2);
     resolved.maxParagraphs = 1;
     resolved.bulletListAllowed = false;
     resolved.followUpAllowed = false;
+  }
+
+  if (options.messageKind === "reply_to_bot") {
+    resolved.maxChars = Math.min(resolved.maxChars, 220);
+    resolved.maxSentences = Math.min(resolved.maxSentences, 2);
+    resolved.maxParagraphs = 1;
+    resolved.followUpAllowed = false;
+  }
+
+  if (options.messageKind === "info_question" && !options.staleTakeDetected) {
+    resolved.maxChars = Math.min(resolved.maxChars, 320);
+    resolved.maxSentences = Math.min(resolved.maxSentences, 3);
+    resolved.maxParagraphs = 1;
+    resolved.followUpAllowed = false;
+  }
+
+  if (options.messageKind === "request_for_explanation" && options.requestedDepth === "short") {
+    resolved.maxChars = Math.min(resolved.maxChars, 320);
+    resolved.maxSentences = Math.min(resolved.maxSentences, 3);
+    resolved.maxParagraphs = 1;
+    resolved.followUpAllowed = false;
+  }
+
+  if (options.staleTakeDetected && (options.messageKind === "info_question" || options.messageKind === "opinion_question")) {
+    resolved.maxChars = Math.min(resolved.maxChars, 200);
+    resolved.maxSentences = Math.min(resolved.maxSentences, 2);
+    resolved.maxParagraphs = 1;
+    resolved.maxTokens = Math.min(resolved.maxTokens, 110);
+    resolved.followUpAllowed = false;
+    resolved.bulletListAllowed = false;
+    resolved.compactness = "short";
   }
 
   if (options.isSelfInitiated) {
@@ -504,8 +549,9 @@ function buildContextUsageBlock(input: ComposeBehaviorPromptInput): BlockResult 
       `Версия контекста: ${version}. Reply-chain=${input.contextTrace.replyChainCount ?? 0}. ActiveTopic=${input.contextTrace.activeTopicId ?? "none"}. Entities=${input.contextTrace.entityTriggers?.join(", ") || "none"}.`,
       `contextConfidence=${input.contextScores?.contextConfidence ?? "n/a"}, mockeryConfidence=${input.contextScores?.mockeryConfidence ?? "n/a"}.`,
       "Сначала используй reply-chain и active topic. Не рестарти тему, если сообщение является reply.",
+      "Используй не больше одной явной контекстной опоры, если этого уже достаточно для точного ответа.",
       "Если confidence низкий, не делай вид, что всё ясно: отвечай короче, осторожнее, без уверенного подкола.",
-      "Не выдумывай недостающий контекст и не пересказывай чат без нужды."
+      "Не выдумывай недостающий контекст, не пересказывай чат и не превращай одну зацепку в монолог."
     ].join("\n")
   };
 }
@@ -524,6 +570,7 @@ function buildStaleTakeMediaBlock(options: {
       "[STALE TAKE / MEDIA REACTION BLOCK]",
       `Stale take detected: ${options.staleTakeDetected}. Media reaction eligible: ${options.mediaReactionEligible}.`,
       "Повторный или gotcha-вброс можно закрывать короче, суше и усталее; не разбирай его с нуля.",
+      "Если мысль уже заезженная, не выдавай мини-лекцию даже если формально это вопрос.",
       "Мемы/GIF тут только extension point: предпочитай их только когда они точнее текста, не наугад."
     ].join("\n")
   };
@@ -607,7 +654,7 @@ function buildMemoryUsageBlock(): BlockResult {
       "[MEMORY USAGE]",
       "Если есть данные о пользователе (профиль, отношения, память сервера) — используй их для тона, а не для пересказа.",
       "Не пересказывай чат. Не цитируй прошлые сообщения без нужды.",
-      "Используй контекст для калибровки: как шутить, насколько быть резкой, что не трогать.",
+      "Используй контекст для калибровки: как шутить, насколько быть резкой, что не трогать. Не разворачивай ответ только потому, что контекст богатый.",
       "Если контекста мало — не выдумывай его. Отвечай проще."
     ].join("\n")
   };
@@ -751,11 +798,14 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     : /\?/.test(input.cleanedContent)
       ? "info_question"
       : "casual_address";
+  const staleTakeDetected = detectStaleTake(input.cleanedContent, messageKind);
   const smalltalkContextHook = detectSmalltalkContextHook(input, messageKind);
-  const requestedDepth = resolveRequestedDepth({ input, channelKind, messageKind, smalltalkContextHook, persona });
-  const mode = resolveMode({ input, persona, channelKind, messageKind, requestedDepth });
+  const requestedDepth = resolveRequestedDepth({ input, channelKind, messageKind, smalltalkContextHook, staleTakeDetected, persona });
+  const mode = resolveMode({ input, persona, channelKind, messageKind, requestedDepth, staleTakeDetected });
+  const staleTakeStyleOverride =
+    staleTakeDetected && (messageKind === "opinion_question" || messageKind === "info_question") ? "dismissive_short" : undefined;
   const resolvedStylePreset = resolveStylePreset({
-    override: input.debugOverrides?.stylePreset,
+    override: input.debugOverrides?.stylePreset ?? staleTakeStyleOverride,
     isSelfInitiated,
     messageKind,
     smalltalkContextHook,
@@ -789,6 +839,7 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     requestedDepth,
     messageKind,
     smalltalkContextHook,
+    staleTakeDetected,
     isSelfInitiated
   });
   const contextEnergy = resolveContextEnergy({
@@ -799,7 +850,6 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     isSelfInitiated,
     timeOfDayHint: input.timeOfDayHint
   });
-  const staleTakeDetected = detectStaleTake(input.cleanedContent, messageKind);
   const mediaReactionEligible =
     !["focused", "serious", "help"].includes(mode) &&
     (isSelfInitiated || staleTakeDetected || messageKind === "meme_bait" || channelKind === "memes");

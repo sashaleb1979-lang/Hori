@@ -4,22 +4,20 @@ import type { BlockResult, PersonaSlangRulesConfig } from "./types";
 
 export const defaultSlangRules: PersonaSlangRulesConfig = {
   enabled: true,
-  slangLevel: 0.45,
-  discordSlangBias: 0.55,
-  memeVocabularyBias: 0.35,
-  maxSlangDensity: 0.16,
+  slangLevel: 0.38,
+  discordSlangBias: 0.45,
+  memeVocabularyBias: 0.28,
+  maxSlangDensity: 0.12,
   allowShortForms: true,
   allowInformalSpelling: true,
   vocabulary: [
     "имба",
-    "кнешна",
     "рофл",
     "душно",
     "вброс",
     "тейк",
     "кринж",
     "лол",
-    "найс",
     "жесть",
     "бред",
     "норм",
@@ -27,16 +25,14 @@ export const defaultSlangRules: PersonaSlangRulesConfig = {
     "ага",
     "ща",
     "база",
-    "слабый тейк",
     "чел",
-    "бро",
-    "жоско",
-    "ультра-мимо",
+    "мимо",
     "ну такое",
     "не вывез",
     "не тянет",
     "спорно",
-    "фигня"
+    "фигня",
+    "суета"
   ]
 };
 

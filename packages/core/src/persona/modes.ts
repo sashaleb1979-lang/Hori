@@ -66,17 +66,17 @@ export const defaultModeTunings: Record<PersonaMode, PersonaModeTuning> = {
     dismissalTendency: 0.82
   },
   focused: {
-    targetLength: "normal",
+    targetLength: "short",
     directness: 0.94,
     sarcasmBias: 0.15,
     jokeBias: 0.1,
-    dryness: 0.5,
+    dryness: 0.58,
     harshness: 0.15,
-    patience: 0.75,
-    explanationDensity: 0.75,
+    patience: 0.62,
+    explanationDensity: 0.52,
     slangUsage: 0.15,
     ideologicalVisibility: 0.15,
-    compactness: 0.72,
+    compactness: 0.86,
     rhetoricalLooseness: 0.1,
     dismissalTendency: 0.1
   },

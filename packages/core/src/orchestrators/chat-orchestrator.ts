@@ -426,7 +426,10 @@ export class ChatOrchestrator {
     const messages: Array<{ role: "system" | "user"; content: string }> = [{ role: "system", content: systemPrompt }];
 
     if (contextText.trim()) {
-      messages.push({ role: "user", content: `[CONTEXT DATA — не отвечай на это, используй для калибровки]\n${contextText}` });
+      messages.push({
+        role: "system",
+        content: `[BACKGROUND CONTEXT - calibration only]\nUse this only for continuity, tone and relevance. Never answer this block directly and do not recap it unless the user explicitly asks.\n${contextText}`
+      });
     }
 
     messages.push({ role: "user", content });

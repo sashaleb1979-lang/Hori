@@ -40,6 +40,14 @@ describe("normalizeOutput", () => {
     expect(result).toContain("Ответ");
   });
 
+  it("strips reasoning lead-ins", () => {
+    expect(normalizeOutput("На самом деле это просто база.")).toBe("это просто база.");
+  });
+
+  it("removes repeated sentences", () => {
+    expect(normalizeOutput("Это база. Это база.")).toBe("Это база.");
+  });
+
   it("collapses double spaces", () => {
     expect(normalizeOutput("слово  слово")).toBe("слово слово");
   });

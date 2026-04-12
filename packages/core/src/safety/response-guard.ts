@@ -10,8 +10,24 @@ const assistantCliches = [
   /если что,? пиши\b[^.!?]*/gi,
   /не стесняйся спрашивать\b[^.!?]*/gi,
   /чем ещё могу помочь\b[^.!?]*/gi,
-  /буду рад(а)? ответить\b[^.!?]*/gi
+  /буду рад(а)? ответить\b[^.!?]*/gi,
+  /если надо,? могу\b[^.!?]*/gi,
+  /хочешь,? расскажу подробнее\b[^.!?]*/gi,
+  /могу подробнее\b[^.!?]*/gi
 ];
+
+const reasoningLeadIns = [
+  /(^|[.!?]\s+)(дело в том, что)\s+/giu,
+  /(^|[.!?]\s+)(на самом деле)\s+/giu,
+  /(^|[.!?]\s+)(вообще(?:-то)?)\s+/giu,
+  /(^|[.!?]\s+)(по сути)\s+/giu,
+  /(^|[.!?]\s+)(если честно|честно говоря)\s+/giu,
+  /(^|[.!?]\s+)(короче говоря|в целом)\s+/giu
+];
+
+function removeRepeatedSentences(text: string) {
+  return text.replace(/([^.!?\n]{6,}[.!?])\s+\1/giu, "$1");
+}
 
 export function normalizeOutput(text: string): string {
   let result = text;
@@ -23,6 +39,12 @@ export function normalizeOutput(text: string): string {
   for (const cliche of assistantCliches) {
     result = result.replace(cliche, "");
   }
+
+  for (const leadIn of reasoningLeadIns) {
+    result = result.replace(leadIn, "$1");
+  }
+
+  result = removeRepeatedSentences(result);
 
   result = result.replace(/ +([.!?,;:)])/g, "$1");
   result = result.replace(/([.!?])\1{2,}/g, "$1$1");

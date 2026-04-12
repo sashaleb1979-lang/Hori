@@ -145,6 +145,27 @@ describe("composeBehaviorPrompt", () => {
     expect(memeChannelResult.trace.stylePreset).toBe("focused_compact");
   });
 
+  it("keeps plain info questions out of auto-focused mode", () => {
+    const result = compose("что такое индекс?");
+
+    expect(result.trace.messageKind).toBe("info_question");
+    expect(result.trace.activeMode).toBe("normal");
+    expect(result.trace.requestedDepth).toBe("short");
+    expect(result.limits.maxChars).toBeLessThanOrEqual(320);
+  });
+
+  it("preserves reply continuity instead of escalating short reply questions", () => {
+    const result = compose("а почему?", {
+      message: {
+        triggerSource: "reply"
+      }
+    });
+
+    expect(result.trace.messageKind).toBe("reply_to_bot");
+    expect(result.trace.activeMode).toBe("normal");
+    expect(result.limits.maxChars).toBeLessThanOrEqual(220);
+  });
+
   it("keeps analogy suppression in strict anti-slop output", () => {
     const result = compose("что такое индексы в базе?");
 
@@ -281,6 +302,7 @@ describe("composeBehaviorPrompt", () => {
   it("keeps depth earned and marks stale/gotcha context separately", () => {
     const simple = compose("что такое индекс?");
     const deep = compose("объясни подробно что такое индекс и как его выбирать");
+    const staleOpinion = compose("государство же нужно, кто дороги построит?");
     const repeated = compose("государство же нужно, кто дороги построит?", {
       context: {
         recentMessages: [
@@ -293,7 +315,13 @@ describe("composeBehaviorPrompt", () => {
     });
 
     expect(simple.trace.requestedDepth).toBe("short");
+    expect(simple.trace.activeMode).toBe("normal");
     expect(deep.trace.requestedDepth).toBe("long");
+    expect(staleOpinion.trace.messageKind).toBe("info_question");
+    expect(staleOpinion.trace.activeMode).toBe("dry");
+    expect(staleOpinion.trace.stylePreset).toBe("dismissive_short");
+    expect(staleOpinion.limits.maxChars).toBeLessThanOrEqual(200);
+    expect(staleOpinion.trace.staleTakeDetected).toBe(true);
     expect(repeated.trace.messageKind).toBe("repeated_question");
     expect(repeated.trace.stylePreset).toBe("dismissive_short");
     expect(repeated.trace.staleTakeDetected).toBe(true);

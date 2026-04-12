@@ -50,6 +50,13 @@ const questionLikePattern = unicodeStartsWithWord(
 
 const commandLikePattern = unicodeStartsWithWord("найди|сделай|перепиши|запомни|забудь|покажи|дай|скинь");
 
+const explanationLeadPattern = unicodeStartsWithWord("объясни|поясни|разбери|раскрой|расскажи");
+
+const explanationDetailPattern = /(подробно|разверн[уё]то|по шагам|нормально разбер[ие]|с аргументами|без воды разложи)/i;
+
+const stalePoliticalBaitPattern =
+  /(кто\s+дороги\s+построит|кто\s+дороги\s+будет\s+строить|без\s+государств[ао]?\s+.*дорог|налог[аиы].*нужн|государств[ао]?.*нужн|коммунизм.*работ|опять.*налог|опять.*государств|стар(ый|ое)\s+тейк|заезжен|затаскан)/i;
+
 const smalltalkHangoutPatterns = [
   unicodeStartsWithWord("(?:хори[,.!\\s-]*)?(?:привет|хай|хелло|здарова|здрасьте|доброе\\s+утро|добрый\\s+день|добрый\\s+вечер|ку|йо)"),
   unicodeStartsWithWord("(?:ну\\s+)?(?:как\\s+дела|как\\s+ты|че\\s+как|ч[её]\\s+как|что\\s+делаешь|чем\\s+занимаешься)"),
@@ -80,6 +87,24 @@ function isSmalltalkHangout(content: string, intent: BotIntent) {
   }
 
   return smalltalkHangoutPatterns.some((pattern) => pattern.test(normalized));
+}
+
+function isStalePoliticalBait(content: string) {
+  return stalePoliticalBaitPattern.test(content);
+}
+
+function isExplanationRequest(content: string) {
+  const normalized = content.trim();
+
+  if (!normalized) {
+    return false;
+  }
+
+  if (isStalePoliticalBait(normalized) && !explanationLeadPattern.test(normalized)) {
+    return false;
+  }
+
+  return explanationLeadPattern.test(normalized) || explanationDetailPattern.test(normalized);
 }
 
 function repeatedInContext(content: string, context?: ContextBundle | null) {
@@ -118,8 +143,8 @@ export function detectMessageKind(options: {
     return "low_signal_noise";
   }
 
-  if (/(объясни|поясни|разбери|почему так|как работает|в ч[её]м смысл|подробно|разверн[уё]то)/i.test(content)) {
-    return "request_for_explanation";
+  if (/(заткнись|тупая|ботяра|провокац|слабый бот|ты вообще|чушь нес[её]шь|идиот|дура)/i.test(content)) {
+    return "provocation";
   }
 
   if (
@@ -134,6 +159,18 @@ export function detectMessageKind(options: {
     return "command_like_request";
   }
 
+  if (isExplanationRequest(content)) {
+    return "request_for_explanation";
+  }
+
+  if (isSmalltalkHangout(content, options.intent)) {
+    return "smalltalk_hangout";
+  }
+
+  if (options.message.triggerSource === "reply") {
+    return "reply_to_bot";
+  }
+
   if (/(кто прав|что думаешь|мнение|как считаешь|твой тейк|оцени|правда ли|левый|коммунизм|израил|палестин|полит)/i.test(content)) {
     return "opinion_question";
   }
@@ -142,20 +179,8 @@ export function detectMessageKind(options: {
     return "meme_bait";
   }
 
-  if (/(заткнись|тупая|ботяра|провокац|слабый бот|ты вообще|чушь нес[её]шь|идиот|дура)/i.test(content)) {
-    return "provocation";
-  }
-
-  if (isSmalltalkHangout(content, options.intent)) {
-    return "smalltalk_hangout";
-  }
-
   if (isQuestionLike(content)) {
     return "info_question";
-  }
-
-  if (options.message.triggerSource === "reply") {
-    return "reply_to_bot";
   }
 
   if (options.message.triggerSource === "mention" || options.message.mentionedBot) {

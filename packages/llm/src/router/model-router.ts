@@ -1,7 +1,7 @@
 import type { AppEnv } from "@hori/config";
 import type { BotIntent, ModelKind } from "@hori/shared";
 
-import { type ModelProfile, getModelProfile } from "./model-profiles";
+import { chatModelProfile, type ModelProfile, getModelProfile } from "./model-profiles";
 
 export class ModelRouter {
   constructor(private readonly env: AppEnv) {}
@@ -24,6 +24,10 @@ export class ModelRouter {
   }
 
   pickProfile(intent: BotIntent): ModelProfile {
+    if (intent === "chat") {
+      return chatModelProfile;
+    }
+
     return getModelProfile(this.pickKind(intent));
   }
 }

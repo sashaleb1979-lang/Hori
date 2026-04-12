@@ -33,36 +33,36 @@ export const stylePresets: Record<StylePresetName, StylePresetTuning> = {
     tone: "simple, low-pressure, short and unforced",
     sarcasmBias: 0.08,
     jokeBias: 0.06,
-    closeness: 0.48,
-    directness: 0.72,
+    closeness: 0.36,
+    directness: 0.78,
     acceptablePunctuation: "plain, calm, sparse",
     acceptableSlang: "minimal to light",
-    compactness: 0.94,
-    emotionalTemperature: "soft-neutral"
+    compactness: 0.96,
+    emotionalTemperature: "neutral-low"
   },
   neutral_short: {
     targetLength: "short",
     tone: "short, even, alive",
-    sarcasmBias: 0.25,
-    jokeBias: 0.2,
-    closeness: 0.45,
-    directness: 0.75,
+    sarcasmBias: 0.18,
+    jokeBias: 0.14,
+    closeness: 0.34,
+    directness: 0.82,
     acceptablePunctuation: "normal Discord punctuation",
     acceptableSlang: "light",
-    compactness: 0.85,
+    compactness: 0.9,
     emotionalTemperature: "neutral"
   },
   playful_short: {
     targetLength: "short",
     tone: "short Discord riff with controlled bite, never hyperactive",
     sarcasmBias: 0.7,
-    jokeBias: 0.76,
-    closeness: 0.55,
+    jokeBias: 0.58,
+    closeness: 0.42,
     directness: 0.75,
     acceptablePunctuation: "casual, not spammy",
     acceptableSlang: "moderate",
-    compactness: 0.85,
-    emotionalTemperature: "warm-sharp"
+    compactness: 0.9,
+    emotionalTemperature: "dry-playful"
   },
   sharp_short: {
     targetLength: "short",
@@ -77,15 +77,15 @@ export const stylePresets: Record<StylePresetName, StylePresetTuning> = {
     emotionalTemperature: "hot but stable"
   },
   focused_compact: {
-    targetLength: "normal",
-    tone: "dense, clear, factual, still not official",
+    targetLength: "short",
+    tone: "dense, clear, compact, factual, still not official",
     sarcasmBias: 0.1,
     jokeBias: 0.05,
-    closeness: 0.35,
+    closeness: 0.28,
     directness: 0.9,
     acceptablePunctuation: "plain",
     acceptableSlang: "minimal",
-    compactness: 0.75,
+    compactness: 0.86,
     emotionalTemperature: "calm"
   },
   dismissive_short: {
