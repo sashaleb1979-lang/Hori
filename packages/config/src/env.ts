@@ -100,7 +100,6 @@ const coreEnvSchema = z.object({
 
   DISCORD_TOKEN: z.string().optional(),
   DISCORD_CLIENT_ID: z.string().optional(),
-  DISCORD_DEV_GUILD_ID: z.string().optional(),
   DISCORD_OWNER_IDS: csvish.default([]),
 
   BOT_NAME: z.string().default("Хори"),
@@ -150,7 +149,13 @@ const compactConfigSchema = z
         ideologicalFlavourEnabled: z.boolean().optional(),
         analogyBanEnabled: z.boolean().optional(),
         slangLayerEnabled: z.boolean().optional(),
-        selfInterjectionConstraintsEnabled: z.boolean().optional()
+        selfInterjectionConstraintsEnabled: z.boolean().optional(),
+        memoryAlbumEnabled: z.boolean().optional(),
+        interactionRequestsEnabled: z.boolean().optional(),
+        linkUnderstandingEnabled: z.boolean().optional(),
+        naturalMessageSplittingEnabled: z.boolean().optional(),
+        selectiveEngagementEnabled: z.boolean().optional(),
+        selfReflectionLessonsEnabled: z.boolean().optional()
       })
       .partial()
       .optional(),
@@ -226,6 +231,14 @@ const compactConfigSchema = z
       })
       .partial()
       .optional(),
+    chat: z
+      .object({
+        naturalSplitChance: z.number().min(0).max(1).optional(),
+        naturalSplitCooldownSec: z.number().int().nonnegative().optional(),
+        selectiveEngagementMinScore: z.number().min(0).max(1).optional()
+      })
+      .partial()
+      .optional(),
     jobs: z
       .object({
         prefix: z.string().optional(),
@@ -263,6 +276,12 @@ const legacyAdvancedSchema = z
     FEATURE_ANALOGY_BAN_ENABLED: boolish.optional(),
     FEATURE_SLANG_LAYER_ENABLED: boolish.optional(),
     FEATURE_SELF_INTERJECTION_CONSTRAINTS_ENABLED: boolish.optional(),
+    FEATURE_MEMORY_ALBUM_ENABLED: boolish.optional(),
+    FEATURE_INTERACTION_REQUESTS_ENABLED: boolish.optional(),
+    FEATURE_LINK_UNDERSTANDING_ENABLED: boolish.optional(),
+    FEATURE_NATURAL_MESSAGE_SPLITTING_ENABLED: boolish.optional(),
+    FEATURE_SELECTIVE_ENGAGEMENT_ENABLED: boolish.optional(),
+    FEATURE_SELF_REFLECTION_LESSONS_ENABLED: boolish.optional(),
     LLM_MAX_CONTEXT_MESSAGES: intish.optional(),
     LLM_MAX_TOOL_CALLS: intish.optional(),
     LLM_REPLY_MAX_TOKENS: intish.optional(),
@@ -295,6 +314,9 @@ const legacyAdvancedSchema = z
     DEFAULT_ROAST_LEVEL: intish.optional(),
     DEFAULT_SARCASM_LEVEL: intish.optional(),
     DEFAULT_INTERJECT_TENDENCY: intish.optional(),
+    NATURAL_SPLIT_CHANCE: floatish.optional(),
+    NATURAL_SPLIT_COOLDOWN_SEC: intish.optional(),
+    SELECTIVE_ENGAGEMENT_MIN_SCORE: floatish.optional(),
     JOB_QUEUE_PREFIX: z.string().optional(),
     JOB_CONCURRENCY_SUMMARIES: intish.optional(),
     JOB_CONCURRENCY_PROFILES: intish.optional(),
@@ -308,7 +330,6 @@ export type AppRole = "bot" | "api" | "worker";
 const envAliasMap = {
   BOT_TOKEN: "DISCORD_TOKEN",
   BOT_ID: "DISCORD_CLIENT_ID",
-  DEV_GUILD: "DISCORD_DEV_GUILD_ID",
   BOT_OWNERS: "DISCORD_OWNER_IDS",
   BOT_LANG: "BOT_DEFAULT_LANGUAGE",
   HOST: "API_HOST",
@@ -350,7 +371,6 @@ function mapCoreAliases(raw: NodeJS.ProcessEnv) {
     LOG_LEVEL: raw.LOG_LEVEL,
     DISCORD_TOKEN: raw.BOT_TOKEN ?? raw.DISCORD_TOKEN,
     DISCORD_CLIENT_ID: raw.BOT_ID ?? raw.DISCORD_CLIENT_ID,
-    DISCORD_DEV_GUILD_ID: raw.DEV_GUILD ?? raw.DISCORD_DEV_GUILD_ID,
     DISCORD_OWNER_IDS: raw.BOT_OWNERS ?? raw.DISCORD_OWNER_IDS,
     BOT_NAME: raw.BOT_NAME,
     BOT_DEFAULT_LANGUAGE: raw.BOT_LANG ?? raw.BOT_DEFAULT_LANGUAGE,
@@ -408,6 +428,12 @@ function parseCompactConfig(cfg?: string): Partial<RuntimeTuning> {
     FEATURE_ANALOGY_BAN_ENABLED: parsed.features?.analogyBanEnabled,
     FEATURE_SLANG_LAYER_ENABLED: parsed.features?.slangLayerEnabled,
     FEATURE_SELF_INTERJECTION_CONSTRAINTS_ENABLED: parsed.features?.selfInterjectionConstraintsEnabled,
+    FEATURE_MEMORY_ALBUM_ENABLED: parsed.features?.memoryAlbumEnabled,
+    FEATURE_INTERACTION_REQUESTS_ENABLED: parsed.features?.interactionRequestsEnabled,
+    FEATURE_LINK_UNDERSTANDING_ENABLED: parsed.features?.linkUnderstandingEnabled,
+    FEATURE_NATURAL_MESSAGE_SPLITTING_ENABLED: parsed.features?.naturalMessageSplittingEnabled,
+    FEATURE_SELECTIVE_ENGAGEMENT_ENABLED: parsed.features?.selectiveEngagementEnabled,
+    FEATURE_SELF_REFLECTION_LESSONS_ENABLED: parsed.features?.selfReflectionLessonsEnabled,
     LLM_MAX_CONTEXT_MESSAGES: parsed.llm?.contextMessages,
     LLM_MAX_TOOL_CALLS: parsed.llm?.toolCalls,
     LLM_REPLY_MAX_TOKENS: parsed.llm?.replyMaxTokens,
@@ -440,6 +466,9 @@ function parseCompactConfig(cfg?: string): Partial<RuntimeTuning> {
     DEFAULT_ROAST_LEVEL: parsed.reply?.roastLevel,
     DEFAULT_SARCASM_LEVEL: parsed.reply?.sarcasmLevel,
     DEFAULT_INTERJECT_TENDENCY: parsed.reply?.interjectTendency,
+    NATURAL_SPLIT_CHANCE: parsed.chat?.naturalSplitChance,
+    NATURAL_SPLIT_COOLDOWN_SEC: parsed.chat?.naturalSplitCooldownSec,
+    SELECTIVE_ENGAGEMENT_MIN_SCORE: parsed.chat?.selectiveEngagementMinScore,
     JOB_QUEUE_PREFIX: parsed.jobs?.prefix,
     JOB_CONCURRENCY_SUMMARIES: parsed.jobs?.summaries,
     JOB_CONCURRENCY_PROFILES: parsed.jobs?.profiles,

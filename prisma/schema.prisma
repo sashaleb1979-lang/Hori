@@ -39,6 +39,9 @@ model Guild {
   topicSessions      TopicSession[]
   affinitySignals    AffinitySignal[]
   replyQueueItems    ReplyQueueItem[]
+  memoryAlbumEntries MemoryAlbumEntry[]
+  interactionRequests InteractionRequest[]
+  reflectionLessons  ReflectionLesson[]
 }
 
 model ChannelConfig {
@@ -477,4 +480,87 @@ model MediaMetadata {
   @@index([type])
   @@index([nsfw])
   @@index([enabled])
+}
+
+model MemoryAlbumEntry {
+  id            String   @id @default(cuid())
+  guildId       String
+  channelId     String
+  messageId     String?
+  savedByUserId String
+  authorUserId  String?
+  content       String   @db.Text
+  note          String?  @db.Text
+  category      String   @default("moment")
+  tags          String[] @default([])
+  sourceUrl     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  guild         Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, savedByUserId, messageId])
+  @@index([guildId, savedByUserId, createdAt])
+  @@index([guildId, channelId, createdAt])
+}
+
+model InteractionRequest {
+  id                 String   @id @default(cuid())
+  guildId            String
+  channelId          String
+  messageId          String?
+  userId             String
+  requestType        String
+  status             String   @default("pending")
+  title              String
+  prompt             String   @db.Text
+  category           String?
+  expectedAnswerType String?
+  allowedOptions     String[] @default([])
+  answerText         String?  @db.Text
+  answerJson         Json?
+  metadataJson       Json?
+  expiresAt          DateTime?
+  answeredAt         DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  guild              Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  events             InteractionRequestEvent[]
+
+  @@index([guildId, status, createdAt])
+  @@index([guildId, userId, status])
+  @@index([expiresAt])
+}
+
+model InteractionRequestEvent {
+  id            String   @id @default(cuid())
+  requestId     String
+  actorUserId   String?
+  eventType     String
+  fromStatus    String?
+  toStatus      String
+  payloadJson   Json?
+  createdAt     DateTime @default(now())
+  request       InteractionRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, createdAt])
+}
+
+model ReflectionLesson {
+  id            String   @id @default(cuid())
+  guildId       String
+  channelId     String
+  messageId     String?  @unique
+  userId        String?
+  lessonType    String   @default("feedback")
+  sentiment     String   @default("neutral")
+  severity      Int      @default(1)
+  summary       String   @db.Text
+  status        String   @default("open")
+  metadataJson  Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  guild         Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, status, createdAt])
+  @@index([guildId, sentiment, createdAt])
 }

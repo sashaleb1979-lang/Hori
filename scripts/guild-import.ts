@@ -1,5 +1,5 @@
 /**
- * Guild Import — restores guild data from a JSON export.
+ * Guild Import - restores guild data from a JSON export.
  *
  * Usage:
  *   npx tsx scripts/guild-import.ts <file.json> [--target-guild <newGuildId>] [--channel-map old1:new1,old2:new2] [--dry-run]
@@ -60,14 +60,14 @@ async function main() {
   const data = JSON.parse(raw) as ExportData;
 
   if (!data.version || !data.guild) {
-    console.error("Invalid export file — missing version or guild");
+    console.error("Invalid export file - missing version or guild");
     process.exit(1);
   }
 
   const sourceGuildId = data.guild.id as string;
   const guildId = targetGuildId ?? sourceGuildId;
 
-  console.log(`Importing guild data`);
+  console.log("Importing guild data");
   console.log(`  Source guild: ${sourceGuildId}`);
   console.log(`  Target guild: ${guildId}`);
   console.log(`  Channel map: ${channelMap.size > 0 ? [...channelMap.entries()].map(([a, b]) => `${a}->${b}`).join(", ") : "none"}`);
@@ -101,7 +101,6 @@ async function main() {
   const prisma = new PrismaClient();
 
   try {
-    // 1. Guild
     const guildPayload = { ...data.guild } as Record<string, unknown>;
     delete guildPayload.createdAt;
     delete guildPayload.updatedAt;
@@ -112,9 +111,8 @@ async function main() {
       update: guildPayload,
       create: guildPayload as never,
     });
-    console.log("✓ Guild");
+    console.log("Guild imported");
 
-    // 2. Users
     for (const user of (data.users ?? [])) {
       const u = { ...user } as Record<string, unknown>;
       delete u.createdAt;
@@ -125,9 +123,8 @@ async function main() {
         create: { id: u.id as string, username: u.username as string | null, globalName: u.globalName as string | null, isBot: (u.isBot as boolean) ?? false },
       });
     }
-    console.log(`✓ Users: ${counts.users}`);
+    console.log(`Users imported: ${counts.users}`);
 
-    // 3. Channel configs
     for (const cc of (data.channelConfigs ?? [])) {
       const channelId = remapChannel(cc.channelId as string, channelMap);
       await prisma.channelConfig.upsert({
@@ -152,9 +149,8 @@ async function main() {
         },
       });
     }
-    console.log(`✓ Channel configs: ${counts.channelConfigs}`);
+    console.log(`Channel configs imported: ${counts.channelConfigs}`);
 
-    // 4. Messages
     let msgImported = 0;
     let msgSkipped = 0;
 
@@ -186,9 +182,8 @@ async function main() {
         msgSkipped++;
       }
     }
-    console.log(`✓ Messages: ${msgImported} imported, ${msgSkipped} skipped`);
+    console.log(`Messages: ${msgImported} imported, ${msgSkipped} skipped`);
 
-    // 5. Relationship profiles
     for (const rp of (data.relationshipProfiles ?? [])) {
       await prisma.relationshipProfile.upsert({
         where: { guildId_userId: { guildId, userId: rp.userId as string } },
@@ -226,9 +221,8 @@ async function main() {
         },
       });
     }
-    console.log(`✓ Relationships: ${counts.relationships}`);
+    console.log(`Relationships imported: ${counts.relationships}`);
 
-    // 6. Server memories
     for (const sm of (data.serverMemories ?? [])) {
       await prisma.serverMemory.upsert({
         where: { guildId_key: { guildId, key: sm.key as string } },
@@ -247,9 +241,8 @@ async function main() {
         },
       });
     }
-    console.log(`✓ Server memories: ${counts.serverMemories}`);
+    console.log(`Server memories imported: ${counts.serverMemories}`);
 
-    // 7. User memory notes
     for (const um of (data.userMemoryNotes ?? [])) {
       await prisma.userMemoryNote.upsert({
         where: { guildId_userId_key: { guildId, userId: um.userId as string, key: um.key as string } },
@@ -265,9 +258,9 @@ async function main() {
         },
       });
     }
-    console.log(`✓ User memory notes: ${counts.userMemoryNotes}`);
+    console.log(`User memory notes imported: ${counts.userMemoryNotes}`);
 
-    console.log("\n✅ Import complete!");
+    console.log("\nImport complete!");
   } finally {
     await prisma.$disconnect();
   }

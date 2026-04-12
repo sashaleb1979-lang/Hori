@@ -235,6 +235,18 @@ export class ReplyQueueService {
       }
     });
   }
+
+  async clearAll(): Promise<{ count: number }> {
+    return this.prisma.replyQueueItem.updateMany({
+      where: {
+        status: { in: ["queued", "processing"] }
+      },
+      data: {
+        status: "dropped",
+        lockedUntil: null
+      }
+    });
+  }
 }
 
 function toStoredPriority(lane: QueueLane, score: number) {

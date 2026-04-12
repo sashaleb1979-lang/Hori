@@ -24,7 +24,13 @@ const FEATURE_KEY_MAP = {
   ideological_flavour_enabled: "ideologicalFlavourEnabled",
   analogy_ban_enabled: "analogyBanEnabled",
   slang_layer_enabled: "slangLayerEnabled",
-  self_interjection_constraints_enabled: "selfInterjectionConstraintsEnabled"
+  self_interjection_constraints_enabled: "selfInterjectionConstraintsEnabled",
+  memory_album_enabled: "memoryAlbumEnabled",
+  interaction_requests_enabled: "interactionRequestsEnabled",
+  link_understanding_enabled: "linkUnderstandingEnabled",
+  natural_message_splitting_enabled: "naturalMessageSplittingEnabled",
+  selective_engagement_enabled: "selectiveEngagementEnabled",
+  self_reflection_lessons_enabled: "selfReflectionLessonsEnabled"
 } as const satisfies Record<string, keyof FeatureFlags>;
 
 export interface EffectiveChannelPolicy {

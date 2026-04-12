@@ -2,15 +2,17 @@ import type { GuildMember, Message } from "discord.js";
 import { PermissionFlagsBits } from "discord.js";
 
 import { trackIngestedMessage } from "@hori/analytics";
-import { DEFAULT_DEBOUNCE, IntentRouter, createChannelDebouncer, detectMessageKind, implicitMentionKindWhen, resolveActivation, shouldDebounce } from "@hori/core";
+import { DEFAULT_DEBOUNCE, IntentRouter, createChannelDebouncer, detectMessageKind, evaluateSelectiveEngagement, implicitMentionKindWhen, planNaturalMessageSplit, resolveActivation, shouldDebounce } from "@hori/core";
 import { type MessageEnvelope, type ReplyQueueTrace, type TriggerSource } from "@hori/shared";
 
 import type { BotRuntime } from "../bootstrap";
 import { enqueueBackgroundJobs } from "./background-jobs";
+import { getOwnerLockdownState, isBotOwner } from "./owner-lockdown";
 import { sendReply } from "../responders/message-responder";
 
 const intentRouter = new IntentRouter();
 const inboundDebouncers = new Map<string, ReturnType<typeof createChannelDebouncer<PendingInvocation>>>();
+const naturalSplitCooldownByChannel = new Map<string, number>();
 
 interface PendingInvocation {
   runtime: BotRuntime;
@@ -45,8 +47,43 @@ async function detectTriggerSource(message: Message, botName: string, botId: str
   return { triggerSource: undefined, wasMentioned: false, implicitMentionKinds: [] };
 }
 
-async function shouldAutoInterject(runtime: BotRuntime, message: Message) {
+async function shouldAutoInterject(
+  runtime: BotRuntime,
+  message: Message,
+  routingConfig: Awaited<ReturnType<BotRuntime["runtimeConfig"]["getRoutingConfig"]>>
+) {
   if (!message.guildId) {
+    return false;
+  }
+
+  const relationship = await runtime.prisma.relationshipProfile.findUnique({
+    where: {
+      guildId_userId: {
+        guildId: message.guildId,
+        userId: message.author.id
+      }
+    },
+    select: {
+      doNotInitiate: true,
+      proactivityPreference: true,
+      interruptPriority: true
+    }
+  });
+  const decision = evaluateSelectiveEngagement({
+    content: message.content,
+    enabled: routingConfig.featureFlags.selectiveEngagementEnabled,
+    autoInterjectEnabled: routingConfig.featureFlags.autoInterject,
+    channelAllowsInterjections: routingConfig.channelPolicy.allowInterjections,
+    channelMuted: routingConfig.channelPolicy.isMuted,
+    hasAttachments: message.attachments.size > 0,
+    interjectTendency: routingConfig.guildSettings.interjectTendency,
+    relationshipDoNotInitiate: relationship?.doNotInitiate,
+    relationshipProactivityPreference: relationship?.proactivityPreference,
+    relationshipInterruptPriority: relationship?.interruptPriority,
+    minScore: runtime.env.SELECTIVE_ENGAGEMENT_MIN_SCORE
+  });
+
+  if (!decision.shouldInterject) {
     return false;
   }
 
@@ -79,11 +116,18 @@ async function shouldAutoInterject(runtime: BotRuntime, message: Message) {
     return false;
   }
 
-  return /что думаете|кто прав|мнение|как считаете/i.test(message.content);
+  return true;
 }
 
 export async function routeMessage(runtime: BotRuntime, message: Message) {
   if (!message.inGuild() || message.author.bot || !runtime.client.user) {
+    return;
+  }
+
+  const ownerLockdownState = await getOwnerLockdownState(runtime);
+  const ownerLockdownActive = ownerLockdownState.enabled && runtime.env.DISCORD_OWNER_IDS.length > 0;
+
+  if (ownerLockdownActive && !isBotOwner(runtime, message.author.id)) {
     return;
   }
 
@@ -115,12 +159,13 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
   const explicitInvocation = activation.effectiveWasMentioned;
   const autoInterject =
     !explicitInvocation &&
+    !ownerLockdownActive &&
     routingConfig.featureFlags.autoInterject &&
     routingConfig.channelPolicy.allowInterjections &&
     !routingConfig.channelPolicy.isMuted &&
     (!runtime.env.AUTOINTERJECT_CHANNEL_ALLOWLIST.length ||
       runtime.env.AUTOINTERJECT_CHANNEL_ALLOWLIST.includes(message.channelId)) &&
-    (await shouldAutoInterject(runtime, message));
+    (await shouldAutoInterject(runtime, message, routingConfig));
   const envelope = buildEnvelope(message, member, botName, botId, triggerSource, explicitInvocation, autoInterject);
 
   await runtime.ingestService.ingestMessage({
@@ -266,7 +311,32 @@ async function processInvocation(
     return;
   }
 
-  await sendReply(message, result.reply);
+  const replyText = typeof result.reply === "string" ? result.reply : result.reply.text;
+  const hasMedia = typeof result.reply !== "string" && Boolean(result.reply.media);
+  const splitPlan = hasMedia
+    ? null
+    : planNaturalMessageSplit({
+        text: replyText,
+        enabled: routingConfig.featureFlags.naturalMessageSplittingEnabled,
+        intent: result.trace.intent,
+        explicitInvocation: envelope.explicitInvocation,
+        triggerSource: result.trace.triggerSource,
+        messageKind: result.trace.behavior?.messageKind,
+        nowMs: Date.now(),
+        lastSplitAtMs: naturalSplitCooldownByChannel.get(message.channelId),
+        cooldownMs: runtime.env.NATURAL_SPLIT_COOLDOWN_SEC * 1000,
+        chance: runtime.env.NATURAL_SPLIT_CHANCE,
+        random: Math.random()
+      });
+
+  if (splitPlan) {
+    naturalSplitCooldownByChannel.set(message.channelId, Date.now());
+  }
+
+  await sendReply(message, result.reply, {
+    naturalChunks: splitPlan?.chunks,
+    naturalDelayMs: splitPlan?.delayMs
+  });
 
   if (queueItemId) {
     await runtime.replyQueue.complete(queueItemId);

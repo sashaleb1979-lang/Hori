@@ -145,6 +145,12 @@ export interface FeatureFlags {
   analogyBanEnabled: boolean;
   slangLayerEnabled: boolean;
   selfInterjectionConstraintsEnabled: boolean;
+  memoryAlbumEnabled: boolean;
+  interactionRequestsEnabled: boolean;
+  linkUnderstandingEnabled: boolean;
+  naturalMessageSplittingEnabled: boolean;
+  selectiveEngagementEnabled: boolean;
+  selfReflectionLessonsEnabled: boolean;
 }
 
 export interface PersonaSettings {
@@ -278,6 +284,17 @@ export interface BotTrace {
   context?: ContextTrace;
   queue?: ReplyQueueTrace;
   media?: MediaReactionTrace;
+  linkUnderstanding?: {
+    enabled: boolean;
+    urls: string[];
+    fetched: number;
+    reason?: string;
+  };
+  reflection?: {
+    recorded: boolean;
+    sentiment?: "positive" | "negative" | "neutral";
+    lessonId?: string | null;
+  };
 }
 
 export interface ContextMessage {

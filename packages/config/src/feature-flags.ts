@@ -26,7 +26,13 @@ export function buildFeatureFlags(env: AppEnv): FeatureFlags {
     ideologicalFlavourEnabled: env.FEATURE_IDEOLOGICAL_FLAVOUR_ENABLED,
     analogyBanEnabled: env.FEATURE_ANALOGY_BAN_ENABLED,
     slangLayerEnabled: env.FEATURE_SLANG_LAYER_ENABLED,
-    selfInterjectionConstraintsEnabled: env.FEATURE_SELF_INTERJECTION_CONSTRAINTS_ENABLED
+    selfInterjectionConstraintsEnabled: env.FEATURE_SELF_INTERJECTION_CONSTRAINTS_ENABLED,
+    memoryAlbumEnabled: env.FEATURE_MEMORY_ALBUM_ENABLED,
+    interactionRequestsEnabled: env.FEATURE_INTERACTION_REQUESTS_ENABLED,
+    linkUnderstandingEnabled: env.FEATURE_LINK_UNDERSTANDING_ENABLED,
+    naturalMessageSplittingEnabled: env.FEATURE_NATURAL_MESSAGE_SPLITTING_ENABLED,
+    selectiveEngagementEnabled: env.FEATURE_SELECTIVE_ENGAGEMENT_ENABLED,
+    selfReflectionLessonsEnabled: env.FEATURE_SELF_REFLECTION_LESSONS_ENABLED
   };
 }
 

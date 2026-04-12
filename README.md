@@ -93,7 +93,7 @@ pnpm build
 ## Environment Variables
 See [.env.example](./.env.example). Short aliases are the preferred setup for Railway:
 - Required in most setups: `BOT_TOKEN`, `BOT_ID`, `DB_URL`, `KV_URL`, `AI_URL`
-- Usually set too: `DEV_GUILD`, `BOT_OWNERS`, `BOT_NAME`, `BRAVE_KEY`
+- Usually set too: `BOT_OWNERS`, `BOT_NAME`, `BRAVE_KEY`
 - Optional top-level overrides: `BOT_LANG`, `HOST`, `PORT`, `ADMIN_KEY`, `AI_FAST`, `AI_SMART`, `AI_EMBED`, `AI_TIMEOUT`
 - Advanced tuning is compressed into one optional `CFG` JSON instead of dozens of separate vars
 
@@ -113,6 +113,8 @@ CFG={"features":{"webSearch":true,"autoInterject":false},"profiles":{"minMessage
 
 Notes:
 - The app still accepts legacy long names like `DISCORD_TOKEN` and `DATABASE_URL`.
+- Discord commands are registered globally, so there is no per-server guild id to update when moving the bot.
+- Put your Discord user ID in `BOT_OWNERS` to use owner-only commands like `/bot-lockdown on|off|status`.
 - Prisma-based scripts use the alias bridge automatically, so `DB_URL` is enough if you run the provided `pnpm prisma:*` and `pnpm seed` scripts.
 - API-only deployments can skip `AI_URL`; bot and worker still require it.
 - In Railway, prefer using the built-in managed database variable names directly for service references: `DATABASE_URL=${{Postgres.DATABASE_URL}}` and `REDIS_URL=${{Redis.REDIS_URL}}`.

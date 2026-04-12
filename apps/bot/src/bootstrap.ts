@@ -4,7 +4,7 @@ import { AnalyticsQueryService, MessageIngestService } from "@hori/analytics";
 import { assertEnvForRole, loadEnv } from "@hori/config";
 import { AffinityService, createChatOrchestrator, MediaReactionService, MoodService, ReplyQueueService, RuntimeConfigService, SlashAdminService } from "@hori/core";
 import { EmbeddingAdapter, ModelRouter, OllamaClient, ToolOrchestrator } from "@hori/llm";
-import { ContextService, ProfileService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
+import { ContextService, InteractionRequestService, MemoryAlbumService, ProfileService, ReflectionService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
 import { BraveSearchClient, SearchCacheService } from "@hori/search";
 import { createLogger, createPrismaClient, createRedisClient, createAppQueues, ensureInfrastructureReady, loadPersistedOllamaBaseUrl } from "@hori/shared";
 
@@ -35,6 +35,9 @@ export interface BotRuntime {
   ingestService: MessageIngestService;
   analytics: AnalyticsQueryService;
   slashAdmin: SlashAdminService;
+  memoryAlbum: MemoryAlbumService;
+  interactionRequests: InteractionRequestService;
+  reflection: ReflectionService;
   runtimeConfig: RuntimeConfigService;
   orchestrator: ReturnType<typeof createChatOrchestrator>;
   replyQueue: ReplyQueueService;
@@ -103,6 +106,9 @@ export async function bootstrapBot() {
   const summaryService = new SummaryService(prisma);
   const relationshipService = new RelationshipService(prisma);
   const retrievalService = new RetrievalService(prisma);
+  const memoryAlbumService = new MemoryAlbumService(prisma);
+  const interactionRequestService = new InteractionRequestService(prisma);
+  const reflectionService = new ReflectionService(prisma);
   const profileService = new ProfileService(prisma, env);
   const runtimeConfig = new RuntimeConfigService(prisma, env);
   const affinityService = new AffinityService(prisma);
@@ -139,7 +145,18 @@ export async function bootstrapBot() {
   const searchClient = new BraveSearchClient(env, logger, searchCache);
   const toolOrchestrator = new ToolOrchestrator(llmClient, logger);
   const ingestService = new MessageIngestService(prisma, logger);
-  const slashAdmin = new SlashAdminService(prisma, analytics, relationshipService, retrievalService, summaryService, runtimeConfig, moodService, replyQueueService);
+  const slashAdmin = new SlashAdminService(
+    prisma,
+    analytics,
+    relationshipService,
+    retrievalService,
+    summaryService,
+    runtimeConfig,
+    moodService,
+    replyQueueService,
+    memoryAlbumService,
+    reflectionService
+  );
   const orchestrator = createChatOrchestrator({
     env,
     logger,
@@ -156,7 +173,8 @@ export async function bootstrapBot() {
     relationships: relationshipService,
     affinity: affinityService,
     mood: moodService,
-    media: mediaReactionService
+    media: mediaReactionService,
+    reflection: reflectionService
   });
 
   const runtime: BotRuntime = {
@@ -169,6 +187,9 @@ export async function bootstrapBot() {
     ingestService,
     analytics,
     slashAdmin,
+    memoryAlbum: memoryAlbumService,
+    interactionRequests: interactionRequestService,
+    reflection: reflectionService,
     runtimeConfig,
     orchestrator,
     replyQueue: replyQueueService

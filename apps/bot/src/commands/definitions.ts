@@ -46,6 +46,21 @@ export const slashCommandDefinitions = [
         .addStringOption((option) => option.setName("key").setDescription("Ключ").setRequired(true))
     ),
   new SlashCommandBuilder()
+    .setName("bot-album")
+    .setDescription("Личный альбом сохранённых моментов")
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("list")
+        .setDescription("Показать последние сохранённые моменты")
+        .addIntegerOption((option) => option.setName("limit").setDescription("Сколько показать").setMinValue(1).setMaxValue(10))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("remove")
+        .setDescription("Удалить момент из своего альбома")
+        .addStringOption((option) => option.setName("id").setDescription("ID момента").setRequired(true))
+    ),
+  new SlashCommandBuilder()
     .setName("bot-relationship")
     .setDescription("Настроить отношение к пользователю")
     .addUserOption((option) => option.setName("user").setDescription("Пользователь").setRequired(true))
@@ -87,7 +102,13 @@ export const slashCommandDefinitions = [
           { name: "ideological_flavour_enabled", value: "ideological_flavour_enabled" },
           { name: "analogy_ban_enabled", value: "analogy_ban_enabled" },
           { name: "slang_layer_enabled", value: "slang_layer_enabled" },
-          { name: "self_interjection_constraints_enabled", value: "self_interjection_constraints_enabled" }
+          { name: "self_interjection_constraints_enabled", value: "self_interjection_constraints_enabled" },
+          { name: "memory_album_enabled", value: "memory_album_enabled" },
+          { name: "interaction_requests_enabled", value: "interaction_requests_enabled" },
+          { name: "link_understanding_enabled", value: "link_understanding_enabled" },
+          { name: "natural_message_splitting_enabled", value: "natural_message_splitting_enabled" },
+          { name: "selective_engagement_enabled", value: "selective_engagement_enabled" },
+          { name: "self_reflection_lessons_enabled", value: "self_reflection_lessons_enabled" }
         )
     )
     .addBooleanOption((option) => option.setName("enabled").setDescription("Включить/выключить").setRequired(true)),
@@ -190,6 +211,16 @@ export const slashCommandDefinitions = [
         )
     ),
   new SlashCommandBuilder()
+    .setName("bot-reflection")
+    .setDescription("Посмотреть тихий журнал уроков Hori")
+    .addSubcommand((subcommand) => subcommand.setName("status").setDescription("Сводка по урокам"))
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("list")
+        .setDescription("Последние открытые уроки")
+        .addIntegerOption((option) => option.setName("limit").setDescription("Сколько показать").setMinValue(1).setMaxValue(10))
+    ),
+  new SlashCommandBuilder()
     .setName("bot-media")
     .setDescription("Управлять media registry")
     .addSubcommand((subcommand) =>
@@ -228,6 +259,12 @@ export const slashCommandDefinitions = [
     .setDescription("Сменить Ollama URL (только владелец бота)")
     .addStringOption((option) => option.setName("url").setDescription("Новый URL (https://...)").setRequired(true)),
   new SlashCommandBuilder()
+    .setName("bot-lockdown")
+    .setDescription("Включить режим: Хори слушает только владельца")
+    .addSubcommand((subcommand) => subcommand.setName("on").setDescription("Включить локдаун"))
+    .addSubcommand((subcommand) => subcommand.setName("off").setDescription("Выключить локдаун"))
+    .addSubcommand((subcommand) => subcommand.setName("status").setDescription("Проверить статус локдауна")),
+  new SlashCommandBuilder()
     .setName("bot-import")
     .setDescription("Импортировать историю чата из JSON файла")
     .addAttachmentOption((option) => option.setName("file").setDescription(".json файл с историей чата").setRequired(true))
@@ -242,6 +279,9 @@ export const contextMenuDefinitions = [
     .setType(ApplicationCommandType.Message),
   new ContextMenuCommandBuilder()
     .setName(CONTEXT_ACTIONS.tone)
+    .setType(ApplicationCommandType.Message),
+  new ContextMenuCommandBuilder()
+    .setName(CONTEXT_ACTIONS.rememberMoment)
     .setType(ApplicationCommandType.Message)
 ].map((command) => command.toJSON());
 

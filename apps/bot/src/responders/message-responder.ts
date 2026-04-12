@@ -2,12 +2,21 @@ import type { Message } from "discord.js";
 
 import { splitLongMessage, type BotReplyPayload } from "@hori/shared";
 
-export async function sendReply(message: Message, reply: string | BotReplyPayload) {
+export interface SendReplyOptions {
+  naturalChunks?: string[];
+  naturalDelayMs?: number;
+}
+
+export async function sendReply(message: Message, reply: string | BotReplyPayload, options: SendReplyOptions = {}) {
   const text = typeof reply === "string" ? reply : reply.text;
   const media = typeof reply === "string" ? null : reply.media;
-  const chunks = splitLongMessage(text);
+  const chunks = media || !options.naturalChunks?.length ? splitLongMessage(text) : options.naturalChunks;
 
   for (let index = 0; index < chunks.length; index += 1) {
+    if (index > 0 && options.naturalChunks?.length) {
+      await sleep(options.naturalDelayMs ?? 900);
+    }
+
     if (index === 0) {
       await message.reply(media ? mediaReplyPayload(chunks[index], media.filePath) : chunks[index]);
     } else if ("send" in message.channel) {
@@ -31,4 +40,8 @@ export async function sendReplyToChannel(
 
 function mediaReplyPayload(content: string, filePath: string) {
   return content ? { content, files: [filePath] } : { files: [filePath] };
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

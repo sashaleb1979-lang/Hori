@@ -2,11 +2,16 @@ import { normalizeWhitespace } from "@hori/shared";
 
 import type { AppEnv } from "@hori/config";
 
+import { isBlockedHostnameOrIp } from "../link-understanding/ssrf";
 import { sanitizeHtmlToText } from "../sanitize/text-sanitizer";
 
 function isAllowedDomain(urlString: string, env: AppEnv) {
   const url = new URL(urlString);
   const hostname = url.hostname.replace(/^www\./, "");
+
+  if (isBlockedHostnameOrIp(url.hostname)) {
+    return false;
+  }
 
   if (env.SEARCH_DOMAIN_DENYLIST.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))) {
     return false;
@@ -20,6 +25,12 @@ function isAllowedDomain(urlString: string, env: AppEnv) {
 }
 
 export async function fetchWebPage(url: string, env: AppEnv) {
+  const parsed = new URL(url);
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Protocol is not allowed");
+  }
+
   if (!isAllowedDomain(url, env)) {
     throw new Error("Domain is not allowed");
   }

@@ -3,7 +3,7 @@ import { parseCsv } from "@hori/shared";
 
 import { defaultPersonaSettings } from "@hori/config";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
-import { RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
+import { MemoryAlbumService, ReflectionService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
 import type { MoodService } from "./mood-service";
 import type { ReplyQueueService } from "./reply-queue-service";
 import type { RuntimeConfigService } from "./runtime-config-service";
@@ -17,11 +17,13 @@ export class SlashAdminService {
     private readonly summaries: SummaryService,
     private readonly runtimeConfig?: RuntimeConfigService,
     private readonly mood?: MoodService,
-    private readonly replyQueue?: ReplyQueueService
+    private readonly replyQueue?: ReplyQueueService,
+    private readonly memoryAlbum?: MemoryAlbumService,
+    private readonly reflection?: ReflectionService
   ) {}
 
   async handleHelp() {
-    return "Команды админки: /bot-style, /bot-memory, /bot-relationship, /bot-feature, /bot-debug, /bot-profile, /bot-channel, /bot-summary, /bot-stats, /bot-topic, /bot-mood, /bot-queue, /bot-media.";
+    return "Команды: /bot-album для своих сохранённых моментов. Админка: /bot-style, /bot-memory, /bot-relationship, /bot-feature, /bot-debug, /bot-profile, /bot-channel, /bot-summary, /bot-stats, /bot-topic, /bot-mood, /bot-queue, /bot-reflection, /bot-media. Владелец: /bot-lockdown.";
   }
 
   async updateStyle(
@@ -132,6 +134,33 @@ export class SlashAdminService {
   async forget(guildId: string, key: string) {
     await this.retrieval.forgetServerFact(guildId, key);
     return `Удалила память по ключу ${key}.`;
+  }
+
+  async albumList(guildId: string, userId: string, limit = 8) {
+    const entries = await this.memoryAlbum?.listMoments(guildId, userId, limit);
+
+    if (!entries?.length) {
+      return "В твоём альбоме пока пусто. Используй контекстное действие `Хори: запомнить момент` на сообщении.";
+    }
+
+    return entries
+      .map((entry) => {
+        const tags = entry.tags.length ? ` #${entry.tags.join(" #")}` : "";
+        const note = entry.note ? `\n   заметка: ${entry.note}` : "";
+        const excerpt = entry.content.length > 120 ? `${entry.content.slice(0, 117)}...` : entry.content;
+        return `- ${entry.id}${tags}\n  "${excerpt}"${note}`;
+      })
+      .join("\n");
+  }
+
+  async albumRemove(guildId: string, userId: string, id: string) {
+    const result = await this.memoryAlbum?.removeMoment(guildId, userId, id);
+
+    if (!result?.count) {
+      return "Не нашла такой момент в твоём альбоме.";
+    }
+
+    return "Убрала из альбома.";
   }
 
   async channelConfig(
@@ -297,6 +326,31 @@ export class SlashAdminService {
     }
 
     return `Media ${mediaId}: off.`;
+  }
+
+  async reflectionStatus(guildId: string) {
+    const status = await this.reflection?.status(guildId);
+
+    if (!status) {
+      return "Reflection journal недоступен.";
+    }
+
+    return `Reflection: open=${status.open}, positive=${status.positive}, negative=${status.negative}.`;
+  }
+
+  async reflectionList(guildId: string, limit = 8) {
+    const entries = await this.reflection?.listOpenLessons(guildId, limit);
+
+    if (!entries?.length) {
+      return "Открытых уроков пока нет.";
+    }
+
+    return entries
+      .map((entry) => {
+        const excerpt = entry.summary.length > 150 ? `${entry.summary.slice(0, 147)}...` : entry.summary;
+        return `- ${entry.sentiment}/${entry.severity}: ${excerpt}`;
+      })
+      .join("\n");
   }
 
   async debugTrace(messageId: string) {

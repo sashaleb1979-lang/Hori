@@ -76,7 +76,13 @@ const featureFlags: FeatureFlags = {
   ideologicalFlavourEnabled: true,
   analogyBanEnabled: true,
   slangLayerEnabled: true,
-  selfInterjectionConstraintsEnabled: true
+  selfInterjectionConstraintsEnabled: true,
+  memoryAlbumEnabled: true,
+  interactionRequestsEnabled: true,
+  linkUnderstandingEnabled: true,
+  naturalMessageSplittingEnabled: true,
+  selectiveEngagementEnabled: true,
+  selfReflectionLessonsEnabled: true
 };
 
 const guildSettings: PersonaSettings = {

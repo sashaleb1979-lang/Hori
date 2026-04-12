@@ -3,6 +3,13 @@ import type { AppPrismaClient } from "./prisma";
 import { asErrorMessage } from "./utils";
 
 export const OLLAMA_BASE_URL_SETTING_KEY = "OLLAMA_BASE_URL";
+export const OWNER_LOCKDOWN_SETTING_KEY = "OWNER_LOCKDOWN";
+
+export interface OwnerLockdownState {
+  enabled: boolean;
+  updatedBy?: string | null;
+  updatedAt?: Date | null;
+}
 
 export async function loadPersistedOllamaBaseUrl(prisma: AppPrismaClient, logger?: AppLogger): Promise<string | undefined> {
   try {
@@ -32,6 +39,38 @@ export async function persistOllamaBaseUrl(prisma: AppPrismaClient, url: string,
   );
 }
 
+export async function loadOwnerLockdownState(prisma: AppPrismaClient, logger?: AppLogger): Promise<OwnerLockdownState> {
+  try {
+    const rows = await prisma.$queryRawUnsafe<Array<{ value: string; updatedBy: string | null; updatedAt: Date | null }>>(
+      'SELECT "value", "updatedBy", "updatedAt" FROM "RuntimeSetting" WHERE "key" = $1 LIMIT 1',
+      OWNER_LOCKDOWN_SETTING_KEY
+    );
+    const row = rows[0];
+
+    if (!row) {
+      return { enabled: false };
+    }
+
+    return {
+      enabled: parseOwnerLockdownValue(row.value),
+      updatedBy: row.updatedBy,
+      updatedAt: row.updatedAt
+    };
+  } catch (error) {
+    logger?.warn({ error: asErrorMessage(error) }, "failed to load owner lockdown state");
+    return { enabled: false };
+  }
+}
+
+export async function persistOwnerLockdownState(prisma: AppPrismaClient, enabled: boolean, updatedBy?: string): Promise<void> {
+  await prisma.$executeRawUnsafe(
+    'INSERT INTO "RuntimeSetting" ("key", "value", "updatedBy") VALUES ($1, $2, $3) ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value", "updatedBy" = EXCLUDED."updatedBy", "updatedAt" = CURRENT_TIMESTAMP',
+    OWNER_LOCKDOWN_SETTING_KEY,
+    enabled ? "true" : "false",
+    updatedBy ?? null
+  );
+}
+
 export function shouldAutoSyncOllamaBaseUrl(raw: NodeJS.ProcessEnv = process.env) {
   return !raw.OLLAMA_BASE_URL && !raw.AI_URL;
 }
@@ -57,4 +96,9 @@ export function startOllamaBaseUrlSync(options: {
 
   timer.unref?.();
   return timer;
+}
+
+function parseOwnerLockdownValue(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "on" || normalized === "enabled";
 }

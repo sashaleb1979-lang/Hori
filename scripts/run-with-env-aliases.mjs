@@ -3,7 +3,6 @@ import { spawn } from "node:child_process";
 const envAliasMap = {
   BOT_TOKEN: "DISCORD_TOKEN",
   BOT_ID: "DISCORD_CLIENT_ID",
-  DEV_GUILD: "DISCORD_DEV_GUILD_ID",
   BOT_OWNERS: "DISCORD_OWNER_IDS",
   BOT_LANG: "BOT_DEFAULT_LANGUAGE",
   HOST: "API_HOST",

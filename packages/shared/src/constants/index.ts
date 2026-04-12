@@ -10,13 +10,15 @@ export const QUEUE_NAMES = {
 export const CONTEXT_ACTIONS = {
   explain: "Хори: объясни",
   summarize: "Хори: кратко",
-  tone: "Хори: оценить тон"
+  tone: "Хори: оценить тон",
+  rememberMoment: "Хори: запомнить момент"
 } as const;
 
 export const SLASH_COMMANDS = [
   "bot-help",
   "bot-style",
   "bot-memory",
+  "bot-album",
   "bot-relationship",
   "bot-feature",
   "bot-debug",
@@ -27,8 +29,11 @@ export const SLASH_COMMANDS = [
   "bot-topic",
   "bot-mood",
   "bot-queue",
+  "bot-reflection",
   "bot-media",
-  "bot-ai-url"
+  "bot-ai-url",
+  "bot-lockdown",
+  "bot-import"
 ] as const;
 
 export const HALF_HOUR_MS = 30 * 60 * 1000;

@@ -7,7 +7,7 @@ var import_core2 = require("@hori/core");
 var import_llm = require("@hori/llm");
 var import_memory2 = require("@hori/memory");
 var import_search = require("@hori/search");
-var import_shared5 = require("@hori/shared");
+var import_shared6 = require("@hori/shared");
 
 // src/gateway/create-discord-client.ts
 var import_discord = require("discord.js");
@@ -43,6 +43,11 @@ var slashCommandDefinitions = [
   ).addSubcommand(
     (subcommand) => subcommand.setName("forget").setDescription("\u0417\u0430\u0431\u044B\u0442\u044C \u0444\u0430\u043A\u0442").addStringOption((option) => option.setName("key").setDescription("\u041A\u043B\u044E\u0447").setRequired(true))
   ),
+  new import_discord2.SlashCommandBuilder().setName("bot-album").setDescription("\u041B\u0438\u0447\u043D\u044B\u0439 \u0430\u043B\u044C\u0431\u043E\u043C \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D\u043D\u044B\u0445 \u043C\u043E\u043C\u0435\u043D\u0442\u043E\u0432").addSubcommand(
+    (subcommand) => subcommand.setName("list").setDescription("\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D\u043D\u044B\u0435 \u043C\u043E\u043C\u0435\u043D\u0442\u044B").addIntegerOption((option) => option.setName("limit").setDescription("\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C").setMinValue(1).setMaxValue(10))
+  ).addSubcommand(
+    (subcommand) => subcommand.setName("remove").setDescription("\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u043C\u043E\u043C\u0435\u043D\u0442 \u0438\u0437 \u0441\u0432\u043E\u0435\u0433\u043E \u0430\u043B\u044C\u0431\u043E\u043C\u0430").addStringOption((option) => option.setName("id").setDescription("ID \u043C\u043E\u043C\u0435\u043D\u0442\u0430").setRequired(true))
+  ),
   new import_discord2.SlashCommandBuilder().setName("bot-relationship").setDescription("\u041D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435 \u043A \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044E").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true)).addStringOption((option) => option.setName("tone-bias").setDescription("neutral, friendly, sharp, playful")).addIntegerOption((option) => option.setName("roast-level").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("praise-bias").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("interrupt-priority").setDescription("0-5").setMinValue(0).setMaxValue(5)).addBooleanOption((option) => option.setName("do-not-mock").setDescription("\u041D\u0435 \u043F\u043E\u0434\u043A\u0430\u043B\u044B\u0432\u0430\u0442\u044C")).addBooleanOption((option) => option.setName("do-not-initiate").setDescription("\u041D\u0435 \u0438\u043D\u0438\u0446\u0438\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u0435")).addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics")),
   new import_discord2.SlashCommandBuilder().setName("bot-feature").setDescription("\u041F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0438\u0442\u044C feature flag").addStringOption(
     (option) => option.setName("key").setDescription("\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u0444\u043B\u0430\u0433\u0430").setRequired(true).addChoices(
@@ -68,7 +73,13 @@ var slashCommandDefinitions = [
       { name: "ideological_flavour_enabled", value: "ideological_flavour_enabled" },
       { name: "analogy_ban_enabled", value: "analogy_ban_enabled" },
       { name: "slang_layer_enabled", value: "slang_layer_enabled" },
-      { name: "self_interjection_constraints_enabled", value: "self_interjection_constraints_enabled" }
+      { name: "self_interjection_constraints_enabled", value: "self_interjection_constraints_enabled" },
+      { name: "memory_album_enabled", value: "memory_album_enabled" },
+      { name: "interaction_requests_enabled", value: "interaction_requests_enabled" },
+      { name: "link_understanding_enabled", value: "link_understanding_enabled" },
+      { name: "natural_message_splitting_enabled", value: "natural_message_splitting_enabled" },
+      { name: "selective_engagement_enabled", value: "selective_engagement_enabled" },
+      { name: "self_reflection_lessons_enabled", value: "self_reflection_lessons_enabled" }
     )
   ).addBooleanOption((option) => option.setName("enabled").setDescription("\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C/\u0432\u044B\u043A\u043B\u044E\u0447\u0438\u0442\u044C").setRequired(true)),
   new import_discord2.SlashCommandBuilder().setName("bot-debug").setDescription("\u041F\u043E\u043B\u0443\u0447\u0438\u0442\u044C debug trace \u043F\u043E \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044E").addStringOption((option) => option.setName("message-id").setDescription("ID \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F").setRequired(true)),
@@ -111,6 +122,9 @@ var slashCommandDefinitions = [
       (option) => option.setName("channel").setDescription("\u041A\u0430\u043D\u0430\u043B").addChannelTypes(import_discord2.ChannelType.GuildText, import_discord2.ChannelType.PublicThread, import_discord2.ChannelType.PrivateThread)
     )
   ),
+  new import_discord2.SlashCommandBuilder().setName("bot-reflection").setDescription("\u041F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u0442\u0438\u0445\u0438\u0439 \u0436\u0443\u0440\u043D\u0430\u043B \u0443\u0440\u043E\u043A\u043E\u0432 Hori").addSubcommand((subcommand) => subcommand.setName("status").setDescription("\u0421\u0432\u043E\u0434\u043A\u0430 \u043F\u043E \u0443\u0440\u043E\u043A\u0430\u043C")).addSubcommand(
+    (subcommand) => subcommand.setName("list").setDescription("\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u043E\u0442\u043A\u0440\u044B\u0442\u044B\u0435 \u0443\u0440\u043E\u043A\u0438").addIntegerOption((option) => option.setName("limit").setDescription("\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C").setMinValue(1).setMaxValue(10))
+  ),
   new import_discord2.SlashCommandBuilder().setName("bot-media").setDescription("\u0423\u043F\u0440\u0430\u0432\u043B\u044F\u0442\u044C media registry").addSubcommand(
     (subcommand) => subcommand.setName("add").setDescription("\u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 media-\u0444\u0430\u0439\u043B").addStringOption((option) => option.setName("id").setDescription("media id").setRequired(true)).addStringOption(
       (option) => option.setName("type").setDescription("\u0422\u0438\u043F").setRequired(true).addChoices(
@@ -124,29 +138,84 @@ var slashCommandDefinitions = [
     (subcommand) => subcommand.setName("disable").setDescription("\u041E\u0442\u043A\u043B\u044E\u0447\u0438\u0442\u044C media").addStringOption((option) => option.setName("id").setDescription("media id").setRequired(true))
   ),
   new import_discord2.SlashCommandBuilder().setName("bot-ai-url").setDescription("\u0421\u043C\u0435\u043D\u0438\u0442\u044C Ollama URL (\u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446 \u0431\u043E\u0442\u0430)").addStringOption((option) => option.setName("url").setDescription("\u041D\u043E\u0432\u044B\u0439 URL (https://...)").setRequired(true)),
+  new import_discord2.SlashCommandBuilder().setName("bot-lockdown").setDescription("\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0440\u0435\u0436\u0438\u043C: \u0425\u043E\u0440\u0438 \u0441\u043B\u0443\u0448\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430").addSubcommand((subcommand) => subcommand.setName("on").setDescription("\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u043B\u043E\u043A\u0434\u0430\u0443\u043D")).addSubcommand((subcommand) => subcommand.setName("off").setDescription("\u0412\u044B\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u043B\u043E\u043A\u0434\u0430\u0443\u043D")).addSubcommand((subcommand) => subcommand.setName("status").setDescription("\u041F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C \u0441\u0442\u0430\u0442\u0443\u0441 \u043B\u043E\u043A\u0434\u0430\u0443\u043D\u0430")),
   new import_discord2.SlashCommandBuilder().setName("bot-import").setDescription("\u0418\u043C\u043F\u043E\u0440\u0442\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0438\u0441\u0442\u043E\u0440\u0438\u044E \u0447\u0430\u0442\u0430 \u0438\u0437 JSON \u0444\u0430\u0439\u043B\u0430").addAttachmentOption((option) => option.setName("file").setDescription(".json \u0444\u0430\u0439\u043B \u0441 \u0438\u0441\u0442\u043E\u0440\u0438\u0435\u0439 \u0447\u0430\u0442\u0430").setRequired(true))
 ].map((command) => command.toJSON());
 var contextMenuDefinitions = [
   new import_discord2.ContextMenuCommandBuilder().setName(import_shared.CONTEXT_ACTIONS.explain).setType(import_discord2.ApplicationCommandType.Message),
   new import_discord2.ContextMenuCommandBuilder().setName(import_shared.CONTEXT_ACTIONS.summarize).setType(import_discord2.ApplicationCommandType.Message),
-  new import_discord2.ContextMenuCommandBuilder().setName(import_shared.CONTEXT_ACTIONS.tone).setType(import_discord2.ApplicationCommandType.Message)
+  new import_discord2.ContextMenuCommandBuilder().setName(import_shared.CONTEXT_ACTIONS.tone).setType(import_discord2.ApplicationCommandType.Message),
+  new import_discord2.ContextMenuCommandBuilder().setName(import_shared.CONTEXT_ACTIONS.rememberMoment).setType(import_discord2.ApplicationCommandType.Message)
 ].map((command) => command.toJSON());
 
 // src/router/interaction-router.ts
 var import_discord3 = require("discord.js");
-var import_shared2 = require("@hori/shared");
+var import_shared3 = require("@hori/shared");
 var import_memory = require("@hori/memory");
+
+// src/router/owner-lockdown.ts
+var import_shared2 = require("@hori/shared");
+var LOCKDOWN_CACHE_TTL_MS = 1500;
+var cachedState = null;
+function isBotOwner(runtime, userId) {
+  return runtime.env.DISCORD_OWNER_IDS.includes(userId);
+}
+async function getOwnerLockdownState(runtime, force = false) {
+  if (!force && cachedState && cachedState.expiresAtMs > Date.now()) {
+    return cachedState;
+  }
+  const state = await (0, import_shared2.loadOwnerLockdownState)(runtime.prisma, runtime.logger);
+  cachedState = { ...state, expiresAtMs: Date.now() + LOCKDOWN_CACHE_TTL_MS };
+  return state;
+}
+async function setOwnerLockdownState(runtime, enabled, updatedBy) {
+  await (0, import_shared2.persistOwnerLockdownState)(runtime.prisma, enabled, updatedBy);
+  const state = {
+    enabled,
+    updatedBy,
+    updatedAt: /* @__PURE__ */ new Date()
+  };
+  cachedState = { ...state, expiresAtMs: Date.now() + LOCKDOWN_CACHE_TTL_MS };
+  return state;
+}
+async function shouldIgnoreForOwnerLockdown(runtime, userId) {
+  if (isBotOwner(runtime, userId)) {
+    return false;
+  }
+  if (!runtime.env.DISCORD_OWNER_IDS.length) {
+    return false;
+  }
+  const state = await getOwnerLockdownState(runtime);
+  return state.enabled;
+}
+
+// src/router/interaction-router.ts
+var PUBLIC_COMMANDS = /* @__PURE__ */ new Set(["bot-help", "bot-album"]);
+var OWNER_COMMANDS = /* @__PURE__ */ new Set(["bot-ai-url", "bot-import", "bot-lockdown"]);
+var MEMORY_ALBUM_MODAL_PREFIX = "memory-album";
 function ensureModerator(interaction) {
   return interaction.memberPermissions?.has(import_discord3.PermissionFlagsBits.ManageGuild) ?? false;
 }
 async function routeInteraction(runtime, interaction) {
+  const isOwner = isBotOwner(runtime, interaction.user.id);
+  if (!isOwner && await shouldIgnoreForOwnerLockdown(runtime, interaction.user.id)) {
+    return;
+  }
+  if (interaction.isModalSubmit()) {
+    await routeModalSubmit(runtime, interaction);
+    return;
+  }
   if (interaction.isChatInputCommand()) {
+    if (interaction.commandName === "bot-lockdown") {
+      await handleOwnerLockdownCommand(runtime, interaction, isOwner);
+      return;
+    }
     if (!interaction.guildId) {
       await interaction.reply({ content: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043D\u0443\u0442\u0440\u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
       return;
     }
     const isModerator = ensureModerator(interaction);
-    if (!isModerator && interaction.commandName !== "bot-help") {
+    if (!isModerator && !PUBLIC_COMMANDS.has(interaction.commandName) && !(isOwner && OWNER_COMMANDS.has(interaction.commandName))) {
       await interaction.reply({ content: "\u042D\u0442\u043E \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u043C\u043E\u0434\u0435\u0440\u043E\u0432.", flags: import_discord3.MessageFlags.Ephemeral });
       return;
     }
@@ -155,8 +224,8 @@ async function routeInteraction(runtime, interaction) {
         await interaction.reply({ content: await runtime.slashAdmin.handleHelp(), flags: import_discord3.MessageFlags.Ephemeral });
         return;
       case "bot-ai-url": {
-        const isOwner = runtime.env.DISCORD_OWNER_IDS.includes(interaction.user.id);
-        if (!isOwner) {
+        const isOwner2 = runtime.env.DISCORD_OWNER_IDS.includes(interaction.user.id);
+        if (!isOwner2) {
           await interaction.reply({ content: "\u042D\u0442\u0430 \u043A\u043E\u043C\u0430\u043D\u0434\u0430 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u0431\u043E\u0442\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
           return;
         }
@@ -180,10 +249,10 @@ async function routeInteraction(runtime, interaction) {
             appliedUrl = newUrl;
             status = `\u2705 Ollama \u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D (\u043C\u043E\u0434\u0435\u043B\u0438: ${models})`;
             try {
-              await (0, import_shared2.persistOllamaBaseUrl)(runtime.prisma, newUrl, interaction.user.id);
+              await (0, import_shared3.persistOllamaBaseUrl)(runtime.prisma, newUrl, interaction.user.id);
               status += "\n\u{1F4BE} URL \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D \u0438 \u043F\u0435\u0440\u0435\u0436\u0438\u0432\u0451\u0442 \u0440\u0435\u0441\u0442\u0430\u0440\u0442.";
             } catch (error) {
-              runtime.logger.warn({ error: (0, import_shared2.asErrorMessage)(error), url: newUrl }, "failed to persist ollama url");
+              runtime.logger.warn({ error: (0, import_shared3.asErrorMessage)(error), url: newUrl }, "failed to persist ollama url");
               status += "\n\u26A0\uFE0F URL \u043F\u0440\u0438\u043C\u0435\u043D\u0451\u043D \u0442\u043E\u043B\u044C\u043A\u043E \u0432 \u043F\u0430\u043C\u044F\u0442\u0438 \u043F\u0440\u043E\u0446\u0435\u0441\u0441\u0430. \u041F\u043E\u0441\u043B\u0435 \u0440\u0435\u0441\u0442\u0430\u0440\u0442\u0430 \u043F\u043E\u043D\u0430\u0434\u043E\u0431\u0438\u0442\u0441\u044F \u0437\u0430\u0434\u0430\u0442\u044C \u0435\u0433\u043E \u0441\u043D\u043E\u0432\u0430.";
             }
           } else {
@@ -225,6 +294,24 @@ ${status}`
           key,
           interaction.options.getString("value", true)
         ) : await runtime.slashAdmin.forget(interaction.guildId, key);
+        await interaction.reply({ content, flags: import_discord3.MessageFlags.Ephemeral });
+        return;
+      }
+      case "bot-album": {
+        const featureFlags2 = await runtime.runtimeConfig.getFeatureFlags(interaction.guildId);
+        if (!featureFlags2.memoryAlbumEnabled) {
+          await interaction.reply({ content: "Memory Album \u0441\u0435\u0439\u0447\u0430\u0441 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D.", flags: import_discord3.MessageFlags.Ephemeral });
+          return;
+        }
+        const content = interaction.options.getSubcommand() === "remove" ? await runtime.slashAdmin.albumRemove(
+          interaction.guildId,
+          interaction.user.id,
+          interaction.options.getString("id", true)
+        ) : await runtime.slashAdmin.albumList(
+          interaction.guildId,
+          interaction.user.id,
+          interaction.options.getInteger("limit") ?? 8
+        );
         await interaction.reply({ content, flags: import_discord3.MessageFlags.Ephemeral });
         return;
       }
@@ -316,6 +403,11 @@ ${status}`
         await interaction.reply({ content, flags: import_discord3.MessageFlags.Ephemeral });
         return;
       }
+      case "bot-reflection": {
+        const content = interaction.options.getSubcommand() === "list" ? await runtime.slashAdmin.reflectionList(interaction.guildId, interaction.options.getInteger("limit") ?? 8) : await runtime.slashAdmin.reflectionStatus(interaction.guildId);
+        await interaction.reply({ content, flags: import_discord3.MessageFlags.Ephemeral });
+        return;
+      }
       case "bot-media": {
         const subcommand = interaction.options.getSubcommand();
         const content = subcommand === "add" ? await runtime.slashAdmin.mediaAdd({
@@ -332,8 +424,8 @@ ${status}`
         return;
       }
       case "bot-import": {
-        const isOwner = runtime.env.DISCORD_OWNER_IDS.includes(interaction.user.id);
-        if (!isOwner) {
+        const isOwner2 = runtime.env.DISCORD_OWNER_IDS.includes(interaction.user.id);
+        if (!isOwner2) {
           await interaction.reply({ content: "\u0418\u043C\u043F\u043E\u0440\u0442 \u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D \u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0443 \u0431\u043E\u0442\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
           return;
         }
@@ -447,11 +539,15 @@ ${status}`
     return;
   }
   const featureFlags = await runtime.runtimeConfig.getFeatureFlags(interaction.guildId);
+  if (interaction.commandName === import_shared3.CONTEXT_ACTIONS.rememberMoment) {
+    await handleRememberMomentContext(runtime, interaction, featureFlags);
+    return;
+  }
   if (!featureFlags.contextActions) {
     await interaction.reply({ content: "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u044B\u0435 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044F \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u044B.", flags: import_discord3.MessageFlags.Ephemeral });
     return;
   }
-  const action = interaction.commandName === import_shared2.CONTEXT_ACTIONS.explain ? "explain" : interaction.commandName === import_shared2.CONTEXT_ACTIONS.summarize ? "summarize" : "tone";
+  const action = interaction.commandName === import_shared3.CONTEXT_ACTIONS.explain ? "explain" : interaction.commandName === import_shared3.CONTEXT_ACTIONS.summarize ? "summarize" : "tone";
   const result = await runtime.orchestrator.handleContextAction({
     guildId: interaction.guildId,
     channelId: interaction.channelId,
@@ -462,6 +558,153 @@ ${status}`
   });
   await interaction.reply({ content: result, flags: import_discord3.MessageFlags.Ephemeral });
 }
+async function handleOwnerLockdownCommand(runtime, interaction, isOwner) {
+  if (!isOwner) {
+    await interaction.reply({ content: "\u042D\u0442\u0430 \u043A\u043E\u043C\u0430\u043D\u0434\u0430 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u0431\u043E\u0442\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  if (!runtime.env.DISCORD_OWNER_IDS.length) {
+    await interaction.reply({ content: "\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u0443\u043A\u0430\u0436\u0438 Discord user ID \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u0432 BOT_OWNERS.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  const subcommand = interaction.options.getSubcommand();
+  if (subcommand === "status") {
+    const state = await getOwnerLockdownState(runtime, true);
+    await interaction.reply({
+      content: `Owner lockdown: ${state.enabled ? "on" : "off"}${state.updatedBy ? `
+\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0435\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435: ${state.updatedBy}` : ""}`,
+      flags: import_discord3.MessageFlags.Ephemeral
+    });
+    return;
+  }
+  const enabled = subcommand === "on";
+  await setOwnerLockdownState(runtime, enabled, interaction.user.id);
+  const cleared = enabled ? await runtime.replyQueue.clearAll() : { count: 0 };
+  await interaction.reply({
+    content: enabled ? `\u041B\u043E\u043A\u0434\u0430\u0443\u043D \u0432\u043A\u043B\u044E\u0447\u0451\u043D. \u0422\u0435\u043F\u0435\u0440\u044C \u0425\u043E\u0440\u0438 \u043C\u043E\u043B\u0447\u0430 \u0438\u0433\u043D\u043E\u0440\u0438\u0440\u0443\u0435\u0442 \u0432\u0441\u0435\u0445, \u043A\u0440\u043E\u043C\u0435 \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430. \u041E\u0447\u0435\u0440\u0435\u0434\u044C \u043E\u0442\u0432\u0435\u0442\u043E\u0432 \u0441\u0431\u0440\u043E\u0448\u0435\u043D\u0430: ${cleared.count}.` : "\u041B\u043E\u043A\u0434\u0430\u0443\u043D \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D. \u0425\u043E\u0440\u0438 \u0441\u043D\u043E\u0432\u0430 \u0441\u043B\u0443\u0448\u0430\u0435\u0442 \u043E\u0431\u044B\u0447\u043D\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.",
+    flags: import_discord3.MessageFlags.Ephemeral
+  });
+}
+async function handleRememberMomentContext(runtime, interaction, featureFlags) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043D\u0443\u0442\u0440\u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  if (!featureFlags.memoryAlbumEnabled) {
+    await interaction.reply({ content: "Memory Album \u0441\u0435\u0439\u0447\u0430\u0441 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  if (!featureFlags.interactionRequestsEnabled) {
+    await interaction.reply({ content: "Interaction Requests \u0441\u0435\u0439\u0447\u0430\u0441 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u044B.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  const request = await runtime.interactionRequests.create({
+    guildId: interaction.guildId,
+    channelId: interaction.channelId,
+    messageId: interaction.targetId,
+    userId: interaction.user.id,
+    requestType: "dialogue",
+    title: "\u0417\u0430\u043F\u043E\u043C\u043D\u0438\u0442\u044C \u043C\u043E\u043C\u0435\u043D\u0442",
+    prompt: "\u0414\u043E\u0431\u0430\u0432\u044C \u043A\u043E\u0440\u043E\u0442\u043A\u0443\u044E \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u0438 \u0442\u0435\u0433\u0438 \u0434\u043B\u044F Memory Album.",
+    category: "memory_album",
+    expectedAnswerType: "note_tags",
+    metadataJson: { targetMessageId: interaction.targetId },
+    expiresAt: new Date(Date.now() + 15 * 60 * 1e3)
+  });
+  const modal = new import_discord3.ModalBuilder().setCustomId(buildMemoryAlbumModalId(request.id, interaction.targetId)).setTitle("\u0417\u0430\u043F\u043E\u043C\u043D\u0438\u0442\u044C \u043C\u043E\u043C\u0435\u043D\u0442");
+  const noteInput = new import_discord3.TextInputBuilder().setCustomId("note").setLabel("\u0417\u0430\u043C\u0435\u0442\u043A\u0430").setPlaceholder("\u041F\u043E\u0447\u0435\u043C\u0443 \u044D\u0442\u043E\u0442 \u043C\u043E\u043C\u0435\u043D\u0442 \u0441\u0442\u043E\u0438\u0442 \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C? \u041C\u043E\u0436\u043D\u043E \u043E\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u043F\u0443\u0441\u0442\u044B\u043C.").setRequired(false).setMaxLength(500).setStyle(import_discord3.TextInputStyle.Paragraph);
+  const tagsInput = new import_discord3.TextInputBuilder().setCustomId("tags").setLabel("\u0422\u0435\u0433\u0438 \u0447\u0435\u0440\u0435\u0437 \u0437\u0430\u043F\u044F\u0442\u0443\u044E").setPlaceholder("\u0448\u0443\u0442\u043A\u0430, \u0438\u0434\u0435\u044F, \u0434\u043E\u0433\u043E\u0432\u043E\u0440\u0451\u043D\u043D\u043E\u0441\u0442\u044C").setRequired(false).setMaxLength(120).setStyle(import_discord3.TextInputStyle.Short);
+  modal.addComponents(
+    new import_discord3.ActionRowBuilder().addComponents(noteInput),
+    new import_discord3.ActionRowBuilder().addComponents(tagsInput)
+  );
+  await interaction.showModal(modal);
+}
+async function routeModalSubmit(runtime, interaction) {
+  const parsed = parseMemoryAlbumModalId(interaction.customId);
+  if (!parsed) {
+    return;
+  }
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043D\u0443\u0442\u0440\u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  const featureFlags = await runtime.runtimeConfig.getFeatureFlags(interaction.guildId);
+  if (!featureFlags.memoryAlbumEnabled) {
+    await interaction.reply({ content: "Memory Album \u0441\u0435\u0439\u0447\u0430\u0441 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  const request = await runtime.interactionRequests.getPending(parsed.requestId);
+  if (!request || request.userId !== interaction.user.id) {
+    await interaction.reply({ content: "\u042D\u0442\u043E\u0442 \u0437\u0430\u043F\u0440\u043E\u0441 \u0443\u0436\u0435 \u0443\u0441\u0442\u0430\u0440\u0435\u043B \u0438\u043B\u0438 \u043D\u0435 \u0442\u0432\u043E\u0439.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  const note = interaction.fields.getTextInputValue("note").trim();
+  const tags = (0, import_shared3.parseCsv)(interaction.fields.getTextInputValue("tags"));
+  const source = await fetchSourceMessageForAlbum(runtime, interaction, parsed.messageId);
+  if (!source.content.trim()) {
+    await runtime.interactionRequests.cancel(request.id, interaction.user.id, "source message is empty");
+    await interaction.reply({ content: "\u041D\u0435 \u0441\u0442\u0430\u043B\u0430 \u0441\u043E\u0445\u0440\u0430\u043D\u044F\u0442\u044C: \u0443 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u043D\u0435\u0442 \u0442\u0435\u043A\u0441\u0442\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  await runtime.prisma.guild.upsert({
+    where: { id: interaction.guildId },
+    update: { name: interaction.guild?.name ?? void 0 },
+    create: { id: interaction.guildId, name: interaction.guild?.name ?? null }
+  });
+  const entry = await runtime.memoryAlbum.saveMoment({
+    guildId: interaction.guildId,
+    channelId: request.channelId,
+    messageId: parsed.messageId,
+    savedByUserId: interaction.user.id,
+    authorUserId: source.authorUserId,
+    content: source.content,
+    note,
+    tags,
+    sourceUrl: source.sourceUrl
+  });
+  await runtime.interactionRequests.answer(request.id, interaction.user.id, note, {
+    tags,
+    memoryAlbumEntryId: entry.id
+  });
+  await interaction.reply({
+    content: `\u0417\u0430\u043F\u043E\u043C\u043D\u0438\u043B\u0430 \u043C\u043E\u043C\u0435\u043D\u0442 \u0432 \u0430\u043B\u044C\u0431\u043E\u043C. ID: ${entry.id}${tags.length ? `
+\u0422\u0435\u0433\u0438: ${tags.join(", ")}` : ""}`,
+    flags: import_discord3.MessageFlags.Ephemeral
+  });
+}
+async function fetchSourceMessageForAlbum(runtime, interaction, messageId) {
+  if (interaction.channel && "messages" in interaction.channel) {
+    try {
+      const sourceMessage = await interaction.channel.messages.fetch(messageId);
+      return {
+        content: sourceMessage.content,
+        authorUserId: sourceMessage.author.id,
+        sourceUrl: sourceMessage.url
+      };
+    } catch {
+    }
+  }
+  const stored = await runtime.prisma.message.findUnique({
+    where: { id: messageId },
+    select: { content: true, userId: true }
+  });
+  return {
+    content: stored?.content ?? "",
+    authorUserId: stored?.userId ?? null,
+    sourceUrl: null
+  };
+}
+function buildMemoryAlbumModalId(requestId, messageId) {
+  return `${MEMORY_ALBUM_MODAL_PREFIX}:${requestId}:${messageId}`;
+}
+function parseMemoryAlbumModalId(customId) {
+  const [prefix, requestId, messageId] = customId.split(":");
+  if (prefix !== MEMORY_ALBUM_MODAL_PREFIX || !requestId || !messageId) {
+    return null;
+  }
+  return { requestId, messageId };
+}
 
 // src/router/message-router.ts
 var import_discord4 = require("discord.js");
@@ -469,7 +712,7 @@ var import_analytics = require("@hori/analytics");
 var import_core = require("@hori/core");
 
 // src/router/background-jobs.ts
-var import_shared3 = require("@hori/shared");
+var import_shared4 = require("@hori/shared");
 async function enqueueBackgroundJobs(runtime, envelope) {
   const jobs = [
     {
@@ -512,7 +755,7 @@ async function enqueueBackgroundJobs(runtime, envelope) {
         {
           queue: jobs[index]?.queue,
           messageId: envelope.messageId,
-          error: (0, import_shared3.asErrorMessage)(result.reason)
+          error: (0, import_shared4.asErrorMessage)(result.reason)
         },
         "background queue enqueue failed"
       );
@@ -521,12 +764,15 @@ async function enqueueBackgroundJobs(runtime, envelope) {
 }
 
 // src/responders/message-responder.ts
-var import_shared4 = require("@hori/shared");
-async function sendReply(message, reply) {
+var import_shared5 = require("@hori/shared");
+async function sendReply(message, reply, options = {}) {
   const text = typeof reply === "string" ? reply : reply.text;
   const media = typeof reply === "string" ? null : reply.media;
-  const chunks = (0, import_shared4.splitLongMessage)(text);
+  const chunks = media || !options.naturalChunks?.length ? (0, import_shared5.splitLongMessage)(text) : options.naturalChunks;
   for (let index = 0; index < chunks.length; index += 1) {
+    if (index > 0 && options.naturalChunks?.length) {
+      await sleep(options.naturalDelayMs ?? 900);
+    }
     if (index === 0) {
       await message.reply(media ? mediaReplyPayload(chunks[index], media.filePath) : chunks[index]);
     } else if ("send" in message.channel) {
@@ -537,10 +783,14 @@ async function sendReply(message, reply) {
 function mediaReplyPayload(content, filePath) {
   return content ? { content, files: [filePath] } : { files: [filePath] };
 }
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 // src/router/message-router.ts
 var intentRouter = new import_core.IntentRouter();
 var inboundDebouncers = /* @__PURE__ */ new Map();
+var naturalSplitCooldownByChannel = /* @__PURE__ */ new Map();
 async function detectTriggerSource(message, botName, botId) {
   const content = message.content.trim();
   if (message.mentions.has(botId)) {
@@ -561,8 +811,37 @@ async function detectTriggerSource(message, botName, botId) {
   }
   return { triggerSource: void 0, wasMentioned: false, implicitMentionKinds: [] };
 }
-async function shouldAutoInterject(runtime, message) {
+async function shouldAutoInterject(runtime, message, routingConfig) {
   if (!message.guildId) {
+    return false;
+  }
+  const relationship = await runtime.prisma.relationshipProfile.findUnique({
+    where: {
+      guildId_userId: {
+        guildId: message.guildId,
+        userId: message.author.id
+      }
+    },
+    select: {
+      doNotInitiate: true,
+      proactivityPreference: true,
+      interruptPriority: true
+    }
+  });
+  const decision = (0, import_core.evaluateSelectiveEngagement)({
+    content: message.content,
+    enabled: routingConfig.featureFlags.selectiveEngagementEnabled,
+    autoInterjectEnabled: routingConfig.featureFlags.autoInterject,
+    channelAllowsInterjections: routingConfig.channelPolicy.allowInterjections,
+    channelMuted: routingConfig.channelPolicy.isMuted,
+    hasAttachments: message.attachments.size > 0,
+    interjectTendency: routingConfig.guildSettings.interjectTendency,
+    relationshipDoNotInitiate: relationship?.doNotInitiate,
+    relationshipProactivityPreference: relationship?.proactivityPreference,
+    relationshipInterruptPriority: relationship?.interruptPriority,
+    minScore: runtime.env.SELECTIVE_ENGAGEMENT_MIN_SCORE
+  });
+  if (!decision.shouldInterject) {
     return false;
   }
   const recentCount = await runtime.prisma.interjectionLog.count({
@@ -587,10 +866,15 @@ async function shouldAutoInterject(runtime, message) {
   if (recentInterjection && Date.now() - recentInterjection.createdAt.getTime() < runtime.env.AUTOINTERJECT_COOLDOWN_SEC * 1e3) {
     return false;
   }
-  return /что думаете|кто прав|мнение|как считаете/i.test(message.content);
+  return true;
 }
 async function routeMessage(runtime, message) {
   if (!message.inGuild() || message.author.bot || !runtime.client.user) {
+    return;
+  }
+  const ownerLockdownState = await getOwnerLockdownState(runtime);
+  const ownerLockdownActive = ownerLockdownState.enabled && runtime.env.DISCORD_OWNER_IDS.length > 0;
+  if (ownerLockdownActive && !isBotOwner(runtime, message.author.id)) {
     return;
   }
   const routingConfig = await runtime.runtimeConfig.getRoutingConfig(message.guildId, message.channelId);
@@ -619,7 +903,7 @@ async function routeMessage(runtime, message) {
   );
   const triggerSource = triggerContext.triggerSource ?? (activation.shouldBypassMention ? "name" : void 0);
   const explicitInvocation = activation.effectiveWasMentioned;
-  const autoInterject = !explicitInvocation && routingConfig.featureFlags.autoInterject && routingConfig.channelPolicy.allowInterjections && !routingConfig.channelPolicy.isMuted && (!runtime.env.AUTOINTERJECT_CHANNEL_ALLOWLIST.length || runtime.env.AUTOINTERJECT_CHANNEL_ALLOWLIST.includes(message.channelId)) && await shouldAutoInterject(runtime, message);
+  const autoInterject = !explicitInvocation && !ownerLockdownActive && routingConfig.featureFlags.autoInterject && routingConfig.channelPolicy.allowInterjections && !routingConfig.channelPolicy.isMuted && (!runtime.env.AUTOINTERJECT_CHANNEL_ALLOWLIST.length || runtime.env.AUTOINTERJECT_CHANNEL_ALLOWLIST.includes(message.channelId)) && await shouldAutoInterject(runtime, message, routingConfig);
   const envelope = buildEnvelope(message, member, botName, botId, triggerSource, explicitInvocation, autoInterject);
   await runtime.ingestService.ingestMessage({
     ...envelope,
@@ -732,7 +1016,28 @@ async function processInvocation(runtime, message, routingConfig, triggerSource,
     }
     return;
   }
-  await sendReply(message, result.reply);
+  const replyText = typeof result.reply === "string" ? result.reply : result.reply.text;
+  const hasMedia = typeof result.reply !== "string" && Boolean(result.reply.media);
+  const splitPlan = hasMedia ? null : (0, import_core.planNaturalMessageSplit)({
+    text: replyText,
+    enabled: routingConfig.featureFlags.naturalMessageSplittingEnabled,
+    intent: result.trace.intent,
+    explicitInvocation: envelope.explicitInvocation,
+    triggerSource: result.trace.triggerSource,
+    messageKind: result.trace.behavior?.messageKind,
+    nowMs: Date.now(),
+    lastSplitAtMs: naturalSplitCooldownByChannel.get(message.channelId),
+    cooldownMs: runtime.env.NATURAL_SPLIT_COOLDOWN_SEC * 1e3,
+    chance: runtime.env.NATURAL_SPLIT_CHANCE,
+    random: Math.random()
+  });
+  if (splitPlan) {
+    naturalSplitCooldownByChannel.set(message.channelId, Date.now());
+  }
+  await sendReply(message, result.reply, {
+    naturalChunks: splitPlan?.chunks,
+    naturalDelayMs: splitPlan?.delayMs
+  });
   if (queueItemId) {
     await runtime.replyQueue.complete(queueItemId);
     await drainReplyQueue(runtime, message);
@@ -812,7 +1117,7 @@ function registerEvents(runtime) {
   });
   runtime.client.on("interactionCreate", async (interaction) => {
     try {
-      if (interaction.isChatInputCommand() || interaction.isMessageContextMenuCommand()) {
+      if (interaction.isChatInputCommand() || interaction.isMessageContextMenuCommand() || interaction.isModalSubmit()) {
         await routeInteraction(runtime, interaction);
       }
     } catch (error) {
@@ -852,10 +1157,10 @@ function createNoopQueues(logger, prefix) {
 async function bootstrapBot() {
   const env = (0, import_config.loadEnv)();
   (0, import_config.assertEnvForRole)(env, "bot");
-  const logger = (0, import_shared5.createLogger)(env.LOG_LEVEL);
-  const prisma = (0, import_shared5.createPrismaClient)();
-  const redis = (0, import_shared5.createRedisClient)(env.REDIS_URL);
-  const { redisReady } = await (0, import_shared5.ensureInfrastructureReady)({
+  const logger = (0, import_shared6.createLogger)(env.LOG_LEVEL);
+  const prisma = (0, import_shared6.createPrismaClient)();
+  const redis = (0, import_shared6.createRedisClient)(env.REDIS_URL);
+  const { redisReady } = await (0, import_shared6.ensureInfrastructureReady)({
     role: "bot",
     nodeEnv: env.NODE_ENV,
     databaseUrl: env.DATABASE_URL,
@@ -866,17 +1171,20 @@ async function bootstrapBot() {
     allowRedisFailure: env.NODE_ENV !== "production"
   });
   if (!env.OLLAMA_BASE_URL) {
-    const persistedOllamaUrl = await (0, import_shared5.loadPersistedOllamaBaseUrl)(prisma, logger);
+    const persistedOllamaUrl = await (0, import_shared6.loadPersistedOllamaBaseUrl)(prisma, logger);
     if (persistedOllamaUrl) {
       env.OLLAMA_BASE_URL = persistedOllamaUrl;
     }
   }
-  const queues = redisReady ? (0, import_shared5.createAppQueues)(env.REDIS_URL, env.JOB_QUEUE_PREFIX) : createNoopQueues(logger, env.JOB_QUEUE_PREFIX);
+  const queues = redisReady ? (0, import_shared6.createAppQueues)(env.REDIS_URL, env.JOB_QUEUE_PREFIX) : createNoopQueues(logger, env.JOB_QUEUE_PREFIX);
   const client = createDiscordClient();
   const analytics = new import_analytics2.AnalyticsQueryService(prisma);
   const summaryService = new import_memory2.SummaryService(prisma);
   const relationshipService = new import_memory2.RelationshipService(prisma);
   const retrievalService = new import_memory2.RetrievalService(prisma);
+  const memoryAlbumService = new import_memory2.MemoryAlbumService(prisma);
+  const interactionRequestService = new import_memory2.InteractionRequestService(prisma);
+  const reflectionService = new import_memory2.ReflectionService(prisma);
   const profileService = new import_memory2.ProfileService(prisma, env);
   const runtimeConfig = new import_core2.RuntimeConfigService(prisma, env);
   const affinityService = new import_core2.AffinityService(prisma);
@@ -910,7 +1218,18 @@ async function bootstrapBot() {
   const searchClient = new import_search.BraveSearchClient(env, logger, searchCache);
   const toolOrchestrator = new import_llm.ToolOrchestrator(llmClient, logger);
   const ingestService = new import_analytics2.MessageIngestService(prisma, logger);
-  const slashAdmin = new import_core2.SlashAdminService(prisma, analytics, relationshipService, retrievalService, summaryService, runtimeConfig, moodService, replyQueueService);
+  const slashAdmin = new import_core2.SlashAdminService(
+    prisma,
+    analytics,
+    relationshipService,
+    retrievalService,
+    summaryService,
+    runtimeConfig,
+    moodService,
+    replyQueueService,
+    memoryAlbumService,
+    reflectionService
+  );
   const orchestrator = (0, import_core2.createChatOrchestrator)({
     env,
     logger,
@@ -927,7 +1246,8 @@ async function bootstrapBot() {
     relationships: relationshipService,
     affinity: affinityService,
     mood: moodService,
-    media: mediaReactionService
+    media: mediaReactionService,
+    reflection: reflectionService
   });
   const runtime = {
     env,
@@ -939,6 +1259,9 @@ async function bootstrapBot() {
     ingestService,
     analytics,
     slashAdmin,
+    memoryAlbum: memoryAlbumService,
+    interactionRequests: interactionRequestService,
+    reflection: reflectionService,
     runtimeConfig,
     orchestrator,
     replyQueue: replyQueueService

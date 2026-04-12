@@ -1,21 +1,47 @@
 import {
+  ActionRowBuilder,
   ChatInputCommandInteraction,
   ContextMenuCommandInteraction,
   MessageFlags,
-  PermissionFlagsBits
+  ModalBuilder,
+  ModalSubmitInteraction,
+  PermissionFlagsBits,
+  TextInputBuilder,
+  TextInputStyle
 } from "discord.js";
 
-import { CONTEXT_ACTIONS, asErrorMessage, persistOllamaBaseUrl, type PersonaMode } from "@hori/shared";
+import { CONTEXT_ACTIONS, asErrorMessage, parseCsv, persistOllamaBaseUrl, type PersonaMode } from "@hori/shared";
 import { RelationshipService } from "@hori/memory";
 
 import type { BotRuntime } from "../bootstrap";
+import { getOwnerLockdownState, isBotOwner, setOwnerLockdownState, shouldIgnoreForOwnerLockdown } from "./owner-lockdown";
 
-function ensureModerator(interaction: ChatInputCommandInteraction | ContextMenuCommandInteraction) {
+const PUBLIC_COMMANDS = new Set(["bot-help", "bot-album"]);
+const OWNER_COMMANDS = new Set(["bot-ai-url", "bot-import", "bot-lockdown"]);
+const MEMORY_ALBUM_MODAL_PREFIX = "memory-album";
+
+function ensureModerator(interaction: ChatInputCommandInteraction | ContextMenuCommandInteraction | ModalSubmitInteraction) {
   return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
 }
 
-export async function routeInteraction(runtime: BotRuntime, interaction: ChatInputCommandInteraction | ContextMenuCommandInteraction) {
+export async function routeInteraction(runtime: BotRuntime, interaction: ChatInputCommandInteraction | ContextMenuCommandInteraction | ModalSubmitInteraction) {
+  const isOwner = isBotOwner(runtime, interaction.user.id);
+
+  if (!isOwner && (await shouldIgnoreForOwnerLockdown(runtime, interaction.user.id))) {
+    return;
+  }
+
+  if (interaction.isModalSubmit()) {
+    await routeModalSubmit(runtime, interaction);
+    return;
+  }
+
   if (interaction.isChatInputCommand()) {
+    if (interaction.commandName === "bot-lockdown") {
+      await handleOwnerLockdownCommand(runtime, interaction, isOwner);
+      return;
+    }
+
     if (!interaction.guildId) {
       await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
       return;
@@ -23,7 +49,7 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
 
     const isModerator = ensureModerator(interaction);
 
-    if (!isModerator && interaction.commandName !== "bot-help") {
+    if (!isModerator && !PUBLIC_COMMANDS.has(interaction.commandName) && !(isOwner && OWNER_COMMANDS.has(interaction.commandName))) {
       await interaction.reply({ content: "Это только для модеров.", flags: MessageFlags.Ephemeral });
       return;
     }
@@ -110,6 +136,30 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
                 interaction.options.getString("value", true)
               )
             : await runtime.slashAdmin.forget(interaction.guildId, key);
+
+        await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      case "bot-album": {
+        const featureFlags = await runtime.runtimeConfig.getFeatureFlags(interaction.guildId);
+
+        if (!featureFlags.memoryAlbumEnabled) {
+          await interaction.reply({ content: "Memory Album сейчас выключен.", flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        const content =
+          interaction.options.getSubcommand() === "remove"
+            ? await runtime.slashAdmin.albumRemove(
+                interaction.guildId,
+                interaction.user.id,
+                interaction.options.getString("id", true)
+              )
+            : await runtime.slashAdmin.albumList(
+                interaction.guildId,
+                interaction.user.id,
+                interaction.options.getInteger("limit") ?? 8
+              );
 
         await interaction.reply({ content, flags: MessageFlags.Ephemeral });
         return;
@@ -213,6 +263,14 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
           interaction.options.getSubcommand() === "clear"
             ? await runtime.slashAdmin.queueClear(interaction.guildId, channelId)
             : await runtime.slashAdmin.queueStatus(interaction.guildId, channelId);
+        await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      case "bot-reflection": {
+        const content =
+          interaction.options.getSubcommand() === "list"
+            ? await runtime.slashAdmin.reflectionList(interaction.guildId, interaction.options.getInteger("limit") ?? 8)
+            : await runtime.slashAdmin.reflectionStatus(interaction.guildId);
         await interaction.reply({ content, flags: MessageFlags.Ephemeral });
         return;
       }
@@ -348,6 +406,11 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
 
   const featureFlags = await runtime.runtimeConfig.getFeatureFlags(interaction.guildId);
 
+  if (interaction.commandName === CONTEXT_ACTIONS.rememberMoment) {
+    await handleRememberMomentContext(runtime, interaction, featureFlags);
+    return;
+  }
+
   if (!featureFlags.contextActions) {
     await interaction.reply({ content: "Контекстные действия выключены.", flags: MessageFlags.Ephemeral });
     return;
@@ -370,4 +433,211 @@ export async function routeInteraction(runtime: BotRuntime, interaction: ChatInp
   });
 
   await interaction.reply({ content: result, flags: MessageFlags.Ephemeral });
+}
+
+async function handleOwnerLockdownCommand(
+  runtime: BotRuntime,
+  interaction: ChatInputCommandInteraction,
+  isOwner: boolean
+) {
+  if (!isOwner) {
+    await interaction.reply({ content: "Эта команда только для владельца бота.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (!runtime.env.DISCORD_OWNER_IDS.length) {
+    await interaction.reply({ content: "Сначала укажи Discord user ID владельца в BOT_OWNERS.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const subcommand = interaction.options.getSubcommand();
+
+  if (subcommand === "status") {
+    const state = await getOwnerLockdownState(runtime, true);
+    await interaction.reply({
+      content: `Owner lockdown: ${state.enabled ? "on" : "off"}${state.updatedBy ? `\nПоследнее изменение: ${state.updatedBy}` : ""}`,
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const enabled = subcommand === "on";
+  await setOwnerLockdownState(runtime, enabled, interaction.user.id);
+  const cleared = enabled ? await runtime.replyQueue.clearAll() : { count: 0 };
+
+  await interaction.reply({
+    content: enabled
+      ? `Локдаун включён. Теперь Хори молча игнорирует всех, кроме владельца. Очередь ответов сброшена: ${cleared.count}.`
+      : "Локдаун выключен. Хори снова слушает обычные правила сервера.",
+    flags: MessageFlags.Ephemeral
+  });
+}
+
+async function handleRememberMomentContext(
+  runtime: BotRuntime,
+  interaction: ContextMenuCommandInteraction,
+  featureFlags: Awaited<ReturnType<BotRuntime["runtimeConfig"]["getFeatureFlags"]>>
+) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (!featureFlags.memoryAlbumEnabled) {
+    await interaction.reply({ content: "Memory Album сейчас выключен.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (!featureFlags.interactionRequestsEnabled) {
+    await interaction.reply({ content: "Interaction Requests сейчас выключены.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const request = await runtime.interactionRequests.create({
+    guildId: interaction.guildId,
+    channelId: interaction.channelId,
+    messageId: interaction.targetId,
+    userId: interaction.user.id,
+    requestType: "dialogue",
+    title: "Запомнить момент",
+    prompt: "Добавь короткую заметку и теги для Memory Album.",
+    category: "memory_album",
+    expectedAnswerType: "note_tags",
+    metadataJson: { targetMessageId: interaction.targetId },
+    expiresAt: new Date(Date.now() + 15 * 60 * 1000)
+  });
+
+  const modal = new ModalBuilder()
+    .setCustomId(buildMemoryAlbumModalId(request.id, interaction.targetId))
+    .setTitle("Запомнить момент");
+  const noteInput = new TextInputBuilder()
+    .setCustomId("note")
+    .setLabel("Заметка")
+    .setPlaceholder("Почему этот момент стоит сохранить? Можно оставить пустым.")
+    .setRequired(false)
+    .setMaxLength(500)
+    .setStyle(TextInputStyle.Paragraph);
+  const tagsInput = new TextInputBuilder()
+    .setCustomId("tags")
+    .setLabel("Теги через запятую")
+    .setPlaceholder("шутка, идея, договорённость")
+    .setRequired(false)
+    .setMaxLength(120)
+    .setStyle(TextInputStyle.Short);
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(noteInput),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(tagsInput)
+  );
+
+  await interaction.showModal(modal);
+}
+
+async function routeModalSubmit(runtime: BotRuntime, interaction: ModalSubmitInteraction) {
+  const parsed = parseMemoryAlbumModalId(interaction.customId);
+
+  if (!parsed) {
+    return;
+  }
+
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const featureFlags = await runtime.runtimeConfig.getFeatureFlags(interaction.guildId);
+
+  if (!featureFlags.memoryAlbumEnabled) {
+    await interaction.reply({ content: "Memory Album сейчас выключен.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const request = await runtime.interactionRequests.getPending(parsed.requestId);
+
+  if (!request || request.userId !== interaction.user.id) {
+    await interaction.reply({ content: "Этот запрос уже устарел или не твой.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const note = interaction.fields.getTextInputValue("note").trim();
+  const tags = parseCsv(interaction.fields.getTextInputValue("tags"));
+  const source = await fetchSourceMessageForAlbum(runtime, interaction, parsed.messageId);
+
+  if (!source.content.trim()) {
+    await runtime.interactionRequests.cancel(request.id, interaction.user.id, "source message is empty");
+    await interaction.reply({ content: "Не стала сохранять: у сообщения нет текста.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  await runtime.prisma.guild.upsert({
+    where: { id: interaction.guildId },
+    update: { name: interaction.guild?.name ?? undefined },
+    create: { id: interaction.guildId, name: interaction.guild?.name ?? null }
+  });
+
+  const entry = await runtime.memoryAlbum.saveMoment({
+    guildId: interaction.guildId,
+    channelId: request.channelId,
+    messageId: parsed.messageId,
+    savedByUserId: interaction.user.id,
+    authorUserId: source.authorUserId,
+    content: source.content,
+    note,
+    tags,
+    sourceUrl: source.sourceUrl
+  });
+
+  await runtime.interactionRequests.answer(request.id, interaction.user.id, note, {
+    tags,
+    memoryAlbumEntryId: entry.id
+  });
+
+  await interaction.reply({
+    content: `Запомнила момент в альбом. ID: ${entry.id}${tags.length ? `\nТеги: ${tags.join(", ")}` : ""}`,
+    flags: MessageFlags.Ephemeral
+  });
+}
+
+async function fetchSourceMessageForAlbum(
+  runtime: BotRuntime,
+  interaction: ModalSubmitInteraction,
+  messageId: string
+): Promise<{ content: string; authorUserId?: string | null; sourceUrl?: string | null }> {
+  if (interaction.channel && "messages" in interaction.channel) {
+    try {
+      const sourceMessage = await interaction.channel.messages.fetch(messageId);
+      return {
+        content: sourceMessage.content,
+        authorUserId: sourceMessage.author.id,
+        sourceUrl: sourceMessage.url
+      };
+    } catch {
+      // Fall through to the ingested message table.
+    }
+  }
+
+  const stored = await runtime.prisma.message.findUnique({
+    where: { id: messageId },
+    select: { content: true, userId: true }
+  });
+
+  return {
+    content: stored?.content ?? "",
+    authorUserId: stored?.userId ?? null,
+    sourceUrl: null
+  };
+}
+
+function buildMemoryAlbumModalId(requestId: string, messageId: string) {
+  return `${MEMORY_ALBUM_MODAL_PREFIX}:${requestId}:${messageId}`;
+}
+
+function parseMemoryAlbumModalId(customId: string) {
+  const [prefix, requestId, messageId] = customId.split(":");
+
+  if (prefix !== MEMORY_ALBUM_MODAL_PREFIX || !requestId || !messageId) {
+    return null;
+  }
+
+  return { requestId, messageId };
 }

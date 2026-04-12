@@ -209,7 +209,7 @@ async function registerImportRoutes(app) {
         });
         seenUsers.add(entry.userId);
         result.imported += 1;
-      } catch (error) {
+      } catch {
         result.errors += 1;
       }
     }

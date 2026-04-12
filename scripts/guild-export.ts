@@ -1,5 +1,5 @@
 /**
- * Guild Export — dumps all guild-related data to JSON.
+ * Guild Export - dumps all guild-related data to JSON.
  *
  * Usage:
  *   npx tsx scripts/guild-export.ts <guildId> [--out <path>]
@@ -88,7 +88,7 @@ async function main() {
     writeFileSync(outPath, JSON.stringify(exportData, null, 2), "utf-8");
 
     console.log(`Exported to ${outPath}`);
-    console.log(`  Guild settings: 1`);
+    console.log("  Guild settings: 1");
     console.log(`  Channel configs: ${channelConfigs.length}`);
     console.log(`  Users: ${users.length}`);
     console.log(`  Messages: ${messages.length}`);
