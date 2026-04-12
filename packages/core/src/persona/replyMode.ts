@@ -48,6 +48,10 @@ export function resolveReplyMode(options: {
     return "dry";
   }
 
+  if (options.messageKind === "meta_feedback") {
+    return "dry";
+  }
+
   if (isUtilityIntent(options.intent)) {
     return weightedPick(utilityModes, [3, 5, 2]);
   }

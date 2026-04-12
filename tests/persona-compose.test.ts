@@ -166,6 +166,58 @@ describe("composeBehaviorPrompt", () => {
     expect(result.limits.maxChars).toBeLessThanOrEqual(220);
   });
 
+  it("adds concrete grounding and constraint continuation for narrowing replies", () => {
+    const result = compose("не аниме", {
+      message: {
+        triggerSource: "reply"
+      }
+    });
+
+    expect(result.trace.messageKind).toBe("reply_to_bot");
+    expect(result.prompt).toContain("[CONCRETE CHAT GROUNDING BLOCK]");
+    expect(result.prompt).toContain("Пользователь сейчас сужает или правит прошлый ответ");
+    expect(result.limits.maxChars).toBeLessThanOrEqual(190);
+  });
+
+  it("routes short corrective meta comments into dedicated meta-feedback path", () => {
+    const result = compose("ты девушка вообще-то", {
+      message: {
+        triggerSource: "reply"
+      }
+    });
+
+    expect(result.trace.messageKind).toBe("meta_feedback");
+    expect(result.trace.activeMode).toBe("dry");
+    expect(result.trace.stylePreset).toBe("curt");
+    expect(result.prompt).toContain("[META-FEEDBACK BLOCK]");
+    expect(result.limits.maxChars).toBeLessThanOrEqual(120);
+    expect(result.prompt).toContain("Не говори: 'я не бот'");
+  });
+
+  it("keeps botness complaints short and free of self-lore guidance", () => {
+    const result = compose("ты как бот разговариваешь", {
+      message: {
+        triggerSource: "reply"
+      }
+    });
+
+    expect(result.trace.messageKind).toBe("meta_feedback");
+    expect(result.prompt).toContain("исправь конкретный сбой");
+    expect(result.prompt).not.toContain("живой серверный персонаж Discord");
+    expect(result.limits.maxChars).toBeLessThanOrEqual(120);
+  });
+
+  it("keeps what-is-this-nonsense replies in meta-feedback when aimed at the bot", () => {
+    const result = compose("что за бред", {
+      message: {
+        triggerSource: "reply"
+      }
+    });
+
+    expect(result.trace.messageKind).toBe("meta_feedback");
+    expect(result.trace.compactness).toBe("tiny");
+  });
+
   it("keeps analogy suppression in strict anti-slop output", () => {
     const result = compose("что такое индексы в базе?");
 
@@ -277,6 +329,13 @@ describe("composeBehaviorPrompt", () => {
     expect(compose("что думаешь про налоги").trace.messageKind).toBe("opinion_question");
     expect(compose("найди X", { intent: "search" }).trace.messageKind).toBe("command_like_request");
     expect(compose("заткнись ботяра").trace.messageKind).toBe("provocation");
+  });
+
+  it("preserves real provocation instead of collapsing it into meta-feedback", () => {
+    const result = compose("заткнись ботяра");
+
+    expect(result.trace.messageKind).toBe("provocation");
+    expect(result.trace.activeMode).toBe("irritated");
   });
 
   it("applies self-initiated brevity and unsolicited presets", () => {

@@ -5,6 +5,7 @@ import type { BlockResult } from "./types";
 export const messageKinds = [
   "direct_mention",
   "reply_to_bot",
+  "meta_feedback",
   "casual_address",
   "smalltalk_hangout",
   "info_question",
@@ -20,6 +21,7 @@ export const messageKinds = [
 const messageKindNotes: Record<MessageKind, string[]> = {
   direct_mention: ["answer directly", "higher priority", "do not mumble"],
   reply_to_bot: ["preserve continuity", "do not restart the topic from scratch"],
+  meta_feedback: ["very short correction or rollback", "no self-lore", "do not defend your process"],
   casual_address: ["shorter", "alive", "human-like Discord flow"],
   smalltalk_hangout: ["low-pressure hangout chat", "short and natural", "do not treat it like a task"],
   info_question: ["less riffing if the question is real", "increase clarity when needed"],
@@ -35,7 +37,17 @@ const messageKindNotes: Record<MessageKind, string[]> = {
 function normalizeForRepeat(value: string) {
   return value
     .toLowerCase()
+    .replace(/ё/g, "е")
     .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeForMeta(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -73,6 +85,46 @@ function isQuestionLike(content: string) {
 function isLowSignal(content: string) {
   const normalized = content.trim();
   return normalized.length <= 3 || /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s!?.,]+$/u.test(normalized);
+}
+
+function isMetaFeedback(content: string, message: MessageEnvelope) {
+  const normalized = normalizeForMeta(content);
+
+  if (!normalized || normalized.length > 120) {
+    return false;
+  }
+
+  const directMetaMatch =
+    (normalized.includes("девушка") && normalized.includes("вообще то")) ||
+    normalized.includes("в мужском роде") ||
+    normalized.includes("как бот говоришь") ||
+    normalized.includes("как бот разговариваешь") ||
+    normalized.includes("как бот отвечаешь") ||
+    normalized.includes("как бот пишешь") ||
+    normalized.includes("по человечески") ||
+    normalized.includes("ответь нормально") ||
+    normalized.includes("скажи нормально") ||
+    normalized.includes("ботский тон") ||
+    normalized.includes("ботский стиль") ||
+    normalized.includes("ботский ответ");
+
+  if (directMetaMatch) {
+    return true;
+  }
+
+  const isBotTargeted = message.triggerSource === "reply" || message.mentionedBot || message.mentionsBotByName;
+
+  if (!isBotTargeted) {
+    return false;
+  }
+
+  return (
+    normalized.startsWith("что за бред") ||
+    normalized.startsWith("что за хрень") ||
+    normalized.startsWith("что за ерунда") ||
+    normalized.startsWith("что за нейрослоп") ||
+    normalized.includes("нейрослоп")
+  );
 }
 
 function isSmalltalkHangout(content: string, intent: BotIntent) {
@@ -137,6 +189,10 @@ export function detectMessageKind(options: {
 
   if (repeatedInContext(content, options.context)) {
     return "repeated_question";
+  }
+
+  if (isMetaFeedback(content, options.message)) {
+    return "meta_feedback";
   }
 
   if (isLowSignal(content)) {

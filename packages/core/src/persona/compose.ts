@@ -69,6 +69,7 @@ const depthLimits: Record<RequestedDepth, PersonaResponseLimits> = {
 };
 
 const messageKindModeBias: Partial<Record<MessageKind, PersonaMode>> = {
+  meta_feedback: "dry",
   request_for_explanation: "focused",
   command_like_request: "focused",
   meme_bait: "playful",
@@ -78,6 +79,7 @@ const messageKindModeBias: Partial<Record<MessageKind, PersonaMode>> = {
 };
 
 const messageKindDepthBias: Partial<Record<MessageKind, RequestedDepth>> = {
+  meta_feedback: "tiny",
   request_for_explanation: "short",
   info_question: "short",
   command_like_request: "short",
@@ -252,6 +254,20 @@ function detectSmalltalkContextHook(input: ComposeBehaviorPromptInput, messageKi
   return replyChainHook || activeTopicHook || entityHook || serverMemoryHook || sharedContextHook || anchoredRelationshipHook;
 }
 
+function detectConstraintFollowUp(input: ComposeBehaviorPromptInput, messageKind: MessageKind) {
+  if (messageKind !== "reply_to_bot") {
+    return false;
+  }
+
+  const normalized = normalizeHookText(input.cleanedContent);
+
+  if (!normalized || normalized.length > 90) {
+    return false;
+  }
+
+  return /^(?:(?:не|без|только|лучше|можно)(?:\s|$)|а\s+не(?:\s|$))/u.test(normalized);
+}
+
 function resolveRequestedDepth(options: {
   input: ComposeBehaviorPromptInput;
   channelKind: ChannelKind;
@@ -260,6 +276,10 @@ function resolveRequestedDepth(options: {
   staleTakeDetected: boolean;
   persona: PersonaConfig;
 }) {
+  if (options.messageKind === "meta_feedback") {
+    return "tiny";
+  }
+
   const tags = options.input.channelPolicy?.topicInterestTags ?? [];
   const debugDepth = options.input.debugOverrides?.requestedDepth;
   const overrideDepth = options.input.requestedDepth;
@@ -320,6 +340,10 @@ function resolveMode(options: {
   requestedDepth: RequestedDepth;
   staleTakeDetected: boolean;
 }) {
+  if (options.messageKind === "meta_feedback") {
+    return "dry";
+  }
+
   const tags = options.input.channelPolicy?.topicInterestTags ?? [];
   const selfInitiated =
     options.input.debugOverrides?.isSelfInitiated ??
@@ -360,6 +384,7 @@ function resolveLimits(options: {
   requestedDepth: RequestedDepth;
   messageKind: MessageKind;
   smalltalkContextHook: boolean;
+  constraintFollowUp: boolean;
   staleTakeDetected: boolean;
   isSelfInitiated: boolean;
 }) {
@@ -403,6 +428,23 @@ function resolveLimits(options: {
 
   if (options.messageKind === "reply_to_bot") {
     resolved.maxChars = Math.min(resolved.maxChars, 220);
+    resolved.maxSentences = Math.min(resolved.maxSentences, 2);
+    resolved.maxParagraphs = 1;
+    resolved.followUpAllowed = false;
+  }
+
+  if (options.messageKind === "meta_feedback") {
+    resolved.maxChars = Math.min(resolved.maxChars, 120);
+    resolved.maxSentences = 2;
+    resolved.maxParagraphs = 1;
+    resolved.maxTokens = Math.min(resolved.maxTokens, 70);
+    resolved.bulletListAllowed = false;
+    resolved.followUpAllowed = false;
+    resolved.compactness = "tiny";
+  }
+
+  if (options.constraintFollowUp) {
+    resolved.maxChars = Math.min(resolved.maxChars, 190);
     resolved.maxSentences = Math.min(resolved.maxSentences, 2);
     resolved.maxParagraphs = 1;
     resolved.followUpAllowed = false;
@@ -463,6 +505,7 @@ function resolveContextEnergy(options: {
     options.mode === "dry" ||
     options.mode === "detached" ||
     options.channelKind === "bot" ||
+    options.messageKind === "meta_feedback" ||
     options.messageKind === "low_signal_noise" ||
     options.messageKind === "repeated_question"
   ) {
@@ -535,6 +578,38 @@ function buildContextEnergyBlock(energy: ContextEnergy): BlockResult {
   };
 }
 
+function buildConcreteGroundingBlock(options: {
+  messageKind: MessageKind;
+  constraintFollowUp: boolean;
+}): BlockResult {
+  const lines = [
+    "[CONCRETE CHAT GROUNDING BLOCK]",
+    "Сначала реагируй на буквальный предмет сообщения.",
+    "Без психодиагноза, скрытых мотивов и глубинных теорий без прямого запроса.",
+    "Для бытового чата лучше один микрошаг или 1-2 приземлённых варианта, чем абстрактная мудрость.",
+    "Без сюра, бытовой философии и псевдо-умных формул ради вайба.",
+    "Не переосмысливай буквальные короткие реплики типа 'спасибо', 'не аниме' или 'норм' как скрытый сигнал о чём-то большем."
+  ];
+
+  if (options.messageKind === "reply_to_bot") {
+    lines.push("Короткий reply обычно продолжает предыдущую тему. Не открывай новую и не съезжай в общий монолог.");
+  }
+
+  if (options.messageKind === "meta_feedback") {
+    lines.push("Если тебя поправляют по тону, роду, ботскости или прошлой фразе - исправь именно это, а не объясняйся.");
+  }
+
+  if (options.constraintFollowUp) {
+    lines.push("Пользователь сейчас сужает или правит прошлый ответ. Останься в той же теме и измени только ограничение.");
+    lines.push("Примеры: 'не аниме' -> дай не-аниме варианты. 'без мотивационных речей' -> дай сухой шаг без морали.");
+  }
+
+  return {
+    name: "CONCRETE CHAT GROUNDING BLOCK",
+    content: lines.join("\n")
+  };
+}
+
 function buildContextUsageBlock(input: ComposeBehaviorPromptInput): BlockResult | null {
   if (!input.contextTrace) {
     return null;
@@ -582,9 +657,28 @@ function buildIdentityBlock(persona: PersonaConfig): BlockResult {
     content: [
       "[STABLE IDENTITY BLOCK]",
       `Ты ${persona.identity.name}. Возраст: ${persona.identity.age}. Язык: ${persona.identity.language}. Платформенный стиль: ${persona.identity.platformStyle}.`,
-      `Role: ${persona.identity.baselineRoleDescription}.`,
-      "Ты — живой серверный персонаж Discord. Не ассистент, не саппорт, не медиатор, не бот-информатор.",
-      "Ты реагируешь как человек в чате: коротко, прямо, с характером. Если не знаешь — говоришь прямо, без отмазок."
+      `Internal framing: ${persona.identity.baselineRoleDescription}.`,
+      "Веди себя как обычная участница Discord-чата, не как справочный сервис.",
+      "Не проговаривай эту рамку без прямого вопроса о роли или устройстве.",
+      "Если не знаешь - говори прямо, без отмазок."
+    ].join("\n")
+  };
+}
+
+function buildMetaFeedbackBlock(messageKind: MessageKind): BlockResult | null {
+  if (messageKind !== "meta_feedback") {
+    return null;
+  }
+
+  return {
+    name: "META-FEEDBACK BLOCK",
+    content: [
+      "[META-FEEDBACK BLOCK]",
+      "Это короткое замечание о твоей прошлой формулировке, тоне или роли.",
+      "Сначала исправь конкретный сбой: род, ботский тон, лишний мусор, кривую фразу.",
+      "Обычно хватает 1 короткой фразы. Если просят 'нормально' или 'по-человечески', переформулируй ту же мысль проще и короче.",
+      "Не оправдывайся. Не объясняй систему, характер, intent, устройство или то, какой ты собеседник.",
+      "Не говори: 'я не бот', 'я живой человек', 'я серверный персонаж', 'я отвечаю по ситуации'."
     ].join("\n")
   };
 }
@@ -800,6 +894,7 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
       : "casual_address";
   const staleTakeDetected = detectStaleTake(input.cleanedContent, messageKind);
   const smalltalkContextHook = detectSmalltalkContextHook(input, messageKind);
+  const constraintFollowUp = detectConstraintFollowUp(input, messageKind);
   const requestedDepth = resolveRequestedDepth({ input, channelKind, messageKind, smalltalkContextHook, staleTakeDetected, persona });
   const mode = resolveMode({ input, persona, channelKind, messageKind, requestedDepth, staleTakeDetected });
   const staleTakeStyleOverride =
@@ -839,6 +934,7 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     requestedDepth,
     messageKind,
     smalltalkContextHook,
+    constraintFollowUp,
     staleTakeDetected,
     isSelfInitiated
   });
@@ -879,6 +975,8 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   add(buildChannelStyleBlock(channelKind, persona.channelOverrides[channelKind]));
   add(buildMessageKindBlock(messageKind));
   add(buildReplyModeBlock(replyMode));
+  add(buildMetaFeedbackBlock(messageKind));
+  add(buildConcreteGroundingBlock({ messageKind, constraintFollowUp }));
   add(buildContextUsageBlock(input));
   add(buildMemoryUsageBlock());
   add(buildLengthBlock(limits));
@@ -912,7 +1010,12 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   add(buildStaleTakeMediaBlock({ staleTakeDetected, mediaReactionEligible }));
   add(buildAntiSlopBlock({ profile: antiSlopProfile, rules: persona.antiSlopRules, forbiddenPatterns: persona.forbiddenPatterns }));
   add(buildAnalogySuppressionBlock(analogyBan));
-  add(buildFewShotBlock());
+  add(
+    buildFewShotBlock({
+      includeConcreteReplyAnchors: constraintFollowUp || messageKind === "reply_to_bot",
+      includeMetaFeedbackAnchors: messageKind === "meta_feedback"
+    })
+  );
   add(buildLegacyServerOverlay(input));
   add(buildModeratorOverlay(input));
   add(buildRelationshipOverlay(input));

@@ -35,6 +35,7 @@ export type ChannelKind = "general" | "memes" | "serious" | "help" | "bot" | "of
 export type MessageKind =
   | "direct_mention"
   | "reply_to_bot"
+  | "meta_feedback"
   | "casual_address"
   | "smalltalk_hangout"
   | "info_question"

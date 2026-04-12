@@ -109,7 +109,11 @@ const stressCases: HarnessCase[] = [
   { id: "casual_advice", text: "если кратко как перестать всё откладывать" },
   { id: "stale_political_bait", text: "государство же нужно, кто дороги построит?" },
   { id: "meme_bait", text: "это база или кринж" },
-  { id: "emotional_overshare", text: "я сегодня без причины херово себя чувствую" }
+  { id: "emotional_overshare", text: "я сегодня без причины херово себя чувствую" },
+  { id: "meta_gender_correction", text: "ты девушка вообще-то", triggerSource: "reply" },
+  { id: "meta_bot_tone", text: "ты как бот разговариваешь", triggerSource: "reply" },
+  { id: "meta_nonsense", text: "что за бред", triggerSource: "reply" },
+  { id: "meta_answer_normally", text: "ответь нормально", triggerSource: "reply" }
 ];
 
 const responseGuard = new ResponseGuard();
