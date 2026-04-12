@@ -1,5 +1,19 @@
 import type { AppPrismaClient, ReplyQueueTrace, TriggerSource } from "@hori/shared";
 
+interface ReplyQueueItemSnapshot {
+  id: string;
+  guildId: string;
+  channelId: string;
+  targetUserId: string;
+  sourceMsgId: string;
+  priority: number;
+  status: string;
+  lockedUntil: Date | null;
+  resultMsgId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export class ReplyQueueService {
   constructor(
     private readonly prisma: AppPrismaClient,
@@ -90,7 +104,7 @@ export class ReplyQueueService {
     return { enabled: true, action: "processing", itemId: processing.id };
   }
 
-  async complete(itemId: string | null | undefined, resultMsgId?: string | null) {
+  async complete(itemId: string | null | undefined, resultMsgId?: string | null): Promise<void> {
     if (!itemId) {
       return;
     }
@@ -105,7 +119,7 @@ export class ReplyQueueService {
     });
   }
 
-  async nextQueued(guildId: string, channelId: string) {
+  async nextQueued(guildId: string, channelId: string): Promise<ReplyQueueItemSnapshot | null> {
     const next = await this.prisma.replyQueueItem.findFirst({
       where: {
         guildId,
@@ -130,7 +144,7 @@ export class ReplyQueueService {
     return next;
   }
 
-  async status(guildId: string, channelId?: string | null) {
+  async status(guildId: string, channelId?: string | null): Promise<{ queued: number; processing: number; dropped: number }> {
     const where = {
       guildId,
       ...(channelId ? { channelId } : {})
@@ -145,7 +159,7 @@ export class ReplyQueueService {
     return { queued, processing, dropped };
   }
 
-  async clear(guildId: string, channelId?: string | null) {
+  async clear(guildId: string, channelId?: string | null): Promise<{ count: number }> {
     return this.prisma.replyQueueItem.updateMany({
       where: {
         guildId,

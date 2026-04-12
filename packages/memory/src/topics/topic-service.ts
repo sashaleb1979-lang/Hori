@@ -6,13 +6,27 @@ interface TopicServiceOptions {
   similarityThreshold?: number;
 }
 
+interface TopicSessionSnapshot {
+  id: string;
+  guildId: string;
+  channelId: string;
+  title: string;
+  summaryShort: string;
+  summaryFacts: unknown;
+  confidence: number;
+  startedAt: Date;
+  lastActiveAt: Date;
+  closedAt: Date | null;
+  closedReason: string | null;
+}
+
 export class TopicService {
   constructor(
     private readonly prisma: AppPrismaClient,
     private readonly options: TopicServiceOptions = {}
   ) {}
 
-  async getActiveTopic(guildId: string, channelId: string) {
+  async getActiveTopic(guildId: string, channelId: string): Promise<TopicSessionSnapshot | null> {
     return this.prisma.topicSession.findFirst({
       where: {
         guildId,
@@ -23,7 +37,7 @@ export class TopicService {
     });
   }
 
-  async resetTopic(guildId: string, channelId: string, reason = "manual") {
+  async resetTopic(guildId: string, channelId: string, reason = "manual"): Promise<{ count: number }> {
     return this.prisma.topicSession.updateMany({
       where: {
         guildId,
@@ -62,7 +76,7 @@ export class TopicService {
         });
       }
 
-      topic = await this.prisma.topicSession.create({
+      const createdTopic = await this.prisma.topicSession.create({
         data: {
           guildId: input.guildId,
           channelId: input.channelId,
@@ -73,9 +87,10 @@ export class TopicService {
           lastActiveAt: now
         }
       });
+      topic = createdTopic;
 
       if (input.embedding?.length) {
-        await this.setTopicEmbedding(topic.id, input.embedding);
+        await this.setTopicEmbedding(createdTopic.id, input.embedding);
       }
     } else {
       await this.prisma.topicSession.update({
@@ -87,6 +102,10 @@ export class TopicService {
           lastActiveAt: now
         }
       });
+    }
+
+    if (!topic) {
+      throw new Error("Topic session was not resolved after update");
     }
 
     await this.prisma.topicMessageLink.upsert({

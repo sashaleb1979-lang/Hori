@@ -21,7 +21,7 @@ var import_config = require("@hori/config");
 var import_llm3 = require("@hori/llm");
 var import_memory = require("@hori/memory");
 var import_search = require("@hori/search");
-var import_shared4 = require("@hori/shared");
+var import_shared5 = require("@hori/shared");
 
 // src/jobs/cleanup.ts
 function createCleanupJob(runtime) {
@@ -36,7 +36,24 @@ function createCleanupJob(runtime) {
     const result = await runtime.prisma.interjectionLog.deleteMany({
       where: { createdAt: { lt: cutoff } }
     });
-    return { deleted: result.count, kind: "interjections" };
+    const [expiredMoods, oldQueueItems] = await Promise.all([
+      runtime.prisma.moodState.deleteMany({
+        where: { endsAt: { lt: cutoff } }
+      }),
+      runtime.prisma.replyQueueItem.deleteMany({
+        where: {
+          status: { in: ["done", "dropped"] },
+          updatedAt: { lt: cutoff }
+        }
+      })
+    ]);
+    return {
+      deleted: result.count + expiredMoods.count + oldQueueItems.count,
+      kind: "interjections",
+      interjections: result.count,
+      expiredMoods: expiredMoods.count,
+      oldQueueItems: oldQueueItems.count
+    };
   };
 }
 
@@ -202,14 +219,46 @@ function createSummaryJob(runtime) {
   };
 }
 
+// src/jobs/topics.ts
+var import_shared4 = require("@hori/shared");
+function createTopicJob(runtime) {
+  return async (job) => {
+    if (!runtime.env.FEATURE_TOPIC_ENGINE_ENABLED) {
+      return { skipped: true, reason: "feature disabled" };
+    }
+    const message = await runtime.prisma.message.findUnique({
+      where: { id: job.data.messageId }
+    });
+    if (!message) {
+      return { skipped: true, reason: "message not found" };
+    }
+    let embedding;
+    if (message.content.length >= runtime.env.MESSAGE_EMBED_MIN_CHARS) {
+      try {
+        embedding = await runtime.embeddingAdapter.embedOne(message.content);
+      } catch (error) {
+        runtime.logger.warn({ error: (0, import_shared4.asErrorMessage)(error), messageId: message.id, jobId: job.id }, "topic embedding unavailable");
+      }
+    }
+    return runtime.topicService.updateFromMessage({
+      guildId: message.guildId,
+      channelId: message.channelId,
+      messageId: message.id,
+      content: message.content,
+      replyToMessageId: message.replyToMessageId,
+      embedding
+    });
+  };
+}
+
 // src/index.ts
 async function main() {
   const env = (0, import_config.loadEnv)();
   (0, import_config.assertEnvForRole)(env, "worker");
-  const logger = (0, import_shared4.createLogger)(env.LOG_LEVEL);
-  const prisma = (0, import_shared4.createPrismaClient)();
-  const redis = (0, import_shared4.createRedisClient)(env.REDIS_URL);
-  await (0, import_shared4.ensureInfrastructureReady)({
+  const logger = (0, import_shared5.createLogger)(env.LOG_LEVEL);
+  const prisma = (0, import_shared5.createPrismaClient)();
+  const redis = (0, import_shared5.createRedisClient)(env.REDIS_URL);
+  await (0, import_shared5.ensureInfrastructureReady)({
     role: "worker",
     nodeEnv: env.NODE_ENV,
     databaseUrl: env.DATABASE_URL,
@@ -219,19 +268,23 @@ async function main() {
     logger
   });
   if (!env.OLLAMA_BASE_URL) {
-    const persistedOllamaUrl = await (0, import_shared4.loadPersistedOllamaBaseUrl)(prisma, logger);
+    const persistedOllamaUrl = await (0, import_shared5.loadPersistedOllamaBaseUrl)(prisma, logger);
     if (persistedOllamaUrl) {
       env.OLLAMA_BASE_URL = persistedOllamaUrl;
     }
   }
-  if ((0, import_shared4.shouldAutoSyncOllamaBaseUrl)()) {
-    (0, import_shared4.startOllamaBaseUrlSync)({ env, prisma, logger });
+  if ((0, import_shared5.shouldAutoSyncOllamaBaseUrl)()) {
+    (0, import_shared5.startOllamaBaseUrlSync)({ env, prisma, logger });
   }
-  const queues = (0, import_shared4.createAppQueues)(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
+  const queues = (0, import_shared5.createAppQueues)(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
   const analytics = new import_analytics.AnalyticsQueryService(prisma);
   const summaryService = new import_memory.SummaryService(prisma);
   const profileService = new import_memory.ProfileService(prisma, env);
   const retrievalService = new import_memory.RetrievalService(prisma);
+  const topicService = new import_memory.TopicService(prisma, {
+    topicTtlMinutes: env.TOPIC_TTL_MINUTES,
+    similarityThreshold: env.TOPIC_SIM_THRESHOLD
+  });
   const searchCache = new import_search.SearchCacheService(prisma, redis);
   const llmClient = new import_llm3.OllamaClient(env, logger);
   const embeddingAdapter = new import_llm3.EmbeddingAdapter(llmClient, env);
@@ -245,16 +298,18 @@ async function main() {
     summaryService,
     profileService,
     retrievalService,
+    topicService,
     searchCache,
     llmClient,
     embeddingAdapter
   };
   const workers = [
-    (0, import_shared4.createWorker)(import_shared4.QUEUE_NAMES.summary, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSummaryJob(runtime), env.JOB_CONCURRENCY_SUMMARIES),
-    (0, import_shared4.createWorker)(import_shared4.QUEUE_NAMES.profile, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createProfileJob(runtime), env.JOB_CONCURRENCY_PROFILES),
-    (0, import_shared4.createWorker)(import_shared4.QUEUE_NAMES.embedding, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createEmbeddingJob(runtime), env.JOB_CONCURRENCY_EMBEDDINGS),
-    (0, import_shared4.createWorker)(import_shared4.QUEUE_NAMES.searchCache, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSearchCacheCleanupJob(runtime), 1),
-    (0, import_shared4.createWorker)(import_shared4.QUEUE_NAMES.cleanup, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createCleanupJob(runtime), 1)
+    (0, import_shared5.createWorker)(import_shared5.QUEUE_NAMES.summary, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSummaryJob(runtime), env.JOB_CONCURRENCY_SUMMARIES),
+    (0, import_shared5.createWorker)(import_shared5.QUEUE_NAMES.profile, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createProfileJob(runtime), env.JOB_CONCURRENCY_PROFILES),
+    (0, import_shared5.createWorker)(import_shared5.QUEUE_NAMES.embedding, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createEmbeddingJob(runtime), env.JOB_CONCURRENCY_EMBEDDINGS),
+    (0, import_shared5.createWorker)(import_shared5.QUEUE_NAMES.topic, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createTopicJob(runtime), 1),
+    (0, import_shared5.createWorker)(import_shared5.QUEUE_NAMES.searchCache, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSearchCacheCleanupJob(runtime), 1),
+    (0, import_shared5.createWorker)(import_shared5.QUEUE_NAMES.cleanup, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createCleanupJob(runtime), 1)
   ];
   await Promise.all([
     queues.cleanup.add("cleanup", { kind: "logs" }, { jobId: "cleanup:logs", repeat: { every: 24 * 60 * 60 * 1e3 } }),

@@ -2,6 +2,20 @@ import type { AppPrismaClient, PersonaMode } from "@hori/shared";
 
 const allowedMoods = new Set<PersonaMode>(["normal", "playful", "dry", "irritated", "focused", "sleepy", "detached"]);
 
+interface MoodStateSnapshot {
+  id: string;
+  scope: string;
+  scopeId: string;
+  mood: string;
+  intensity: number;
+  isRareMode: boolean;
+  startedAt: Date;
+  endsAt: Date;
+  cooldownEnds: Date | null;
+  reasonJson: unknown;
+  updatedAt: Date;
+}
+
 export class MoodService {
   constructor(private readonly prisma: AppPrismaClient) {}
 
@@ -22,7 +36,7 @@ export class MoodService {
     return mood.mood as PersonaMode;
   }
 
-  async setMood(guildId: string, mood: PersonaMode, minutes: number, reason?: string | null) {
+  async setMood(guildId: string, mood: PersonaMode, minutes: number, reason?: string | null): Promise<MoodStateSnapshot> {
     await this.clearMood(guildId);
 
     return this.prisma.moodState.create({
@@ -37,7 +51,7 @@ export class MoodService {
     });
   }
 
-  async clearMood(guildId: string) {
+  async clearMood(guildId: string): Promise<{ count: number }> {
     return this.prisma.moodState.updateMany({
       where: {
         scope: "guild",
@@ -50,7 +64,7 @@ export class MoodService {
     });
   }
 
-  async status(guildId: string) {
+  async status(guildId: string): Promise<MoodStateSnapshot | null> {
     return this.prisma.moodState.findFirst({
       where: {
         scope: "guild",

@@ -50,7 +50,25 @@ var slashCommandDefinitions = [
       { name: "auto_interject", value: "auto_interject" },
       { name: "user_profiles", value: "user_profiles" },
       { name: "context_actions", value: "context_actions" },
-      { name: "roast", value: "roast" }
+      { name: "roast", value: "roast" },
+      { name: "context_v2_enabled", value: "context_v2_enabled" },
+      { name: "context_confidence_enabled", value: "context_confidence_enabled" },
+      { name: "topic_engine_enabled", value: "topic_engine_enabled" },
+      { name: "affinity_signals_enabled", value: "affinity_signals_enabled" },
+      { name: "mood_engine_enabled", value: "mood_engine_enabled" },
+      { name: "reply_queue_enabled", value: "reply_queue_enabled" },
+      { name: "media_reactions_enabled", value: "media_reactions_enabled" },
+      { name: "runtime_config_cache_enabled", value: "runtime_config_cache_enabled" },
+      { name: "embedding_cache_enabled", value: "embedding_cache_enabled" },
+      { name: "channel_aware_mode", value: "channel_aware_mode" },
+      { name: "message_kind_aware_mode", value: "message_kind_aware_mode" },
+      { name: "anti_slop_strict_mode", value: "anti_slop_strict_mode" },
+      { name: "playful_mode_enabled", value: "playful_mode_enabled" },
+      { name: "irritated_mode_enabled", value: "irritated_mode_enabled" },
+      { name: "ideological_flavour_enabled", value: "ideological_flavour_enabled" },
+      { name: "analogy_ban_enabled", value: "analogy_ban_enabled" },
+      { name: "slang_layer_enabled", value: "slang_layer_enabled" },
+      { name: "self_interjection_constraints_enabled", value: "self_interjection_constraints_enabled" }
     )
   ).addBooleanOption((option) => option.setName("enabled").setDescription("\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C/\u0432\u044B\u043A\u043B\u044E\u0447\u0438\u0442\u044C").setRequired(true)),
   new import_discord2.SlashCommandBuilder().setName("bot-debug").setDescription("\u041F\u043E\u043B\u0443\u0447\u0438\u0442\u044C debug trace \u043F\u043E \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044E").addStringOption((option) => option.setName("message-id").setDescription("ID \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F").setRequired(true)),
@@ -62,6 +80,49 @@ var slashCommandDefinitions = [
     (option) => option.setName("channel").setDescription("\u041A\u0430\u043D\u0430\u043B").addChannelTypes(import_discord2.ChannelType.GuildText, import_discord2.ChannelType.PublicThread, import_discord2.ChannelType.PrivateThread).setRequired(true)
   ),
   new import_discord2.SlashCommandBuilder().setName("bot-stats").setDescription("\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u043D\u0435\u0434\u0435\u043B\u044C\u043D\u0443\u044E \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0443"),
+  new import_discord2.SlashCommandBuilder().setName("bot-topic").setDescription("\u041F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u0438\u043B\u0438 \u0441\u0431\u0440\u043E\u0441\u0438\u0442\u044C \u0430\u043A\u0442\u0438\u0432\u043D\u0443\u044E \u0442\u0435\u043C\u0443").addSubcommand(
+    (subcommand) => subcommand.setName("status").setDescription("\u0410\u043A\u0442\u0438\u0432\u043D\u0430\u044F \u0442\u0435\u043C\u0430 \u043A\u0430\u043D\u0430\u043B\u0430").addChannelOption(
+      (option) => option.setName("channel").setDescription("\u041A\u0430\u043D\u0430\u043B").addChannelTypes(import_discord2.ChannelType.GuildText, import_discord2.ChannelType.PublicThread, import_discord2.ChannelType.PrivateThread)
+    )
+  ).addSubcommand(
+    (subcommand) => subcommand.setName("reset").setDescription("\u0421\u0431\u0440\u043E\u0441\u0438\u0442\u044C \u0430\u043A\u0442\u0438\u0432\u043D\u0443\u044E \u0442\u0435\u043C\u0443").addChannelOption(
+      (option) => option.setName("channel").setDescription("\u041A\u0430\u043D\u0430\u043B").addChannelTypes(import_discord2.ChannelType.GuildText, import_discord2.ChannelType.PublicThread, import_discord2.ChannelType.PrivateThread)
+    )
+  ),
+  new import_discord2.SlashCommandBuilder().setName("bot-mood").setDescription("\u0423\u043F\u0440\u0430\u0432\u043B\u044F\u0442\u044C mood Hori").addSubcommand((subcommand) => subcommand.setName("status").setDescription("\u0422\u0435\u043A\u0443\u0449\u0438\u0439 mood")).addSubcommand(
+    (subcommand) => subcommand.setName("set").setDescription("\u0417\u0430\u0434\u0430\u0442\u044C mood").addStringOption(
+      (option) => option.setName("mode").setDescription("\u0420\u0435\u0436\u0438\u043C").setRequired(true).addChoices(
+        { name: "normal", value: "normal" },
+        { name: "playful", value: "playful" },
+        { name: "dry", value: "dry" },
+        { name: "irritated", value: "irritated" },
+        { name: "focused", value: "focused" },
+        { name: "sleepy", value: "sleepy" },
+        { name: "detached", value: "detached" }
+      )
+    ).addIntegerOption((option) => option.setName("minutes").setDescription("\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u043C\u0438\u043D\u0443\u0442").setMinValue(1).setMaxValue(1440)).addStringOption((option) => option.setName("reason").setDescription("\u041F\u0440\u0438\u0447\u0438\u043D\u0430"))
+  ).addSubcommand((subcommand) => subcommand.setName("clear").setDescription("\u0421\u0431\u0440\u043E\u0441\u0438\u0442\u044C mood")),
+  new import_discord2.SlashCommandBuilder().setName("bot-queue").setDescription("\u0423\u043F\u0440\u0430\u0432\u043B\u044F\u0442\u044C reply queue").addSubcommand(
+    (subcommand) => subcommand.setName("status").setDescription("\u0421\u0442\u0430\u0442\u0443\u0441 \u043E\u0447\u0435\u0440\u0435\u0434\u0438").addChannelOption(
+      (option) => option.setName("channel").setDescription("\u041A\u0430\u043D\u0430\u043B").addChannelTypes(import_discord2.ChannelType.GuildText, import_discord2.ChannelType.PublicThread, import_discord2.ChannelType.PrivateThread)
+    )
+  ).addSubcommand(
+    (subcommand) => subcommand.setName("clear").setDescription("\u041E\u0447\u0438\u0441\u0442\u0438\u0442\u044C \u043E\u0447\u0435\u0440\u0435\u0434\u044C").addChannelOption(
+      (option) => option.setName("channel").setDescription("\u041A\u0430\u043D\u0430\u043B").addChannelTypes(import_discord2.ChannelType.GuildText, import_discord2.ChannelType.PublicThread, import_discord2.ChannelType.PrivateThread)
+    )
+  ),
+  new import_discord2.SlashCommandBuilder().setName("bot-media").setDescription("\u0423\u043F\u0440\u0430\u0432\u043B\u044F\u0442\u044C media registry").addSubcommand(
+    (subcommand) => subcommand.setName("add").setDescription("\u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 media-\u0444\u0430\u0439\u043B").addStringOption((option) => option.setName("id").setDescription("media id").setRequired(true)).addStringOption(
+      (option) => option.setName("type").setDescription("\u0422\u0438\u043F").setRequired(true).addChoices(
+        { name: "image", value: "image" },
+        { name: "gif", value: "gif" },
+        { name: "video", value: "video" },
+        { name: "audio", value: "audio" }
+      )
+    ).addStringOption((option) => option.setName("path").setDescription("\u0410\u0431\u0441\u043E\u043B\u044E\u0442\u043D\u044B\u0439 \u043F\u0443\u0442\u044C \u043A \u0444\u0430\u0439\u043B\u0443").setRequired(true)).addStringOption((option) => option.setName("trigger-tags").setDescription("CSV trigger tags")).addStringOption((option) => option.setName("tone-tags").setDescription("CSV tone tags")).addStringOption((option) => option.setName("channels").setDescription("CSV channel kinds")).addStringOption((option) => option.setName("moods").setDescription("CSV moods")).addBooleanOption((option) => option.setName("nsfw").setDescription("NSFW"))
+  ).addSubcommand((subcommand) => subcommand.setName("list").setDescription("\u0421\u043F\u0438\u0441\u043E\u043A media")).addSubcommand(
+    (subcommand) => subcommand.setName("disable").setDescription("\u041E\u0442\u043A\u043B\u044E\u0447\u0438\u0442\u044C media").addStringOption((option) => option.setName("id").setDescription("media id").setRequired(true))
+  ),
   new import_discord2.SlashCommandBuilder().setName("bot-ai-url").setDescription("\u0421\u043C\u0435\u043D\u0438\u0442\u044C Ollama URL (\u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446 \u0431\u043E\u0442\u0430)").addStringOption((option) => option.setName("url").setDescription("\u041D\u043E\u0432\u044B\u0439 URL (https://...)").setRequired(true))
 ].map((command) => command.toJSON());
 var contextMenuDefinitions = [
@@ -230,6 +291,44 @@ ${status}`
       case "bot-stats":
         await interaction.reply({ content: await runtime.slashAdmin.stats(interaction.guildId), flags: import_discord3.MessageFlags.Ephemeral });
         return;
+      case "bot-topic": {
+        const channelId = interaction.options.getChannel("channel")?.id ?? interaction.channelId;
+        const content = interaction.options.getSubcommand() === "reset" ? await runtime.slashAdmin.topicReset(interaction.guildId, channelId) : await runtime.slashAdmin.topicStatus(interaction.guildId, channelId);
+        await interaction.reply({ content, flags: import_discord3.MessageFlags.Ephemeral });
+        return;
+      }
+      case "bot-mood": {
+        const subcommand = interaction.options.getSubcommand();
+        const content = subcommand === "set" ? await runtime.slashAdmin.moodSet(
+          interaction.guildId,
+          interaction.options.getString("mode", true),
+          interaction.options.getInteger("minutes") ?? 60,
+          interaction.options.getString("reason")
+        ) : subcommand === "clear" ? await runtime.slashAdmin.moodClear(interaction.guildId) : await runtime.slashAdmin.moodStatus(interaction.guildId);
+        await interaction.reply({ content, flags: import_discord3.MessageFlags.Ephemeral });
+        return;
+      }
+      case "bot-queue": {
+        const channelId = interaction.options.getChannel("channel")?.id ?? null;
+        const content = interaction.options.getSubcommand() === "clear" ? await runtime.slashAdmin.queueClear(interaction.guildId, channelId) : await runtime.slashAdmin.queueStatus(interaction.guildId, channelId);
+        await interaction.reply({ content, flags: import_discord3.MessageFlags.Ephemeral });
+        return;
+      }
+      case "bot-media": {
+        const subcommand = interaction.options.getSubcommand();
+        const content = subcommand === "add" ? await runtime.slashAdmin.mediaAdd({
+          mediaId: interaction.options.getString("id", true),
+          type: interaction.options.getString("type", true),
+          filePath: interaction.options.getString("path", true),
+          triggerTags: interaction.options.getString("trigger-tags"),
+          toneTags: interaction.options.getString("tone-tags"),
+          allowedChannels: interaction.options.getString("channels"),
+          allowedMoods: interaction.options.getString("moods"),
+          nsfw: interaction.options.getBoolean("nsfw")
+        }) : subcommand === "disable" ? await runtime.slashAdmin.mediaDisable(interaction.options.getString("id", true)) : await runtime.slashAdmin.mediaList();
+        await interaction.reply({ content, flags: import_discord3.MessageFlags.Ephemeral });
+        return;
+      }
       default:
         await interaction.reply({ content: "\u041D\u0435 \u0437\u043D\u0430\u044E \u0442\u0430\u043A\u0443\u044E \u043A\u043E\u043C\u0430\u043D\u0434\u0443.", flags: import_discord3.MessageFlags.Ephemeral });
         return;
@@ -262,15 +361,20 @@ var import_shared4 = require("@hori/shared");
 
 // src/responders/message-responder.ts
 var import_shared3 = require("@hori/shared");
-async function sendReply(message, text) {
+async function sendReply(message, reply) {
+  const text = typeof reply === "string" ? reply : reply.text;
+  const media = typeof reply === "string" ? null : reply.media;
   const chunks = (0, import_shared3.splitLongMessage)(text);
   for (let index = 0; index < chunks.length; index += 1) {
     if (index === 0) {
-      await message.reply(chunks[index]);
+      await message.reply(media ? mediaReplyPayload(chunks[index], media.filePath) : chunks[index]);
     } else if ("send" in message.channel) {
       await message.channel.send(chunks[index]);
     }
   }
+}
+function mediaReplyPayload(content, filePath) {
+  return content ? { content, files: [filePath] } : { files: [filePath] };
 }
 
 // src/router/message-router.ts
@@ -299,6 +403,14 @@ async function enqueueBackgroundJobs(runtime, envelope) {
         { entityType: "message", entityId: envelope.messageId },
         { jobId: `embedding:${envelope.messageId}` }
       ) : Promise.resolve()
+    },
+    {
+      queue: "topic",
+      task: runtime.queues.topic.add(
+        "topic",
+        { guildId: envelope.guildId, channelId: envelope.channelId, messageId: envelope.messageId },
+        { jobId: `topic:${envelope.messageId}` }
+      )
     }
   ];
   const results = await Promise.allSettled(jobs.map((job) => job.task));
@@ -380,6 +492,7 @@ async function routeMessage(runtime, message) {
     userId: message.author.id,
     username: message.author.username,
     displayName: member.displayName,
+    channelName: "name" in message.channel ? message.channel.name : null,
     content: message.content,
     createdAt: message.createdAt,
     replyToMessageId: message.reference?.messageId ?? null,
@@ -394,7 +507,7 @@ async function routeMessage(runtime, message) {
   await runtime.ingestService.ingestMessage({
     ...envelope,
     guildName: message.guild.name,
-    channelName: "name" in message.channel ? message.channel.name : void 0,
+    channelName: envelope.channelName,
     isBotUser: false
   });
   (0, import_analytics.trackIngestedMessage)();
@@ -423,11 +536,39 @@ async function routeMessage(runtime, message) {
     });
     return;
   }
-  const result = await runtime.orchestrator.handleMessage(envelope, routingConfig);
+  let queueItemId = null;
+  let queueTrace = { enabled: false, action: "none" };
+  if (routingConfig.featureFlags.replyQueueEnabled) {
+    queueTrace = await runtime.replyQueue.claimOrQueue({
+      guildId: envelope.guildId,
+      channelId: envelope.channelId,
+      sourceMsgId: envelope.messageId,
+      targetUserId: envelope.userId,
+      triggerSource: envelope.triggerSource,
+      explicitInvocation
+    });
+    if (queueTrace.action === "dropped") {
+      return;
+    }
+    if (queueTrace.action === "busy_ack") {
+      await sendReply(message, "\u0429\u0430, \u044F \u0435\u0449\u0451 \u043F\u0440\u043E\u0448\u043B\u043E\u0435 \u0434\u043E\u0436\u0451\u0432\u044B\u0432\u0430\u044E. \u041F\u043E\u0434\u043E\u0436\u0434\u0438 \u0447\u0443\u0442\u044C.");
+      return;
+    }
+    queueItemId = queueTrace.itemId ?? null;
+  }
+  const result = await runtime.orchestrator.handleMessage(envelope, routingConfig, queueTrace);
   if (!result.reply) {
+    if (queueItemId) {
+      await runtime.replyQueue.complete(queueItemId);
+      await drainReplyQueue(runtime, message);
+    }
     return;
   }
   await sendReply(message, result.reply);
+  if (queueItemId) {
+    await runtime.replyQueue.complete(queueItemId);
+    await drainReplyQueue(runtime, message);
+  }
   if (autoInterject) {
     await runtime.prisma.interjectionLog.create({
       data: {
@@ -439,6 +580,22 @@ async function routeMessage(runtime, message) {
         outcome: "sent"
       }
     });
+  }
+}
+async function drainReplyQueue(runtime, message) {
+  if (!message.guildId) {
+    return;
+  }
+  const next = await runtime.replyQueue.nextQueued(message.guildId, message.channelId);
+  if (!next) {
+    return;
+  }
+  try {
+    const queuedMessage = await message.channel.messages.fetch(next.sourceMsgId);
+    await routeMessage(runtime, queuedMessage);
+  } catch (error) {
+    await runtime.replyQueue.complete(next.id);
+    runtime.logger.warn({ error, sourceMsgId: next.sourceMsgId }, "queued reply source message could not be fetched");
   }
 }
 
@@ -502,6 +659,7 @@ function createNoopQueues(logger, prefix) {
     summary: createNoopQueue("summary"),
     profile: createNoopQueue("profile"),
     embedding: createNoopQueue("embedding"),
+    topic: createNoopQueue("topic"),
     cleanup: createNoopQueue("cleanup"),
     searchCache: createNoopQueue("searchCache"),
     prefix
@@ -537,6 +695,10 @@ async function bootstrapBot() {
   const retrievalService = new import_memory.RetrievalService(prisma);
   const profileService = new import_memory.ProfileService(prisma, env);
   const runtimeConfig = new import_core.RuntimeConfigService(prisma, env);
+  const affinityService = new import_core.AffinityService(prisma);
+  const moodService = new import_core.MoodService(prisma);
+  const mediaReactionService = new import_core.MediaReactionService(prisma);
+  const replyQueueService = new import_core.ReplyQueueService(prisma, env.REPLY_QUEUE_BUSY_TTL_SEC);
   const contextService = new import_memory.ContextService(prisma, summaryService, profileService, relationshipService, retrievalService);
   const llmClient = new import_llm.OllamaClient(env, logger);
   if (env.OLLAMA_BASE_URL) {
@@ -564,7 +726,7 @@ async function bootstrapBot() {
   const searchClient = new import_search.BraveSearchClient(env, logger, searchCache);
   const toolOrchestrator = new import_llm.ToolOrchestrator(llmClient, logger);
   const ingestService = new import_analytics2.MessageIngestService(prisma, logger);
-  const slashAdmin = new import_core.SlashAdminService(prisma, analytics, relationshipService, retrievalService, summaryService);
+  const slashAdmin = new import_core.SlashAdminService(prisma, analytics, relationshipService, retrievalService, summaryService, runtimeConfig, moodService, replyQueueService);
   const orchestrator = (0, import_core.createChatOrchestrator)({
     env,
     logger,
@@ -577,7 +739,10 @@ async function bootstrapBot() {
     toolOrchestrator,
     searchClient,
     embeddingAdapter,
-    runtimeConfig
+    runtimeConfig,
+    affinity: affinityService,
+    mood: moodService,
+    media: mediaReactionService
   });
   const runtime = {
     env,
@@ -590,7 +755,8 @@ async function bootstrapBot() {
     analytics,
     slashAdmin,
     runtimeConfig,
-    orchestrator
+    orchestrator,
+    replyQueue: replyQueueService
   };
   registerEvents(runtime);
   await client.login(env.DISCORD_TOKEN);
