@@ -9,21 +9,27 @@ import {
   ModalBuilder,
   ModalSubmitInteraction,
   PermissionFlagsBits,
+  StringSelectMenuBuilder,
+  StringSelectMenuInteraction,
   TextInputBuilder,
   TextInputStyle
 } from "discord.js";
 
-import { CONTEXT_ACTIONS, asErrorMessage, parseCsv, persistOllamaBaseUrl, type PersonaMode } from "@hori/shared";
+import { CONTEXT_ACTIONS, asErrorMessage, parseCsv, persistOllamaBaseUrl, type MemoryFormationJobPayload, type MessageEnvelope, type PersonaMode } from "@hori/shared";
 import { RelationshipService } from "@hori/memory";
 
 import type { BotRuntime } from "../bootstrap";
 import { getOwnerLockdownState, isBotOwner, setOwnerLockdownState, shouldIgnoreForOwnerLockdown } from "./owner-lockdown";
 
-const PUBLIC_COMMANDS = new Set(["bot-help", "bot-album"]);
+const PUBLIC_COMMANDS = new Set(["hori", "bot-help", "bot-album"]);
 const OWNER_COMMANDS = new Set(["bot-ai-url", "bot-import", "bot-lockdown", "bot-power"]);
 const MEMORY_ALBUM_MODAL_PREFIX = "memory-album";
+const HORI_PANEL_PREFIX = "hori-panel";
+const HORI_ACTION_PREFIX = "hori-action";
 const POWER_PANEL_PREFIX = "power-panel";
 const POWER_PROFILES = ["economy", "balanced", "expanded", "max"] as const;
+const HORI_PANEL_TABS = ["main", "owner", "style", "liveliness", "memory", "people", "channels", "search", "experiments", "diagnostics"] as const;
+type HoriPanelTab = (typeof HORI_PANEL_TABS)[number];
 
 function ensureModerator(interaction: ChatInputCommandInteraction | ContextMenuCommandInteraction | ModalSubmitInteraction) {
   return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
@@ -31,7 +37,7 @@ function ensureModerator(interaction: ChatInputCommandInteraction | ContextMenuC
 
 export async function routeInteraction(
   runtime: BotRuntime,
-  interaction: ChatInputCommandInteraction | ContextMenuCommandInteraction | ModalSubmitInteraction | ButtonInteraction
+  interaction: ChatInputCommandInteraction | ContextMenuCommandInteraction | ModalSubmitInteraction | ButtonInteraction | StringSelectMenuInteraction
 ) {
   const isOwner = isBotOwner(runtime, interaction.user.id);
 
@@ -41,6 +47,11 @@ export async function routeInteraction(
 
   if (interaction.isButton()) {
     await routeButtonInteraction(runtime, interaction, isOwner);
+    return;
+  }
+
+  if (interaction.isStringSelectMenu()) {
+    await routeStringSelectInteraction(runtime, interaction, isOwner);
     return;
   }
 
@@ -68,6 +79,9 @@ export async function routeInteraction(
     }
 
     switch (interaction.commandName) {
+      case "hori":
+        await handleHoriCommand(runtime, interaction, isOwner, isModerator);
+        return;
       case "bot-help":
         await interaction.reply({ content: await runtime.slashAdmin.handleHelp(), flags: MessageFlags.Ephemeral });
         return;
@@ -184,16 +198,19 @@ export async function routeInteraction(
             interaction.options.getUser("user", true).id,
             interaction.user.id,
             {
-              toneBias: interaction.options.getString("tone-bias") ?? "neutral",
-              roastLevel: interaction.options.getInteger("roast-level") ?? 0,
-              praiseBias: interaction.options.getInteger("praise-bias") ?? 0,
-              interruptPriority: interaction.options.getInteger("interrupt-priority") ?? 0,
-              doNotMock: interaction.options.getBoolean("do-not-mock") ?? false,
-              doNotInitiate: interaction.options.getBoolean("do-not-initiate") ?? false,
-              protectedTopics: (interaction.options.getString("protected-topics") ?? "")
-                .split(",")
-                .map((part) => part.trim())
-                .filter(Boolean)
+              toneBias: interaction.options.getString("tone-bias") ?? undefined,
+              roastLevel: interaction.options.getInteger("roast-level") ?? undefined,
+              praiseBias: interaction.options.getInteger("praise-bias") ?? undefined,
+              interruptPriority: interaction.options.getInteger("interrupt-priority") ?? undefined,
+              doNotMock: interaction.options.getBoolean("do-not-mock") ?? undefined,
+              doNotInitiate: interaction.options.getBoolean("do-not-initiate") ?? undefined,
+              protectedTopics: interaction.options.getString("protected-topics")
+                ? parseCsv(interaction.options.getString("protected-topics") ?? undefined)
+                : undefined,
+              closeness: interaction.options.getNumber("closeness") ?? undefined,
+              trustLevel: interaction.options.getNumber("trust") ?? undefined,
+              familiarity: interaction.options.getNumber("familiarity") ?? undefined,
+              proactivityPreference: interaction.options.getNumber("proactivity") ?? undefined
             }
           ),
           flags: MessageFlags.Ephemeral
@@ -485,6 +502,171 @@ export async function routeInteraction(
   await interaction.reply({ content: result, flags: MessageFlags.Ephemeral });
 }
 
+async function handleHoriCommand(
+  runtime: BotRuntime,
+  interaction: ChatInputCommandInteraction,
+  isOwner: boolean,
+  isModerator: boolean
+) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const subcommand = interaction.options.getSubcommand();
+
+  if (subcommand === "panel") {
+    const tab = parseHoriPanelTab(interaction.options.getString("tab")) ?? "main";
+    await interaction.reply({
+      ...buildHoriPanelResponse(tab, isOwner, isModerator),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (subcommand === "search") {
+    await handleHoriSearchCommand(runtime, interaction, isModerator);
+    return;
+  }
+
+  if (subcommand === "memory-build") {
+    const scope = interaction.options.getString("scope", true) as MemoryFormationJobPayload["scope"];
+    const depth = (interaction.options.getString("depth") ?? "recent") as MemoryFormationJobPayload["depth"];
+
+    if (!isOwner && (!isModerator || scope === "server")) {
+      await interaction.reply({
+        content: scope === "server" ? "Сборка памяти по всему серверу только для владельца." : "Memory-build только для модеров.",
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    await interaction.reply({
+      content: await startMemoryBuildRun(runtime, interaction.guildId, scope === "channel" ? interaction.channelId : null, scope, depth, interaction.user.id),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (subcommand === "profile") {
+    const target = interaction.options.getUser("user")?.id ?? interaction.user.id;
+    if (target !== interaction.user.id && !isOwner && !isModerator) {
+      await interaction.reply({ content: "Чужой профиль видит только модер/владелец.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.reply({
+      content: await runtime.slashAdmin.personalMemory(interaction.guildId, target, isOwner || isModerator),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (subcommand === "relationship") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Relationship-цифры только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const targetUserId = interaction.options.getUser("user", true).id;
+    const hasUpdate =
+      interaction.options.getString("tone-bias") !== null ||
+      interaction.options.getInteger("roast-level") !== null ||
+      interaction.options.getInteger("praise-bias") !== null ||
+      interaction.options.getInteger("interrupt-priority") !== null ||
+      interaction.options.getBoolean("do-not-mock") !== null ||
+      interaction.options.getBoolean("do-not-initiate") !== null ||
+      interaction.options.getString("protected-topics") !== null ||
+      interaction.options.getNumber("closeness") !== null ||
+      interaction.options.getNumber("trust") !== null ||
+      interaction.options.getNumber("familiarity") !== null ||
+      interaction.options.getNumber("proactivity") !== null;
+
+    const content = hasUpdate
+      ? [
+          await runtime.slashAdmin.updateRelationship(interaction.guildId, targetUserId, interaction.user.id, {
+            toneBias: interaction.options.getString("tone-bias") ?? undefined,
+            roastLevel: interaction.options.getInteger("roast-level") ?? undefined,
+            praiseBias: interaction.options.getInteger("praise-bias") ?? undefined,
+            interruptPriority: interaction.options.getInteger("interrupt-priority") ?? undefined,
+            doNotMock: interaction.options.getBoolean("do-not-mock") ?? undefined,
+            doNotInitiate: interaction.options.getBoolean("do-not-initiate") ?? undefined,
+            protectedTopics: interaction.options.getString("protected-topics")
+              ? parseCsv(interaction.options.getString("protected-topics") ?? undefined)
+              : undefined,
+            closeness: interaction.options.getNumber("closeness") ?? undefined,
+            trustLevel: interaction.options.getNumber("trust") ?? undefined,
+            familiarity: interaction.options.getNumber("familiarity") ?? undefined,
+            proactivityPreference: interaction.options.getNumber("proactivity") ?? undefined
+          }),
+          "",
+          await runtime.slashAdmin.relationshipDetails(interaction.guildId, targetUserId)
+        ].join("\n")
+      : await runtime.slashAdmin.relationshipDetails(interaction.guildId, targetUserId);
+
+    await interaction.reply({
+      content,
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  await interaction.reply({ content: "Не знаю такую ветку `/hori`.", flags: MessageFlags.Ephemeral });
+}
+
+async function handleHoriSearchCommand(
+  runtime: BotRuntime,
+  interaction: ChatInputCommandInteraction,
+  isModerator: boolean
+) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const query = interaction.options.getString("query", true).trim();
+  const routingConfig = await runtime.runtimeConfig.getRoutingConfig(interaction.guildId, interaction.channelId);
+  const envelope: MessageEnvelope = {
+    messageId: `slash:hori-search:${interaction.id}`,
+    guildId: interaction.guildId,
+    channelId: interaction.channelId,
+    userId: interaction.user.id,
+    username: interaction.user.username,
+    displayName: getInteractionDisplayName(interaction),
+    channelName: interaction.channel && "name" in interaction.channel ? interaction.channel.name : null,
+    content: `Хори найди в интернете: ${query}`,
+    createdAt: new Date(),
+    replyToMessageId: null,
+    mentionCount: 0,
+    mentionedBot: true,
+    mentionsBotByName: true,
+    mentionedUserIds: [],
+    triggerSource: "name",
+    isModerator,
+    explicitInvocation: true
+  };
+  const result = await runtime.orchestrator.handleMessage(envelope, routingConfig);
+  const reply = typeof result.reply === "string" ? result.reply : result.reply?.text;
+
+  await interaction.editReply({
+    content: reply?.trim() || "Поиск не дал нормального ответа. Открой `/hori panel` -> Поиск -> Диагностика, там будет видно где затык."
+  });
+}
+
+async function routeStringSelectInteraction(
+  runtime: BotRuntime,
+  interaction: StringSelectMenuInteraction,
+  isOwner: boolean
+) {
+  if (interaction.customId !== `${HORI_PANEL_PREFIX}:tab`) {
+    return;
+  }
+
+  const tab = parseHoriPanelTab(interaction.values[0]) ?? "main";
+  await interaction.update(buildHoriPanelResponse(tab, isOwner, hasManageGuild(interaction)));
+}
+
 async function handleOwnerLockdownCommand(
   runtime: BotRuntime,
   interaction: ChatInputCommandInteraction,
@@ -649,6 +831,11 @@ async function routeModalSubmit(runtime: BotRuntime, interaction: ModalSubmitInt
 }
 
 async function routeButtonInteraction(runtime: BotRuntime, interaction: ButtonInteraction, isOwner: boolean) {
+  if (interaction.customId.startsWith(`${HORI_ACTION_PREFIX}:`)) {
+    await handleHoriPanelAction(runtime, interaction, isOwner, hasManageGuild(interaction));
+    return;
+  }
+
   if (!interaction.customId.startsWith(`${POWER_PANEL_PREFIX}:`)) {
     return;
   }
@@ -672,6 +859,484 @@ async function routeButtonInteraction(runtime: BotRuntime, interaction: ButtonIn
     content,
     components: buildPowerPanelRows(status.activeProfile)
   });
+}
+
+async function handleHoriPanelAction(
+  runtime: BotRuntime,
+  interaction: ButtonInteraction,
+  isOwner: boolean,
+  isModerator: boolean
+) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const action = interaction.customId.slice(`${HORI_ACTION_PREFIX}:`.length);
+
+  if (action === "power_panel") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Эта панель только для владельца бота.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const status = await runtime.runtimeConfig.getPowerProfileStatus();
+    await interaction.update({
+      content: await runtime.slashAdmin.powerPanel(),
+      components: buildPowerPanelRows(status.activeProfile)
+    });
+    return;
+  }
+
+  if (action.startsWith("lockdown_")) {
+    if (!isOwner) {
+      await interaction.reply({ content: "Локдаун только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const mode = action.replace("lockdown_", "");
+    if (mode === "status") {
+      const state = await getOwnerLockdownState(runtime, true);
+      await interaction.update({
+        content: `Owner lockdown: ${state.enabled ? "on" : "off"}${state.updatedBy ? `\nПоследнее изменение: ${state.updatedBy}` : ""}`,
+        components: buildHoriPanelRows("owner", isOwner, isModerator)
+      });
+      return;
+    }
+
+    const enabled = mode === "on";
+    await setOwnerLockdownState(runtime, enabled, interaction.user.id);
+    const cleared = enabled ? await runtime.replyQueue.clearAll() : { count: 0 };
+    await interaction.update({
+      content: enabled
+        ? `Локдаун включён. Все кроме владельца молча игнорируются. Очередь сброшена: ${cleared.count}.`
+        : "Локдаун выключен.",
+      components: buildHoriPanelRows("owner", isOwner, isModerator)
+    });
+    return;
+  }
+
+  if (action === "memory_build_channel" || action === "memory_build_server") {
+    const scope: MemoryFormationJobPayload["scope"] = action.endsWith("server") ? "server" : "channel";
+    if (!isOwner && (!isModerator || scope === "server")) {
+      await interaction.reply({
+        content: scope === "server" ? "Сборка памяти по всему серверу только для владельца." : "Memory-build только для модеров.",
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    await interaction.update({
+      content: await startMemoryBuildRun(runtime, interaction.guildId, scope === "channel" ? interaction.channelId : null, scope, "recent", interaction.user.id),
+      components: buildHoriPanelRows("memory", isOwner, isModerator)
+    });
+    return;
+  }
+
+  const content = await resolveHoriActionContent(runtime, interaction, action, isOwner, isModerator);
+  const tab = inferTabForHoriAction(action);
+  await interaction.update({
+    content,
+    components: buildHoriPanelRows(tab, isOwner, isModerator)
+  });
+}
+
+async function resolveHoriActionContent(
+  runtime: BotRuntime,
+  interaction: ButtonInteraction,
+  action: string,
+  isOwner: boolean,
+  isModerator: boolean
+) {
+  const guildId = interaction.guildId!;
+
+  switch (action) {
+    case "status":
+      return buildHoriStatus(runtime, guildId, interaction.channelId);
+    case "help":
+      return `${await runtime.slashAdmin.handleHelp()}\n\nГлавный вход теперь /hori panel. Старые /bot-* оставлены как алиасы.`;
+    case "profile_self":
+    case "memory_self":
+      return runtime.slashAdmin.personalMemory(guildId, interaction.user.id, isOwner || isModerator);
+    case "relationship_self":
+      return runtime.slashAdmin.relationshipDetails(guildId, interaction.user.id);
+    case "relationship_hint":
+      return "Для точной настройки: `/bot-relationship user:@человек ...` или `/hori relationship user:@человек`. Owner может менять toneBias, roast/praise/interrupt и цифры closeness/trust/familiarity/proactivity.";
+    case "style_default":
+      return runtime.slashAdmin.updateStyle(guildId, {
+        botName: "Хори",
+        roughnessLevel: 2,
+        sarcasmLevel: 3,
+        roastLevel: 2,
+        replyLength: "short",
+        preferredStyle: "женская персона; коротко; тепло, но не сахарно; умеренно язвительно; нормальный живой сленг без кринжа; не ставь финальные точки в коротких репликах",
+        forbiddenWords: null,
+        forbiddenTopics: null
+      });
+    case "natural_split_on":
+      if (!isModerator && !isOwner) {
+        return "Это только для модеров.";
+      }
+      return runtime.slashAdmin.updateFeature(guildId, "natural_message_splitting_enabled", true);
+    case "read_chat_on":
+      if (!isModerator && !isOwner) {
+        return "Это только для модеров.";
+      }
+      return runtime.slashAdmin.channelConfig(guildId, interaction.channelId, {
+        allowBotReplies: true,
+        allowInterjections: true,
+        isMuted: false,
+        topicInterestTags: null
+      });
+    case "media_sync":
+      if (!isOwner) {
+        return "Media sync-pack только для владельца.";
+      }
+      return runtime.slashAdmin.mediaSyncPack();
+    case "memory_status":
+      return runtime.slashAdmin.channelMemoryStatus(guildId, interaction.channelId);
+    case "search_diagnose":
+      return diagnoseSearch(runtime);
+    case "feature_status":
+      return buildFeatureStatus(runtime, guildId);
+    case "channel_policy":
+      return buildChannelPolicyStatus(runtime, guildId, interaction.channelId);
+    case "debug_latest":
+      return buildLatestDebugTrace(runtime, guildId);
+    default:
+      return "Неизвестная кнопка панели.";
+  }
+}
+
+function buildHoriPanelResponse(tab: HoriPanelTab, isOwner: boolean, isModerator: boolean) {
+  return {
+    content: buildHoriPanelContent(tab, isOwner, isModerator),
+    components: buildHoriPanelRows(tab, isOwner, isModerator)
+  };
+}
+
+function buildHoriPanelContent(tab: HoriPanelTab, isOwner: boolean, isModerator: boolean) {
+  const ownerLine = isOwner ? "owner-доступ активен" : isModerator ? "moderator-доступ активен" : "обычный доступ: видишь только своё";
+  const actions = [
+    "status/help",
+    "style preset",
+    "identity/female persona",
+    "shortness",
+    "slang/warmth",
+    "sarcasm",
+    "punctuation/no-periods",
+    "natural splitting",
+    "read-chat in channel",
+    "interjection limits",
+    "gif/media frequency",
+    "mood",
+    "feature flags",
+    "power profile",
+    "Ollama URL",
+    "search diagnose",
+    "search tuning",
+    "memory-build channel",
+    "memory-build server",
+    "memory inspect self",
+    "memory inspect user",
+    "relationship inspect",
+    "relationship edit",
+    "profile inspect",
+    "profile refresh",
+    "channel policy",
+    "server memory",
+    "event memory",
+    "debug trace",
+    "lockdown"
+  ].join(", ");
+
+  const tabText: Record<HoriPanelTab, string> = {
+    main: `Hori Control Panel\n${ownerLine}\n\n30 действий: ${actions}`,
+    owner: isOwner
+      ? "Owner panel: power profile, lockdown, relationship цифры, media sync-pack, server memory-build"
+      : "Owner panel скрыта. Тут ничего страшного, просто не твоё меню",
+    style: "Стиль: женская персона, короткие ответы, тепло без сахара, умеренная язвительность, живой сленг и без финальных точек в коротких репликах",
+    liveliness: "Живость: чтение чата, редкие аккуратные вмешательства, natural message sprinting максимум в 2 коротких чанка",
+    memory: "Память: Active Memory + Hybrid Recall применяется к каждому ответу; memory-build собирает user/channel/server/event факты из БД",
+    people: "Люди: свой профиль видит каждый; owner/moderator могут смотреть подробнее, owner настраивает relationship цифры",
+    channels: "Каналы: можно включить replies/interjections, посмотреть policy и локальную channel memory",
+    search: "Поиск: диагностика Brave/Ollama/cooldown/denylist и усиленный fallback через прямой Brave search + fetch страниц",
+    experiments: "Эксперименты: natural splitting, media reactions, selective engagement, reflection и link understanding",
+    diagnostics: "Диагностика: последние trace, feature flags, search preflight и состояние памяти"
+  };
+
+  return tabText[tab];
+}
+
+function buildHoriPanelRows(tab: HoriPanelTab, isOwner: boolean, isModerator: boolean) {
+  const rows: Array<ActionRowBuilder<StringSelectMenuBuilder | ButtonBuilder>> = [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`${HORI_PANEL_PREFIX}:tab`)
+        .setPlaceholder("Раздел панели")
+        .addOptions(
+          ...HORI_PANEL_TABS.map((value) => ({
+            label: horiTabLabel(value),
+            value,
+            default: value === tab
+          }))
+        )
+    )
+  ];
+
+  const actions = getHoriTabActions(tab, isOwner, isModerator);
+  for (let index = 0; index < actions.length; index += 5) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...actions.slice(index, index + 5).map((action) =>
+          new ButtonBuilder()
+            .setCustomId(`${HORI_ACTION_PREFIX}:${action.id}`)
+            .setLabel(action.label)
+            .setStyle(action.style ?? ButtonStyle.Secondary)
+        )
+      )
+    );
+  }
+
+  return rows;
+}
+
+function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boolean) {
+  const common = [
+    { id: "status", label: "Статус", style: ButtonStyle.Primary },
+    { id: "help", label: "Help" },
+    { id: "profile_self", label: "Мой профиль" },
+    { id: "memory_self", label: "Моя память" }
+  ];
+
+  const byTab: Record<HoriPanelTab, Array<{ id: string; label: string; style?: ButtonStyle; ownerOnly?: boolean; modOnly?: boolean }>> = {
+    main: common,
+    owner: [
+      { id: "power_panel", label: "Power", ownerOnly: true, style: ButtonStyle.Primary },
+      { id: "lockdown_status", label: "Lockdown?", ownerOnly: true },
+      { id: "lockdown_on", label: "Lockdown on", ownerOnly: true, style: ButtonStyle.Danger },
+      { id: "lockdown_off", label: "Lockdown off", ownerOnly: true },
+      { id: "media_sync", label: "Media sync", ownerOnly: true }
+    ],
+    style: [
+      { id: "style_default", label: "Живой preset", modOnly: true, style: ButtonStyle.Primary },
+      { id: "natural_split_on", label: "Sprinting on", modOnly: true },
+      { id: "feature_status", label: "Фичи" },
+      { id: "status", label: "Статус" }
+    ],
+    liveliness: [
+      { id: "read_chat_on", label: "Читать чат", modOnly: true, style: ButtonStyle.Primary },
+      { id: "natural_split_on", label: "2 чанка", modOnly: true },
+      { id: "media_sync", label: "GIF pack", ownerOnly: true },
+      { id: "feature_status", label: "Фичи" }
+    ],
+    memory: [
+      { id: "memory_status", label: "Memory status", style: ButtonStyle.Primary },
+      { id: "memory_build_channel", label: "Build канал", modOnly: true },
+      { id: "memory_build_server", label: "Build сервер", ownerOnly: true },
+      { id: "memory_self", label: "Моя память" }
+    ],
+    people: [
+      { id: "profile_self", label: "Мой профиль", style: ButtonStyle.Primary },
+      { id: "relationship_self", label: "Отношение ко мне" },
+      { id: "relationship_hint", label: "Owner edit", ownerOnly: true },
+      { id: "memory_self", label: "Моя память" }
+    ],
+    channels: [
+      { id: "channel_policy", label: "Policy", style: ButtonStyle.Primary },
+      { id: "read_chat_on", label: "Interject on", modOnly: true },
+      { id: "memory_status", label: "Channel memory" }
+    ],
+    search: [
+      { id: "search_diagnose", label: "Диагностика", style: ButtonStyle.Primary },
+      { id: "feature_status", label: "Фичи" }
+    ],
+    experiments: [
+      { id: "natural_split_on", label: "Sprinting on", modOnly: true, style: ButtonStyle.Primary },
+      { id: "feature_status", label: "Фичи" },
+      { id: "media_sync", label: "Media sync", ownerOnly: true }
+    ],
+    diagnostics: [
+      { id: "debug_latest", label: "Latest trace", style: ButtonStyle.Primary },
+      { id: "search_diagnose", label: "Search diag" },
+      { id: "feature_status", label: "Фичи" },
+      { id: "status", label: "Статус" }
+    ]
+  };
+
+  return byTab[tab].filter((action) => {
+    if (action.ownerOnly) {
+      return isOwner;
+    }
+    if (action.modOnly) {
+      return isOwner || isModerator;
+    }
+    return true;
+  });
+}
+
+function parseHoriPanelTab(value: string | null | undefined): HoriPanelTab | null {
+  return HORI_PANEL_TABS.includes(value as HoriPanelTab) ? (value as HoriPanelTab) : null;
+}
+
+function horiTabLabel(tab: HoriPanelTab) {
+  const labels: Record<HoriPanelTab, string> = {
+    main: "Главная",
+    owner: "Владелец",
+    style: "Стиль",
+    liveliness: "Живость",
+    memory: "Память",
+    people: "Люди",
+    channels: "Каналы",
+    search: "Поиск",
+    experiments: "Эксперименты",
+    diagnostics: "Диагностика"
+  };
+  return labels[tab];
+}
+
+function inferTabForHoriAction(action: string): HoriPanelTab {
+  if (action.startsWith("memory")) return "memory";
+  if (action.startsWith("search")) return "search";
+  if (action.startsWith("lockdown") || action === "power_panel") return "owner";
+  if (action.startsWith("relationship") || action.startsWith("profile")) return "people";
+  if (action.startsWith("channel") || action === "read_chat_on") return "channels";
+  if (action.startsWith("debug") || action === "feature_status") return "diagnostics";
+  if (action.startsWith("style") || action.startsWith("natural")) return "style";
+  return "main";
+}
+
+async function buildHoriStatus(runtime: BotRuntime, guildId: string, channelId: string) {
+  const [power, lockdown, memory] = await Promise.all([
+    runtime.slashAdmin.powerStatus(),
+    getOwnerLockdownState(runtime, true),
+    runtime.slashAdmin.channelMemoryStatus(guildId, channelId)
+  ]);
+
+  return [
+    "Hori status",
+    power,
+    `Owner lockdown: ${lockdown.enabled ? "on" : "off"}`,
+    memory
+  ].join("\n\n");
+}
+
+async function buildFeatureStatus(runtime: BotRuntime, guildId: string) {
+  const flags = await runtime.runtimeConfig.getFeatureFlags(guildId);
+  return Object.entries(flags)
+    .map(([key, value]) => `${value ? "on " : "off"} ${key}`)
+    .join("\n")
+    .slice(0, 1900);
+}
+
+async function buildChannelPolicyStatus(runtime: BotRuntime, guildId: string, channelId: string) {
+  const policy = await runtime.runtimeConfig.getChannelPolicy(guildId, channelId);
+  return [
+    `Channel policy for ${channelId}`,
+    `allowBotReplies=${policy.allowBotReplies}`,
+    `allowInterjections=${policy.allowInterjections}`,
+    `isMuted=${policy.isMuted}`,
+    `topicInterestTags=${policy.topicInterestTags.join(", ") || "none"}`
+  ].join("\n");
+}
+
+async function buildLatestDebugTrace(runtime: BotRuntime, guildId: string) {
+  const trace = await runtime.prisma.botEventLog.findFirst({
+    where: { guildId },
+    orderBy: { createdAt: "desc" },
+    select: {
+      messageId: true,
+      eventType: true,
+      intent: true,
+      routeReason: true,
+      usedSearch: true,
+      toolCalls: true,
+      memoryLayers: true,
+      debugTrace: true,
+      createdAt: true
+    }
+  });
+
+  if (!trace) {
+    return "Trace пока нет.";
+  }
+
+  return JSON.stringify(trace, null, 2).slice(0, 1900);
+}
+
+async function diagnoseSearch(runtime: BotRuntime) {
+  const lines = [
+    `BRAVE_SEARCH_API_KEY: ${runtime.env.BRAVE_SEARCH_API_KEY ? "set" : "missing"}`,
+    `SEARCH_USER_COOLDOWN_SEC: ${runtime.env.SEARCH_USER_COOLDOWN_SEC}`,
+    `SEARCH_MAX_REQUESTS_PER_RESPONSE: ${runtime.env.SEARCH_MAX_REQUESTS_PER_RESPONSE}`,
+    `SEARCH_MAX_PAGES_PER_RESPONSE: ${runtime.env.SEARCH_MAX_PAGES_PER_RESPONSE}`,
+    `SEARCH_DOMAIN_DENYLIST: ${runtime.env.SEARCH_DOMAIN_DENYLIST.join(", ") || "none"}`,
+    `OLLAMA_BASE_URL: ${runtime.env.OLLAMA_BASE_URL ?? "missing"}`,
+    `OLLAMA_SMART_MODEL: ${runtime.env.OLLAMA_SMART_MODEL}`,
+    `OLLAMA_TIMEOUT_MS: ${runtime.env.OLLAMA_TIMEOUT_MS}`
+  ];
+
+  if (runtime.env.OLLAMA_BASE_URL) {
+    try {
+      const response = await fetch(new URL("/api/tags", runtime.env.OLLAMA_BASE_URL), {
+        signal: AbortSignal.timeout(5000)
+      });
+      if (response.ok) {
+        const payload = (await response.json()) as { models?: Array<{ name?: string }> };
+        lines.push(`Ollama tags: ok (${payload.models?.map((model) => model.name).filter(Boolean).join(", ") || "no models"})`);
+      } else {
+        lines.push(`Ollama tags: status ${response.status}`);
+      }
+    } catch (error) {
+      lines.push(`Ollama tags: ${asErrorMessage(error)}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+async function startMemoryBuildRun(
+  runtime: BotRuntime,
+  guildId: string,
+  channelId: string | null,
+  scope: MemoryFormationJobPayload["scope"],
+  depth: MemoryFormationJobPayload["depth"],
+  requestedBy: string
+) {
+  const run = await runtime.prisma.memoryBuildRun.create({
+    data: {
+      guildId,
+      channelId,
+      scope,
+      depth,
+      status: "queued",
+      requestedBy,
+      progressJson: {
+        phase: "queued",
+        processedChunks: 0,
+        totalChunks: 0
+      }
+    }
+  });
+  const payload: MemoryFormationJobPayload = { runId: run.id, guildId, channelId, scope, depth, requestedBy };
+  await runtime.queues.memoryFormation.add("memory.formation", payload, { jobId: `memory-formation:${run.id}` });
+
+  return [
+    "Memory-build поставлен в очередь",
+    `runId: ${run.id}`,
+    `scope=${scope}, depth=${depth}${channelId ? `, channel=${channelId}` : ""}`,
+    "Статус смотри в /hori panel -> Память -> Memory status"
+  ].join("\n");
+}
+
+function getInteractionDisplayName(interaction: ChatInputCommandInteraction) {
+  return interaction.member && "displayName" in interaction.member
+    ? interaction.member.displayName
+    : interaction.user.globalName;
+}
+
+function hasManageGuild(interaction: ButtonInteraction | StringSelectMenuInteraction) {
+  return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
 }
 
 async function fetchSourceMessageForAlbum(

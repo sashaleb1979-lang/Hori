@@ -30,6 +30,9 @@ model Guild {
   channelSummaries   ChannelSummary[]
   serverMemories     ServerMemory[]
   userMemoryNotes    UserMemoryNote[]
+  channelMemoryNotes ChannelMemoryNote[]
+  eventMemories      EventMemory[]
+  memoryBuildRuns    MemoryBuildRun[]
   botEventLogs       BotEventLog[]
   interjectionLogs   InterjectionLog[]
   moderatorPreferences ModeratorPreference[]
@@ -230,6 +233,59 @@ model UserMemoryNote {
   @@index([guildId, userId, active])
 }
 
+model ChannelMemoryNote {
+  id         String                @id @default(cuid())
+  guildId    String
+  channelId  String
+  key        String
+  value      String                @db.Text
+  type       String                @default("note")
+  tags       String[]              @default([])
+  confidence Float                 @default(0.6)
+  salience   Float                 @default(0.5)
+  source     String?
+  createdBy  String?
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+  expiresAt  DateTime?
+  active     Boolean               @default(true)
+  embedding  Unsupported("vector")?
+  guild      Guild                 @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, channelId, key])
+  @@index([guildId, channelId, active])
+  @@index([guildId, channelId, type])
+}
+
+model EventMemory {
+  id         String                @id @default(cuid())
+  guildId    String
+  channelId  String?
+  eventKey   String
+  title      String?
+  key        String
+  value      String                @db.Text
+  type       String                @default("event")
+  tags       String[]              @default([])
+  confidence Float                 @default(0.6)
+  salience   Float                 @default(0.5)
+  source     String?
+  createdBy  String?
+  startsAt   DateTime?
+  endsAt     DateTime?
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+  expiresAt  DateTime?
+  active     Boolean               @default(true)
+  embedding  Unsupported("vector")?
+  guild      Guild                 @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, eventKey, key])
+  @@index([guildId, active, updatedAt])
+  @@index([guildId, channelId, active])
+  @@index([guildId, eventKey])
+}
+
 model SearchCache {
   id           String   @id @default(cuid())
   cacheKey     String   @unique
@@ -361,6 +417,28 @@ model RuntimeSetting {
   updatedBy String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model MemoryBuildRun {
+  id             String   @id @default(cuid())
+  guildId        String
+  channelId      String?
+  scope          String
+  depth          String
+  status         String   @default("queued")
+  requestedBy    String
+  bestModel      String?
+  progressJson   Json?
+  resultJson     Json?
+  errorText      String?  @db.Text
+  createdAt      DateTime @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  updatedAt      DateTime @updatedAt
+  guild          Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, status, createdAt])
+  @@index([guildId, channelId, createdAt])
 }
 
 model PersonaConfig {

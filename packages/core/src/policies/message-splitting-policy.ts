@@ -38,7 +38,7 @@ function splitOnSentenceBoundary(text: string) {
     const first = text.slice(0, boundary).trim();
     const second = text.slice(boundary).trim();
 
-    if (first.length >= 24 && first.length <= 140 && second.length >= 24 && second.length <= 260) {
+    if (first.length >= 24 && first.length <= 140 && second.length >= 24 && second.length <= 180) {
       return [first, second];
     }
   }
@@ -70,7 +70,7 @@ export function planNaturalMessageSplit(input: NaturalSplitInput): NaturalSplitP
   }
 
   const adjustedChance = input.messageKind === "meme_bait" || input.messageKind === "smalltalk_hangout"
-    ? Math.min(input.chance + 0.035, 0.12)
+    ? Math.min(input.chance + 0.04, 0.2)
     : input.chance;
 
   if (input.random > adjustedChance) {

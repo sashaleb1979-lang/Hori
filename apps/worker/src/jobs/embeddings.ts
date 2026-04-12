@@ -56,7 +56,11 @@ export function createEmbeddingJob(runtime: WorkerRuntime) {
     const source =
       job.data.entityType === "server_memory"
         ? await runtime.prisma.serverMemory.findUnique({ where: { id: job.data.entityId } })
-        : await runtime.prisma.userMemoryNote.findUnique({ where: { id: job.data.entityId } });
+        : job.data.entityType === "user_memory"
+          ? await runtime.prisma.userMemoryNote.findUnique({ where: { id: job.data.entityId } })
+          : job.data.entityType === "channel_memory"
+            ? await runtime.prisma.channelMemoryNote.findUnique({ where: { id: job.data.entityId } })
+            : await runtime.prisma.eventMemory.findUnique({ where: { id: job.data.entityId } });
 
     if (!source) {
       return { skipped: true, reason: "entity not found" };

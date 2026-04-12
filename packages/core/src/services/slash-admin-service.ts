@@ -133,20 +133,41 @@ export class SlashAdminService {
     userId: string,
     updatedBy: string,
     input: {
-      toneBias: string;
-      roastLevel: number;
-      praiseBias: number;
-      interruptPriority: number;
-      doNotMock: boolean;
-      doNotInitiate: boolean;
-      protectedTopics: string[];
+      toneBias?: string;
+      roastLevel?: number;
+      praiseBias?: number;
+      interruptPriority?: number;
+      doNotMock?: boolean;
+      doNotInitiate?: boolean;
+      protectedTopics?: string[];
+      closeness?: number;
+      trustLevel?: number;
+      familiarity?: number;
+      proactivityPreference?: number;
     }
   ) {
+    const existing = await this.prisma.relationshipProfile.findUnique({
+      where: { guildId_userId: { guildId, userId } }
+    });
+    const current = existing ? await this.relationships.getVector(guildId, userId) : null;
+
     await this.relationships.upsertRelationship({
       guildId,
       userId,
       updatedBy,
-      ...input
+      toneBias: input.toneBias ?? current?.toneBias ?? "neutral",
+      roastLevel: input.roastLevel ?? current?.roastLevel ?? 0,
+      praiseBias: input.praiseBias ?? current?.praiseBias ?? 0,
+      interruptPriority: input.interruptPriority ?? current?.interruptPriority ?? 0,
+      doNotMock: input.doNotMock ?? current?.doNotMock ?? false,
+      doNotInitiate: input.doNotInitiate ?? current?.doNotInitiate ?? false,
+      protectedTopics: input.protectedTopics ?? current?.protectedTopics ?? [],
+      closeness: input.closeness ?? current?.closeness ?? 0.5,
+      trustLevel: input.trustLevel ?? current?.trustLevel ?? 0.5,
+      familiarity: input.familiarity ?? current?.familiarity ?? 0.5,
+      interactionCount: current?.interactionCount ?? 0,
+      proactivityPreference: input.proactivityPreference ?? current?.proactivityPreference ?? 0.5,
+      topicBoundaries: current?.topicBoundaries ?? {}
     });
 
     return `Relationship для ${userId} обновлён.`;
@@ -495,6 +516,75 @@ export class SlashAdminService {
     return JSON.stringify(trace.debugTrace, null, 2);
   }
 
+  async relationshipDetails(guildId: string, userId: string) {
+    const vector = await this.relationships.getVector(guildId, userId);
+
+    return [
+      `Relationship для ${userId}`,
+      `toneBias=${vector.toneBias}, roast=${vector.roastLevel}, praise=${vector.praiseBias}, interrupt=${vector.interruptPriority}`,
+      `doNotMock=${vector.doNotMock}, doNotInitiate=${vector.doNotInitiate}`,
+      `closeness=${formatSignal(vector.closeness)}, trust=${formatSignal(vector.trustLevel)}, familiarity=${formatSignal(vector.familiarity)}, proactivity=${formatSignal(vector.proactivityPreference)}`,
+      `interactionCount=${vector.interactionCount}`,
+      vector.protectedTopics.length ? `protectedTopics: ${vector.protectedTopics.join(", ")}` : "protectedTopics: none"
+    ].join("\n");
+  }
+
+  async personalMemory(guildId: string, userId: string, ownerView = false) {
+    const [profile, vector, notes] = await Promise.all([
+      this.prisma.userProfile.findUnique({
+        where: { guildId_userId: { guildId, userId } }
+      }),
+      this.relationships.getVector(guildId, userId),
+      this.prisma.userMemoryNote.findMany({
+        where: {
+          guildId,
+          userId,
+          active: true,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }]
+        },
+        orderBy: { createdAt: "desc" },
+        take: ownerView ? 12 : 6
+      })
+    ]);
+
+    const lines = [
+      profile
+        ? `Профиль: ${profile.summaryShort}\nТеги: ${profile.styleTags.join(", ") || "нет"} | ${profile.topicTags.join(", ") || "нет"}\nConfidence: ${profile.confidenceScore}`
+        : "Профиль пока не готов.",
+      `Отношение: closeness=${formatSignal(vector.closeness)}, trust=${formatSignal(vector.trustLevel)}, familiarity=${formatSignal(vector.familiarity)}, proactivity=${formatSignal(vector.proactivityPreference)}; tone=${vector.toneBias}`,
+      notes.length
+        ? `Память:\n${notes.map((note) => `- ${note.key}: ${note.value}`).join("\n")}`
+        : "Память по человеку пока пустая."
+    ];
+
+    return lines.join("\n\n");
+  }
+
+  async channelMemoryStatus(guildId: string, channelId: string) {
+    const [channelCount, eventCount, recentBuild] = await Promise.all([
+      this.prisma.channelMemoryNote.count({ where: { guildId, channelId, active: true } }),
+      this.prisma.eventMemory.count({
+        where: {
+          guildId,
+          active: true,
+          OR: [{ channelId }, { channelId: null }]
+        }
+      }),
+      this.prisma.memoryBuildRun.findFirst({
+        where: { guildId, OR: [{ channelId }, { channelId: null }] },
+        orderBy: { createdAt: "desc" }
+      })
+    ]);
+
+    return [
+      `Channel memory: ${channelCount}`,
+      `Event memory: ${eventCount}`,
+      recentBuild
+        ? `Последний memory-build: ${recentBuild.status} (${recentBuild.scope}/${recentBuild.depth}) ${recentBuild.finishedAt?.toISOString() ?? recentBuild.updatedAt.toISOString()}`
+        : "Memory-build ещё не запускался."
+    ].join("\n");
+  }
+
   async profile(guildId: string, userId: string) {
     const profile = await this.prisma.userProfile.findUnique({
       where: {
@@ -523,6 +613,10 @@ export class SlashAdminService {
     const overview = await this.analytics.getOverview(guildId, "week");
     return formatAnalyticsOverview(overview);
   }
+}
+
+function formatSignal(value: number) {
+  return value.toFixed(2);
 }
 
 function formatPowerProfileStatus(status: PowerProfileStatus) {

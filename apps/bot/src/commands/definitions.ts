@@ -8,6 +8,84 @@ import {
 import { CONTEXT_ACTIONS } from "@hori/shared";
 
 export const slashCommandDefinitions = [
+  new SlashCommandBuilder()
+    .setName("hori")
+    .setDescription("Главная панель Хори")
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("panel")
+        .setDescription("Открыть подробную панель настроек")
+        .addStringOption((option) =>
+          option
+            .setName("tab")
+            .setDescription("Вкладка")
+            .addChoices(
+              { name: "Главная", value: "main" },
+              { name: "Владелец", value: "owner" },
+              { name: "Стиль", value: "style" },
+              { name: "Живость", value: "liveliness" },
+              { name: "Память", value: "memory" },
+              { name: "Люди", value: "people" },
+              { name: "Каналы", value: "channels" },
+              { name: "Поиск", value: "search" },
+              { name: "Эксперименты", value: "experiments" },
+              { name: "Диагностика", value: "diagnostics" }
+            )
+        )
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("search")
+        .setDescription("Сделать web search через усиленный fallback")
+        .addStringOption((option) => option.setName("query").setDescription("Что искать").setRequired(true))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("memory-build")
+        .setDescription("Долго собрать active memory из уже сохранённых сообщений")
+        .addStringOption((option) =>
+          option
+            .setName("scope")
+            .setDescription("Область")
+            .setRequired(true)
+            .addChoices(
+              { name: "текущий канал", value: "channel" },
+              { name: "весь сервер", value: "server" }
+            )
+        )
+        .addStringOption((option) =>
+          option
+            .setName("depth")
+            .setDescription("Глубина")
+            .addChoices(
+              { name: "recent", value: "recent" },
+              { name: "deep", value: "deep" }
+            )
+        )
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("profile")
+        .setDescription("Показать краткий профиль/память")
+        .addUserOption((option) => option.setName("user").setDescription("Пользователь"))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("relationship")
+        .setDescription("Owner: посмотреть отношение к человеку")
+        .addUserOption((option) => option.setName("user").setDescription("Пользователь").setRequired(true))
+        .addStringOption((option) => option.setName("tone-bias").setDescription("neutral, friendly, sharp, playful"))
+        .addIntegerOption((option) => option.setName("roast-level").setDescription("0-5").setMinValue(0).setMaxValue(5))
+        .addIntegerOption((option) => option.setName("praise-bias").setDescription("0-5").setMinValue(0).setMaxValue(5))
+        .addIntegerOption((option) => option.setName("interrupt-priority").setDescription("0-5").setMinValue(0).setMaxValue(5))
+        .addBooleanOption((option) => option.setName("do-not-mock").setDescription("Не подкалывать"))
+        .addBooleanOption((option) => option.setName("do-not-initiate").setDescription("Не инициировать общение"))
+        .addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics"))
+        .addNumberOption((option) => option.setName("closeness").setDescription("Близость 0-1").setMinValue(0).setMaxValue(1))
+        .addNumberOption((option) => option.setName("trust").setDescription("Доверие 0-1").setMinValue(0).setMaxValue(1))
+        .addNumberOption((option) => option.setName("familiarity").setDescription("Знакомость 0-1").setMinValue(0).setMaxValue(1))
+        .addNumberOption((option) => option.setName("proactivity").setDescription("Желательность инициативы 0-1").setMinValue(0).setMaxValue(1))
+    ),
   new SlashCommandBuilder().setName("bot-help").setDescription("Короткая справка по админ-командам"),
   new SlashCommandBuilder()
     .setName("bot-style")
@@ -70,7 +148,11 @@ export const slashCommandDefinitions = [
     .addIntegerOption((option) => option.setName("interrupt-priority").setDescription("0-5").setMinValue(0).setMaxValue(5))
     .addBooleanOption((option) => option.setName("do-not-mock").setDescription("Не подкалывать"))
     .addBooleanOption((option) => option.setName("do-not-initiate").setDescription("Не инициировать общение"))
-    .addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics")),
+    .addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics"))
+    .addNumberOption((option) => option.setName("closeness").setDescription("Близость 0-1").setMinValue(0).setMaxValue(1))
+    .addNumberOption((option) => option.setName("trust").setDescription("Доверие 0-1").setMinValue(0).setMaxValue(1))
+    .addNumberOption((option) => option.setName("familiarity").setDescription("Знакомость 0-1").setMinValue(0).setMaxValue(1))
+    .addNumberOption((option) => option.setName("proactivity").setDescription("Желательность инициативы 0-1").setMinValue(0).setMaxValue(1)),
   new SlashCommandBuilder()
     .setName("bot-feature")
     .setDescription("Переключить feature flag")

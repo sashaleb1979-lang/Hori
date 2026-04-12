@@ -4,6 +4,7 @@ import { SummaryService } from "../summaries/summary-service";
 import { ProfileService } from "../profiles/profile-service";
 import { RelationshipService } from "../relationships/relationship-service";
 import { RetrievalService } from "../retrieval/retrieval-service";
+import { ActiveMemoryService } from "../active/active-memory-service";
 
 export class ContextService {
   constructor(
@@ -11,7 +12,8 @@ export class ContextService {
     private readonly summaries: SummaryService,
     private readonly profiles: ProfileService,
     private readonly relationships: RelationshipService,
-    private readonly retrieval: RetrievalService
+    private readonly retrieval: RetrievalService,
+    private readonly activeMemory?: ActiveMemoryService
   ) {}
 
   async buildContext(options: {
@@ -24,7 +26,7 @@ export class ContextService {
     intent?: BotIntent;
   }): Promise<ContextBundleV2> {
     const entities = detectEntities(options.message?.content ?? "");
-    const [recentMessages, summaries, userProfile, relationship, serverMemories, replyChain, activeTopic, entityMemories] = await Promise.all([
+    const [recentMessages, summaries, userProfile, relationship, serverMemories, replyChain, activeTopic, entityMemories, activeMemory] = await Promise.all([
       this.prisma.message.findMany({
         where: {
           guildId: options.guildId,
@@ -40,7 +42,15 @@ export class ContextService {
       this.retrieval.findRelevantServerMemory(options.guildId, options.queryEmbedding),
       this.getReplyChain(options.guildId, options.channelId, options.message?.replyToMessageId ?? null),
       this.getActiveTopic(options.guildId, options.channelId),
-      this.getEntityMemories(options.guildId, entities)
+      this.getEntityMemories(options.guildId, entities),
+      this.activeMemory?.buildActiveMemory({
+        guildId: options.guildId,
+        channelId: options.channelId,
+        userId: options.userId,
+        query: options.message?.content ?? "",
+        queryEmbedding: options.queryEmbedding,
+        limit: 10
+      }) ?? Promise.resolve(undefined)
     ]);
     const topicWindow = activeTopic ? await this.getTopicWindow(activeTopic.topicId) : [];
 
@@ -65,7 +75,8 @@ export class ContextService {
       activeTopic,
       topicWindow,
       entities,
-      entityMemories
+      entityMemories,
+      activeMemory
     };
   }
 

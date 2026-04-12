@@ -9,7 +9,7 @@ const candidateGetAllLimit = 50;
 const maxCandidatesPerDecision = 30;
 const maxFactsPerRun = 12;
 
-export type MemoryScope = "server" | "user";
+export type MemoryScope = "server" | "user" | "channel" | "event";
 export type FormationActionEvent = "ADD" | "UPDATE" | "DELETE" | "NOOP";
 
 export interface FormationMessage extends CompactionPromptMessage {}
@@ -28,6 +28,7 @@ export interface FormationAction {
   scope: MemoryScope;
   id?: string;
   key?: string;
+  eventKey?: string;
   text?: string;
   type?: string;
   reason?: string;
@@ -78,6 +79,18 @@ export interface MemoryFormationRetrieval {
     queryEmbedding?: number[],
     limit?: number,
   ): Promise<Array<{ id: string; key: string; value: string; createdAt?: Date }>>;
+  findRelevantChannelMemory(
+    guildId: string,
+    channelId: string,
+    queryEmbedding?: number[],
+    limit?: number,
+  ): Promise<Array<{ id: string; key: string; value: string; type: string; createdAt?: Date }>>;
+  findRelevantEventMemory(
+    guildId: string,
+    channelId: string,
+    queryEmbedding?: number[],
+    limit?: number,
+  ): Promise<Array<{ id: string; key: string; value: string; type: string; eventKey?: string; createdAt?: Date }>>;
   rememberServerFact(input: {
     guildId: string;
     key: string;
@@ -86,8 +99,27 @@ export interface MemoryFormationRetrieval {
     source?: string | null;
     createdBy?: string | null;
   }): Promise<{ id: string }>;
+  rememberChannelFact(input: {
+    guildId: string;
+    channelId: string;
+    key: string;
+    value: string;
+    type: string;
+    source?: string | null;
+    createdBy?: string | null;
+  }): Promise<{ id: string }>;
+  rememberEventFact(input: {
+    guildId: string;
+    channelId?: string | null;
+    eventKey: string;
+    key: string;
+    value: string;
+    type: string;
+    source?: string | null;
+    createdBy?: string | null;
+  }): Promise<{ id: string }>;
   setEmbedding(
-    entityType: "server_memory" | "user_memory",
+    entityType: "server_memory" | "user_memory" | "channel_memory" | "event_memory",
     entityId: string,
     vectorLiteral: string,
   ): Promise<unknown>;
@@ -184,7 +216,7 @@ export class MemoryFormationService {
         {
           role: "system",
           content:
-            "Ты модуль извлечения памяти. Выделяй только устойчивые факты: предпочтения, запреты, границы, договорённости, повторяющиеся темы, важные персональные сведения и server-wide контекст. Игнорируй мимолётные эмоции, шутки, одноразовые реплики и всё, что быстро устаревает. Верни JSON строго формата {\"facts\": string[]}",
+            "Ты модуль извлечения памяти. Выделяй только устойчивые факты: предпочтения, запреты, границы, договорённости, повторяющиеся темы, важные персональные сведения, channel context, server-wide context и важные события. Игнорируй мимолётные эмоции, шутки, одноразовые реплики и всё, что быстро устаревает. Верни JSON строго формата {\"facts\": string[]}",
         },
         {
           role: "user",
@@ -230,10 +262,14 @@ export class MemoryFormationService {
       const embedding = embeddings[index] ?? [];
       let serverResults: Array<{ id: string; key: string; value: string; type: string; createdAt?: Date; updatedAt?: Date }> = [];
       let userResults: Array<{ id: string; key: string; value: string; createdAt?: Date }> = [];
+      let channelResults: Array<{ id: string; key: string; value: string; type: string; createdAt?: Date }> = [];
+      let eventResults: Array<{ id: string; key: string; value: string; type: string; eventKey?: string; createdAt?: Date }> = [];
       try {
-        [serverResults, userResults] = await Promise.all([
+        [serverResults, userResults, channelResults, eventResults] = await Promise.all([
           this.retrieval.findRelevantServerMemory(request.guildId, embedding, limitPerFact),
           this.retrieval.findRelevantUserMemory(request.guildId, request.userId, embedding, limitPerFact),
+          this.retrieval.findRelevantChannelMemory(request.guildId, request.channelId, embedding, limitPerFact),
+          this.retrieval.findRelevantEventMemory(request.guildId, request.channelId, embedding, limitPerFact),
         ]);
       } catch {
         continue;
@@ -241,10 +277,12 @@ export class MemoryFormationService {
 
       pushServerCandidates(candidates, seen, serverResults);
       pushUserCandidates(candidates, seen, userResults);
+      pushChannelCandidates(candidates, seen, channelResults);
+      pushEventCandidates(candidates, seen, eventResults);
     }
 
     if (candidates.length < maxCandidatesPerDecision) {
-      const [recentServer, recentUser] = await Promise.all([
+      const [recentServer, recentUser, recentChannel, recentEvents] = await Promise.all([
         this.prisma.serverMemory.findMany({
           where: { guildId: request.guildId },
           orderBy: { updatedAt: "desc" },
@@ -257,10 +295,28 @@ export class MemoryFormationService {
           take: candidateGetAllLimit,
           select: { id: true, key: true, value: true, createdAt: true },
         }),
+        this.prisma.channelMemoryNote.findMany({
+          where: { guildId: request.guildId, channelId: request.channelId, active: true },
+          orderBy: { updatedAt: "desc" },
+          take: candidateGetAllLimit,
+          select: { id: true, key: true, value: true, type: true, createdAt: true },
+        }),
+        this.prisma.eventMemory.findMany({
+          where: {
+            guildId: request.guildId,
+            active: true,
+            OR: [{ channelId: request.channelId }, { channelId: null }],
+          },
+          orderBy: { updatedAt: "desc" },
+          take: candidateGetAllLimit,
+          select: { id: true, key: true, value: true, type: true, eventKey: true, createdAt: true },
+        }),
       ]);
 
       pushServerCandidates(candidates, seen, recentServer);
       pushUserCandidates(candidates, seen, recentUser);
+      pushChannelCandidates(candidates, seen, recentChannel);
+      pushEventCandidates(candidates, seen, recentEvents);
     }
 
     return candidates.slice(0, maxCandidatesPerDecision);
@@ -280,7 +336,7 @@ export class MemoryFormationService {
         {
           role: "system",
           content:
-            "Ты модуль принятия memory-решений. Сравни новые факты с существующими memories и верни JSON строго формата {\"actions\": FormationAction[]}. event только ADD, UPDATE, DELETE или NOOP. scope только user или server. user — личные предпочтения, запреты, биографические детали и устойчивые отношения текущего пользователя. server — общие факты сервера, общие шутки, коллективные договорённости, named entities и shared context. Для ADD/UPDATE давай короткий key, финальный text и при server scope необязательный type. Не дублируй существующие memories без причины.",
+            "Ты модуль принятия memory-решений. Сравни новые факты с существующими memories и верни JSON строго формата {\"actions\": FormationAction[]}. event только ADD, UPDATE, DELETE или NOOP. scope только user, channel, server или event. user — личные предпочтения, запреты, биографические детали и устойчивые отношения текущего пользователя. channel — нормы, темы, локальные шутки и контекст текущего канала. server — общие факты сервера, коллективные договорённости, named entities и shared context. event — важные события, планы, дедлайны, конфликты, изменения или повторяющиеся эпизоды; для event добавляй eventKey. Для ADD/UPDATE давай короткий key, финальный text и необязательный type. Не дублируй существующие memories без причины.",
         },
         {
           role: "user",
@@ -330,6 +386,29 @@ export class MemoryFormationService {
               createdBy: request.createdBy ?? undefined,
             });
             await this.updateEmbedding("server_memory", stored.id, text);
+          } else if (action.scope === "channel") {
+            const stored = await this.retrieval.rememberChannelFact({
+              guildId: request.guildId,
+              channelId: request.channelId,
+              key,
+              value: text,
+              type: action.type ?? "channel_fact",
+              source: request.source ?? undefined,
+              createdBy: request.createdBy ?? undefined,
+            });
+            await this.updateEmbedding("channel_memory", stored.id, text);
+          } else if (action.scope === "event") {
+            const stored = await this.retrieval.rememberEventFact({
+              guildId: request.guildId,
+              channelId: request.channelId,
+              eventKey: normalizeMemoryKey(action.eventKey ?? action.key ?? text),
+              key,
+              value: text,
+              type: action.type ?? "event",
+              source: request.source ?? undefined,
+              createdBy: request.createdBy ?? undefined,
+            });
+            await this.updateEmbedding("event_memory", stored.id, text);
           } else {
             const stored = await this.prisma.userMemoryNote.upsert({
               where: {
@@ -402,6 +481,70 @@ export class MemoryFormationService {
               storedId = stored.id;
             }
             await this.updateEmbedding("server_memory", storedId, text);
+          } else if (action.scope === "channel") {
+            let storedId: string;
+            if (action.id) {
+              const updatedRow = await this.prisma.channelMemoryNote.update({
+                where: { id: action.id },
+                data: {
+                  key,
+                  value: text,
+                  type: action.type ?? "channel_fact",
+                  source: request.source ?? undefined,
+                  createdBy: request.createdBy ?? undefined,
+                  active: true,
+                  expiresAt: null,
+                  updatedAt: new Date(),
+                },
+              });
+              storedId = updatedRow.id;
+            } else {
+              const stored = await this.retrieval.rememberChannelFact({
+                guildId: request.guildId,
+                channelId: request.channelId,
+                key,
+                value: text,
+                type: action.type ?? "channel_fact",
+                source: request.source ?? undefined,
+                createdBy: request.createdBy ?? undefined,
+              });
+              storedId = stored.id;
+            }
+            await this.updateEmbedding("channel_memory", storedId, text);
+          } else if (action.scope === "event") {
+            let storedId: string;
+            const eventKey = normalizeMemoryKey(action.eventKey ?? action.key ?? text);
+            if (action.id) {
+              const updatedRow = await this.prisma.eventMemory.update({
+                where: { id: action.id },
+                data: {
+                  channelId: request.channelId,
+                  eventKey,
+                  key,
+                  value: text,
+                  type: action.type ?? "event",
+                  source: request.source ?? undefined,
+                  createdBy: request.createdBy ?? undefined,
+                  active: true,
+                  expiresAt: null,
+                  updatedAt: new Date(),
+                },
+              });
+              storedId = updatedRow.id;
+            } else {
+              const stored = await this.retrieval.rememberEventFact({
+                guildId: request.guildId,
+                channelId: request.channelId,
+                eventKey,
+                key,
+                value: text,
+                type: action.type ?? "event",
+                source: request.source ?? undefined,
+                createdBy: request.createdBy ?? undefined,
+              });
+              storedId = stored.id;
+            }
+            await this.updateEmbedding("event_memory", storedId, text);
           } else {
             let storedId: string;
             if (action.id) {
@@ -472,6 +615,36 @@ export class MemoryFormationService {
               result.skipped += 1;
               continue;
             }
+          } else if (action.scope === "channel") {
+            if (action.id) {
+              await this.prisma.channelMemoryNote.updateMany({
+                where: { id: action.id, guildId: request.guildId, channelId: request.channelId },
+                data: { active: false },
+              });
+            } else if (action.key) {
+              await this.prisma.channelMemoryNote.updateMany({
+                where: { guildId: request.guildId, channelId: request.channelId, key: action.key },
+                data: { active: false },
+              });
+            } else {
+              result.skipped += 1;
+              continue;
+            }
+          } else if (action.scope === "event") {
+            if (action.id) {
+              await this.prisma.eventMemory.updateMany({
+                where: { id: action.id, guildId: request.guildId },
+                data: { active: false },
+              });
+            } else if (action.key) {
+              await this.prisma.eventMemory.updateMany({
+                where: { guildId: request.guildId, key: action.key },
+                data: { active: false },
+              });
+            } else {
+              result.skipped += 1;
+              continue;
+            }
           } else if (action.id) {
             await this.prisma.userMemoryNote.updateMany({
               where: { id: action.id, guildId: request.guildId, userId: request.userId },
@@ -503,7 +676,7 @@ export class MemoryFormationService {
     }
   }
 
-  private async updateEmbedding(entityType: "server_memory" | "user_memory", entityId: string, text: string) {
+  private async updateEmbedding(entityType: "server_memory" | "user_memory" | "channel_memory" | "event_memory", entityId: string, text: string) {
     try {
       const [embedding] = await this.llm.embed(this.env.OLLAMA_EMBED_MODEL, text);
       if (!embedding?.length) {
@@ -566,6 +739,56 @@ function pushUserCandidates(
   }
 }
 
+function pushChannelCandidates(
+  target: FormationCandidateMemory[],
+  seen: Set<string>,
+  source: Array<{ id: string; key: string; value: string; type: string; createdAt?: Date }>,
+) {
+  for (const item of source) {
+    const seenKey = `channel:${item.id}`;
+    if (seen.has(seenKey)) {
+      continue;
+    }
+    seen.add(seenKey);
+    target.push({
+      id: item.id,
+      scope: "channel",
+      key: item.key,
+      text: item.value,
+      type: item.type,
+      createdAt: item.createdAt?.toISOString(),
+    });
+    if (target.length >= maxCandidatesPerDecision) {
+      return;
+    }
+  }
+}
+
+function pushEventCandidates(
+  target: FormationCandidateMemory[],
+  seen: Set<string>,
+  source: Array<{ id: string; key: string; value: string; type: string; eventKey?: string; createdAt?: Date }>,
+) {
+  for (const item of source) {
+    const seenKey = `event:${item.id}`;
+    if (seen.has(seenKey)) {
+      continue;
+    }
+    seen.add(seenKey);
+    target.push({
+      id: item.id,
+      scope: "event",
+      key: item.eventKey ? `${item.eventKey}:${item.key}` : item.key,
+      text: item.value,
+      type: item.type,
+      createdAt: item.createdAt?.toISOString(),
+    });
+    if (target.length >= maxCandidatesPerDecision) {
+      return;
+    }
+  }
+}
+
 function parseJsonResponse<T>(content: string): T | null {
   const trimmed = content.trim();
   if (!trimmed) {
@@ -619,6 +842,7 @@ function normalizeActions(payload: { actions?: unknown } | null): FormationActio
       scope,
       id: typeof action.id === "string" ? action.id.trim() || undefined : undefined,
       key: typeof action.key === "string" ? action.key.trim() || undefined : undefined,
+      eventKey: typeof action.eventKey === "string" ? action.eventKey.trim() || undefined : undefined,
       text: typeof action.text === "string" ? action.text.trim() || undefined : undefined,
       type: typeof action.type === "string" ? action.type.trim() || undefined : undefined,
       reason: typeof action.reason === "string" ? action.reason.trim() || undefined : undefined,
@@ -637,11 +861,19 @@ function normalizeEvent(value: unknown): FormationActionEvent {
 }
 
 function normalizeScope(value: unknown, fallbackText: unknown): MemoryScope {
-  if (value === "server" || value === "user") {
+  if (value === "server" || value === "user" || value === "channel" || value === "event") {
     return value;
   }
 
-  if (typeof fallbackText === "string" && /(сервер|канал|общий|мем сервера)/i.test(fallbackText)) {
+  if (typeof fallbackText === "string" && /(ивент|событи|план|дедлайн|встреч|конфликт)/i.test(fallbackText)) {
+    return "event";
+  }
+
+  if (typeof fallbackText === "string" && /(канал|тред|чат|локальн)/i.test(fallbackText)) {
+    return "channel";
+  }
+
+  if (typeof fallbackText === "string" && /(сервер|общий|мем сервера|гильди)/i.test(fallbackText)) {
     return "server";
   }
 

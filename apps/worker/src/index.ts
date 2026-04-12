@@ -19,6 +19,7 @@ import {
 
 import { createCleanupJob } from "./jobs/cleanup";
 import { createEmbeddingJob } from "./jobs/embeddings";
+import { createMemoryFormationJob } from "./jobs/memory-formation";
 import { createProfileJob } from "./jobs/profiles";
 import { createSearchCacheCleanupJob } from "./jobs/search-cache";
 import { createSummaryJob } from "./jobs/summaries";
@@ -103,6 +104,7 @@ async function main() {
     createWorker(QUEUE_NAMES.profile, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createProfileJob(runtime), env.JOB_CONCURRENCY_PROFILES),
     createWorker(QUEUE_NAMES.embedding, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createEmbeddingJob(runtime), env.JOB_CONCURRENCY_EMBEDDINGS),
     createWorker(QUEUE_NAMES.topic, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createTopicJob(runtime), 1),
+    createWorker(QUEUE_NAMES.memoryFormation, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createMemoryFormationJob(runtime), 1),
     createWorker(QUEUE_NAMES.searchCache, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSearchCacheCleanupJob(runtime), 1),
     createWorker(QUEUE_NAMES.cleanup, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createCleanupJob(runtime), 1)
   ];

@@ -30,6 +30,7 @@ export function createAppQueues(redisUrl: string, prefix: string) {
     profile: createQueue(QUEUE_NAMES.profile, redisUrl, prefix, { removeOnComplete: 50, removeOnFail: 100 }),
     embedding: createQueue(QUEUE_NAMES.embedding, redisUrl, prefix, { removeOnComplete: 100, removeOnFail: 100 }),
     topic: createQueue(QUEUE_NAMES.topic, redisUrl, prefix, { removeOnComplete: 100, removeOnFail: 100 }),
+    memoryFormation: createQueue(QUEUE_NAMES.memoryFormation, redisUrl, prefix, { removeOnComplete: 20, removeOnFail: 50 }),
     cleanup: createQueue(QUEUE_NAMES.cleanup, redisUrl, prefix, { removeOnComplete: 20, removeOnFail: 50 }),
     searchCache: createQueue(QUEUE_NAMES.searchCache, redisUrl, prefix, { removeOnComplete: 20, removeOnFail: 20 }),
     prefix

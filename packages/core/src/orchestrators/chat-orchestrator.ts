@@ -1,6 +1,6 @@
 import type { AppEnv } from "@hori/config";
 import type { AppLogger, AppPrismaClient, BotReplyPayload, BotTrace, MessageEnvelope, SearchHit } from "@hori/shared";
-import { botLatencyHistogram, botRepliesCounter, buildMemoryKey, clamp, normalizeWhitespace } from "@hori/shared";
+import { asErrorMessage, botLatencyHistogram, botRepliesCounter, buildMemoryKey, clamp, normalizeWhitespace } from "@hori/shared";
 
 import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet, getModelProfile } from "@hori/llm";
 import type { LlmClient } from "@hori/llm";
@@ -287,6 +287,14 @@ export class ChatOrchestrator {
       behavior: behavior.trace,
       queue: queueTrace,
       linkUnderstanding: linkContext.trace,
+      activeMemory: contextBundle.activeMemory
+        ? {
+            enabled: contextBundle.activeMemory.trace.enabled,
+            entries: contextBundle.activeMemory.entries.length,
+            layers: contextBundle.activeMemory.trace.layers,
+            reason: contextBundle.activeMemory.trace.reason
+          }
+        : { enabled: false, entries: 0, layers: [], reason: "not_available" },
       context: {
         ...contextTrace,
         contextConfidence: contextScores?.contextConfidence,
@@ -314,6 +322,7 @@ export class ChatOrchestrator {
           reply = result.text;
           trace.usedSearch = result.usedSearch;
           trace.toolNames = result.toolNames;
+          trace.searchDiagnostics = "diagnostics" in result ? result.diagnostics : undefined;
           break;
         }
         case "memory_write":
@@ -702,11 +711,34 @@ export class ChatOrchestrator {
     });
 
     if (run.toolCalls.length === 0) {
-      return { text: run.text, toolNames: [], usedSearch: false };
+      return this.handleDirectSearch(
+        message,
+        request,
+        systemPrompt,
+        runtimeSettings,
+        llm,
+        [],
+        "tool_calls_missing",
+        true
+      );
     }
 
     const searchCalls = run.toolCalls.filter((call) => call.toolName === "web_search");
     const searchHits = searchCalls.flatMap((call) => call.output as SearchHit[]);
+
+    if (!searchHits.length) {
+      return this.handleDirectSearch(
+        message,
+        request,
+        systemPrompt,
+        runtimeSettings,
+        llm,
+        run.toolCalls.map((call) => call.toolName),
+        "tool_calls_without_search_hits",
+        false
+      );
+    }
+
     const finalPrompt = buildSearchPrompt(request, buildSourceDigest(request, searchHits, fetchedPages));
     finalPrompt.unshift({ role: "system", content: systemPrompt });
 
@@ -724,8 +756,84 @@ export class ChatOrchestrator {
     return {
       text: response.message.content || run.text,
       toolNames: run.toolCalls.map((call) => call.toolName),
-      usedSearch: true
+      usedSearch: true,
+      diagnostics: {
+        ok: true,
+        provider: "brave",
+        fetchedPages: fetchedPages.length,
+        fallbackUsed: false
+      }
     };
+  }
+
+  private async handleDirectSearch(
+    message: MessageEnvelope,
+    request: string,
+    systemPrompt: string,
+    runtimeSettings: EffectiveRuntimeSettings,
+    llm: ReturnType<ChatOrchestrator["getLlmSettings"]>,
+    priorToolNames: string[],
+    reason: string,
+    applyCooldown: boolean
+  ) {
+    const fetchedPages: Array<{ url: string; title: string; content: string }> = [];
+
+    try {
+      const searchHits = await this.deps.searchClient.search(request, {
+        userId: message.userId,
+        maxResults: this.deps.env.SEARCH_MAX_PAGES_PER_RESPONSE,
+        applyCooldown
+      });
+
+      for (const hit of searchHits.slice(0, this.deps.env.SEARCH_MAX_PAGES_PER_RESPONSE)) {
+        try {
+          fetchedPages.push(await fetchWebPage(hit.url, this.deps.env));
+        } catch (error) {
+          this.deps.logger.warn({ error: asErrorMessage(error), url: hit.url }, "search fallback page fetch failed");
+        }
+      }
+
+      const finalPrompt = buildSearchPrompt(request, buildSourceDigest(request, searchHits, fetchedPages));
+      finalPrompt.unshift({
+        role: "system",
+        content: `${systemPrompt}\nСинтезируй ответ по источникам. Если страниц мало, честно скажи, что уверенность ниже. Не выдумывай ссылки.`
+      });
+
+      const response = await this.deps.llmClient.chat({
+        model: llm.model,
+        messages: finalPrompt,
+        temperature: llm.temperature,
+        topP: llm.topP,
+        maxTokens: llm.maxTokens,
+        keepAlive: runtimeSettings.ollamaKeepAlive,
+        numCtx: runtimeSettings.ollamaNumCtx,
+        numBatch: runtimeSettings.ollamaNumBatch
+      });
+
+      return {
+        text: response.message.content || buildSourceDigest(request, searchHits, fetchedPages).slice(0, 1500),
+        toolNames: [...priorToolNames, "direct_web_search", "direct_fetch_pages"],
+        usedSearch: true,
+        diagnostics: {
+          ok: true,
+          provider: "brave",
+          fetchedPages: fetchedPages.length,
+          fallbackUsed: true
+        }
+      };
+    } catch (error) {
+      return {
+        text: `Поиск не сработал: ${asErrorMessage(error)}. Проверь /hori panel -> Поиск -> Диагностика.`,
+        toolNames: [...priorToolNames, "direct_web_search"],
+        usedSearch: false,
+        diagnostics: {
+          ok: false,
+          error: asErrorMessage(error),
+          provider: this.deps.env.BRAVE_SEARCH_API_KEY ? "brave" : undefined,
+          fallbackUsed: true
+        }
+      };
+    }
   }
 
   private async handleMemoryWrite(message: MessageEnvelope, cleanedContent: string) {

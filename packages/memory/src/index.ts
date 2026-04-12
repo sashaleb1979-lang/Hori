@@ -1,4 +1,5 @@
 export * from "./context/context-service";
+export * from "./active/active-memory-service";
 export * from "./album/memory-album-service";
 export * from "./compaction/compaction-prompt";
 export * from "./compaction/memory-formation";

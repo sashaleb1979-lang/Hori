@@ -30,6 +30,40 @@ var import_discord5 = require("discord.js");
 var import_discord2 = require("discord.js");
 var import_shared = require("@hori/shared");
 var slashCommandDefinitions = [
+  new import_discord2.SlashCommandBuilder().setName("hori").setDescription("\u0413\u043B\u0430\u0432\u043D\u0430\u044F \u043F\u0430\u043D\u0435\u043B\u044C \u0425\u043E\u0440\u0438").addSubcommand(
+    (subcommand) => subcommand.setName("panel").setDescription("\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043F\u043E\u0434\u0440\u043E\u0431\u043D\u0443\u044E \u043F\u0430\u043D\u0435\u043B\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A").addStringOption(
+      (option) => option.setName("tab").setDescription("\u0412\u043A\u043B\u0430\u0434\u043A\u0430").addChoices(
+        { name: "\u0413\u043B\u0430\u0432\u043D\u0430\u044F", value: "main" },
+        { name: "\u0412\u043B\u0430\u0434\u0435\u043B\u0435\u0446", value: "owner" },
+        { name: "\u0421\u0442\u0438\u043B\u044C", value: "style" },
+        { name: "\u0416\u0438\u0432\u043E\u0441\u0442\u044C", value: "liveliness" },
+        { name: "\u041F\u0430\u043C\u044F\u0442\u044C", value: "memory" },
+        { name: "\u041B\u044E\u0434\u0438", value: "people" },
+        { name: "\u041A\u0430\u043D\u0430\u043B\u044B", value: "channels" },
+        { name: "\u041F\u043E\u0438\u0441\u043A", value: "search" },
+        { name: "\u042D\u043A\u0441\u043F\u0435\u0440\u0438\u043C\u0435\u043D\u0442\u044B", value: "experiments" },
+        { name: "\u0414\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430", value: "diagnostics" }
+      )
+    )
+  ).addSubcommand(
+    (subcommand) => subcommand.setName("search").setDescription("\u0421\u0434\u0435\u043B\u0430\u0442\u044C web search \u0447\u0435\u0440\u0435\u0437 \u0443\u0441\u0438\u043B\u0435\u043D\u043D\u044B\u0439 fallback").addStringOption((option) => option.setName("query").setDescription("\u0427\u0442\u043E \u0438\u0441\u043A\u0430\u0442\u044C").setRequired(true))
+  ).addSubcommand(
+    (subcommand) => subcommand.setName("memory-build").setDescription("\u0414\u043E\u043B\u0433\u043E \u0441\u043E\u0431\u0440\u0430\u0442\u044C active memory \u0438\u0437 \u0443\u0436\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D\u043D\u044B\u0445 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0439").addStringOption(
+      (option) => option.setName("scope").setDescription("\u041E\u0431\u043B\u0430\u0441\u0442\u044C").setRequired(true).addChoices(
+        { name: "\u0442\u0435\u043A\u0443\u0449\u0438\u0439 \u043A\u0430\u043D\u0430\u043B", value: "channel" },
+        { name: "\u0432\u0435\u0441\u044C \u0441\u0435\u0440\u0432\u0435\u0440", value: "server" }
+      )
+    ).addStringOption(
+      (option) => option.setName("depth").setDescription("\u0413\u043B\u0443\u0431\u0438\u043D\u0430").addChoices(
+        { name: "recent", value: "recent" },
+        { name: "deep", value: "deep" }
+      )
+    )
+  ).addSubcommand(
+    (subcommand) => subcommand.setName("profile").setDescription("\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u043A\u0440\u0430\u0442\u043A\u0438\u0439 \u043F\u0440\u043E\u0444\u0438\u043B\u044C/\u043F\u0430\u043C\u044F\u0442\u044C").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C"))
+  ).addSubcommand(
+    (subcommand) => subcommand.setName("relationship").setDescription("Owner: \u043F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435 \u043A \u0447\u0435\u043B\u043E\u0432\u0435\u043A\u0443").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true)).addStringOption((option) => option.setName("tone-bias").setDescription("neutral, friendly, sharp, playful")).addIntegerOption((option) => option.setName("roast-level").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("praise-bias").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("interrupt-priority").setDescription("0-5").setMinValue(0).setMaxValue(5)).addBooleanOption((option) => option.setName("do-not-mock").setDescription("\u041D\u0435 \u043F\u043E\u0434\u043A\u0430\u043B\u044B\u0432\u0430\u0442\u044C")).addBooleanOption((option) => option.setName("do-not-initiate").setDescription("\u041D\u0435 \u0438\u043D\u0438\u0446\u0438\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u0435")).addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics")).addNumberOption((option) => option.setName("closeness").setDescription("\u0411\u043B\u0438\u0437\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("trust").setDescription("\u0414\u043E\u0432\u0435\u0440\u0438\u0435 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("familiarity").setDescription("\u0417\u043D\u0430\u043A\u043E\u043C\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("proactivity").setDescription("\u0416\u0435\u043B\u0430\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u0438\u043D\u0438\u0446\u0438\u0430\u0442\u0438\u0432\u044B 0-1").setMinValue(0).setMaxValue(1))
+  ),
   new import_discord2.SlashCommandBuilder().setName("bot-help").setDescription("\u041A\u043E\u0440\u043E\u0442\u043A\u0430\u044F \u0441\u043F\u0440\u0430\u0432\u043A\u0430 \u043F\u043E \u0430\u0434\u043C\u0438\u043D-\u043A\u043E\u043C\u0430\u043D\u0434\u0430\u043C"),
   new import_discord2.SlashCommandBuilder().setName("bot-style").setDescription("\u041D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0441\u0442\u0438\u043B\u044C \u0425\u043E\u0440\u0438").addStringOption((option) => option.setName("bot-name").setDescription("\u0418\u043C\u044F \u0431\u043E\u0442\u0430")).addIntegerOption((option) => option.setName("roughness").setDescription("\u0413\u0440\u0443\u0431\u043E\u0441\u0442\u044C 0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("sarcasm").setDescription("\u0421\u0430\u0440\u043A\u0430\u0437\u043C 0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("roast").setDescription("\u0421\u0442\u0451\u0431 0-5").setMinValue(0).setMaxValue(5)).addStringOption(
     (option) => option.setName("reply-length").setDescription("\u041F\u0440\u0435\u0434\u043F\u043E\u0447\u0442\u0438\u0442\u0435\u043B\u044C\u043D\u0430\u044F \u0434\u043B\u0438\u043D\u0430").addChoices(
@@ -48,7 +82,7 @@ var slashCommandDefinitions = [
   ).addSubcommand(
     (subcommand) => subcommand.setName("remove").setDescription("\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u043C\u043E\u043C\u0435\u043D\u0442 \u0438\u0437 \u0441\u0432\u043E\u0435\u0433\u043E \u0430\u043B\u044C\u0431\u043E\u043C\u0430").addStringOption((option) => option.setName("id").setDescription("ID \u043C\u043E\u043C\u0435\u043D\u0442\u0430").setRequired(true))
   ),
-  new import_discord2.SlashCommandBuilder().setName("bot-relationship").setDescription("\u041D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435 \u043A \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044E").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true)).addStringOption((option) => option.setName("tone-bias").setDescription("neutral, friendly, sharp, playful")).addIntegerOption((option) => option.setName("roast-level").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("praise-bias").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("interrupt-priority").setDescription("0-5").setMinValue(0).setMaxValue(5)).addBooleanOption((option) => option.setName("do-not-mock").setDescription("\u041D\u0435 \u043F\u043E\u0434\u043A\u0430\u043B\u044B\u0432\u0430\u0442\u044C")).addBooleanOption((option) => option.setName("do-not-initiate").setDescription("\u041D\u0435 \u0438\u043D\u0438\u0446\u0438\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u0435")).addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics")),
+  new import_discord2.SlashCommandBuilder().setName("bot-relationship").setDescription("\u041D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435 \u043A \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044E").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true)).addStringOption((option) => option.setName("tone-bias").setDescription("neutral, friendly, sharp, playful")).addIntegerOption((option) => option.setName("roast-level").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("praise-bias").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("interrupt-priority").setDescription("0-5").setMinValue(0).setMaxValue(5)).addBooleanOption((option) => option.setName("do-not-mock").setDescription("\u041D\u0435 \u043F\u043E\u0434\u043A\u0430\u043B\u044B\u0432\u0430\u0442\u044C")).addBooleanOption((option) => option.setName("do-not-initiate").setDescription("\u041D\u0435 \u0438\u043D\u0438\u0446\u0438\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u0435")).addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics")).addNumberOption((option) => option.setName("closeness").setDescription("\u0411\u043B\u0438\u0437\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("trust").setDescription("\u0414\u043E\u0432\u0435\u0440\u0438\u0435 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("familiarity").setDescription("\u0417\u043D\u0430\u043A\u043E\u043C\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("proactivity").setDescription("\u0416\u0435\u043B\u0430\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u0438\u043D\u0438\u0446\u0438\u0430\u0442\u0438\u0432\u044B 0-1").setMinValue(0).setMaxValue(1)),
   new import_discord2.SlashCommandBuilder().setName("bot-feature").setDescription("\u041F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0438\u0442\u044C feature flag").addStringOption(
     (option) => option.setName("key").setDescription("\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u0444\u043B\u0430\u0433\u0430").setRequired(true)
   ).addBooleanOption((option) => option.setName("enabled").setDescription("\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C/\u0432\u044B\u043A\u043B\u044E\u0447\u0438\u0442\u044C").setRequired(true)),
@@ -105,7 +139,19 @@ var slashCommandDefinitions = [
       )
     ).addStringOption((option) => option.setName("path").setDescription("\u0410\u0431\u0441\u043E\u043B\u044E\u0442\u043D\u044B\u0439 \u043F\u0443\u0442\u044C \u043A \u0444\u0430\u0439\u043B\u0443").setRequired(true)).addStringOption((option) => option.setName("trigger-tags").setDescription("CSV trigger tags")).addStringOption((option) => option.setName("tone-tags").setDescription("CSV tone tags")).addStringOption((option) => option.setName("channels").setDescription("CSV channel kinds")).addStringOption((option) => option.setName("moods").setDescription("CSV moods")).addBooleanOption((option) => option.setName("nsfw").setDescription("NSFW"))
   ).addSubcommand((subcommand) => subcommand.setName("list").setDescription("\u0421\u043F\u0438\u0441\u043E\u043A media")).addSubcommand(
+    (subcommand) => subcommand.setName("sync-pack").setDescription("\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C media \u0438\u0437 catalog.json").addStringOption((option) => option.setName("path").setDescription("\u041F\u0443\u0442\u044C \u043A catalog.json \u0432\u043D\u0443\u0442\u0440\u0438 \u0440\u0435\u043F\u043E\u0437\u0438\u0442\u043E\u0440\u0438\u044F"))
+  ).addSubcommand(
     (subcommand) => subcommand.setName("disable").setDescription("\u041E\u0442\u043A\u043B\u044E\u0447\u0438\u0442\u044C media").addStringOption((option) => option.setName("id").setDescription("media id").setRequired(true))
+  ),
+  new import_discord2.SlashCommandBuilder().setName("bot-power").setDescription("\u0413\u043B\u043E\u0431\u0430\u043B\u044C\u043D\u044B\u0435 \u043F\u0440\u0435\u0441\u0435\u0442\u044B \u043C\u043E\u0449\u043D\u043E\u0441\u0442\u0438 Ollama \u0438 \u043A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u0430").addSubcommand((subcommand) => subcommand.setName("panel").setDescription("\u041E\u0442\u043A\u0440\u044B\u0442\u044C owner-only \u043F\u0430\u043D\u0435\u043B\u044C \u043F\u0440\u0435\u0441\u0435\u0442\u043E\u0432")).addSubcommand((subcommand) => subcommand.setName("status").setDescription("\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0439 power profile \u0438 \u043B\u0438\u043C\u0438\u0442\u044B")).addSubcommand(
+    (subcommand) => subcommand.setName("apply").setDescription("\u041F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C power profile").addStringOption(
+      (option) => option.setName("profile").setDescription("\u041F\u0440\u0435\u0441\u0435\u0442 \u043C\u043E\u0449\u043D\u043E\u0441\u0442\u0438").setRequired(true).addChoices(
+        { name: "economy", value: "economy" },
+        { name: "balanced", value: "balanced" },
+        { name: "expanded", value: "expanded" },
+        { name: "max", value: "max" }
+      )
+    )
   ),
   new import_discord2.SlashCommandBuilder().setName("bot-ai-url").setDescription("\u0421\u043C\u0435\u043D\u0438\u0442\u044C Ollama URL (\u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446 \u0431\u043E\u0442\u0430)").addStringOption((option) => option.setName("url").setDescription("\u041D\u043E\u0432\u044B\u0439 URL (https://...)").setRequired(true)),
   new import_discord2.SlashCommandBuilder().setName("bot-lockdown").setDescription("\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0440\u0435\u0436\u0438\u043C: \u0425\u043E\u0440\u0438 \u0441\u043B\u0443\u0448\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430").addSubcommand((subcommand) => subcommand.setName("on").setDescription("\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u043B\u043E\u043A\u0434\u0430\u0443\u043D")).addSubcommand((subcommand) => subcommand.setName("off").setDescription("\u0412\u044B\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u043B\u043E\u043A\u0434\u0430\u0443\u043D")).addSubcommand((subcommand) => subcommand.setName("status").setDescription("\u041F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C \u0441\u0442\u0430\u0442\u0443\u0441 \u043B\u043E\u043A\u0434\u0430\u0443\u043D\u0430")),
@@ -160,15 +206,28 @@ async function shouldIgnoreForOwnerLockdown(runtime, userId) {
 }
 
 // src/router/interaction-router.ts
-var PUBLIC_COMMANDS = /* @__PURE__ */ new Set(["bot-help", "bot-album"]);
-var OWNER_COMMANDS = /* @__PURE__ */ new Set(["bot-ai-url", "bot-import", "bot-lockdown"]);
+var PUBLIC_COMMANDS = /* @__PURE__ */ new Set(["hori", "bot-help", "bot-album"]);
+var OWNER_COMMANDS = /* @__PURE__ */ new Set(["bot-ai-url", "bot-import", "bot-lockdown", "bot-power"]);
 var MEMORY_ALBUM_MODAL_PREFIX = "memory-album";
+var HORI_PANEL_PREFIX = "hori-panel";
+var HORI_ACTION_PREFIX = "hori-action";
+var POWER_PANEL_PREFIX = "power-panel";
+var POWER_PROFILES = ["economy", "balanced", "expanded", "max"];
+var HORI_PANEL_TABS = ["main", "owner", "style", "liveliness", "memory", "people", "channels", "search", "experiments", "diagnostics"];
 function ensureModerator(interaction) {
   return interaction.memberPermissions?.has(import_discord3.PermissionFlagsBits.ManageGuild) ?? false;
 }
 async function routeInteraction(runtime, interaction) {
   const isOwner = isBotOwner(runtime, interaction.user.id);
   if (!isOwner && await shouldIgnoreForOwnerLockdown(runtime, interaction.user.id)) {
+    return;
+  }
+  if (interaction.isButton()) {
+    await routeButtonInteraction(runtime, interaction, isOwner);
+    return;
+  }
+  if (interaction.isStringSelectMenu()) {
+    await routeStringSelectInteraction(runtime, interaction, isOwner);
     return;
   }
   if (interaction.isModalSubmit()) {
@@ -190,6 +249,9 @@ async function routeInteraction(runtime, interaction) {
       return;
     }
     switch (interaction.commandName) {
+      case "hori":
+        await handleHoriCommand(runtime, interaction, isOwner, isModerator);
+        return;
       case "bot-help":
         await interaction.reply({ content: await runtime.slashAdmin.handleHelp(), flags: import_discord3.MessageFlags.Ephemeral });
         return;
@@ -292,13 +354,17 @@ ${status}`
             interaction.options.getUser("user", true).id,
             interaction.user.id,
             {
-              toneBias: interaction.options.getString("tone-bias") ?? "neutral",
-              roastLevel: interaction.options.getInteger("roast-level") ?? 0,
-              praiseBias: interaction.options.getInteger("praise-bias") ?? 0,
-              interruptPriority: interaction.options.getInteger("interrupt-priority") ?? 0,
-              doNotMock: interaction.options.getBoolean("do-not-mock") ?? false,
-              doNotInitiate: interaction.options.getBoolean("do-not-initiate") ?? false,
-              protectedTopics: (interaction.options.getString("protected-topics") ?? "").split(",").map((part) => part.trim()).filter(Boolean)
+              toneBias: interaction.options.getString("tone-bias") ?? void 0,
+              roastLevel: interaction.options.getInteger("roast-level") ?? void 0,
+              praiseBias: interaction.options.getInteger("praise-bias") ?? void 0,
+              interruptPriority: interaction.options.getInteger("interrupt-priority") ?? void 0,
+              doNotMock: interaction.options.getBoolean("do-not-mock") ?? void 0,
+              doNotInitiate: interaction.options.getBoolean("do-not-initiate") ?? void 0,
+              protectedTopics: interaction.options.getString("protected-topics") ? (0, import_shared3.parseCsv)(interaction.options.getString("protected-topics") ?? void 0) : void 0,
+              closeness: interaction.options.getNumber("closeness") ?? void 0,
+              trustLevel: interaction.options.getNumber("trust") ?? void 0,
+              familiarity: interaction.options.getNumber("familiarity") ?? void 0,
+              proactivityPreference: interaction.options.getNumber("proactivity") ?? void 0
             }
           ),
           flags: import_discord3.MessageFlags.Ephemeral
@@ -314,6 +380,28 @@ ${status}`
           flags: import_discord3.MessageFlags.Ephemeral
         });
         return;
+      case "bot-power": {
+        if (!isOwner) {
+          await interaction.reply({ content: "\u042D\u0442\u0430 \u043A\u043E\u043C\u0430\u043D\u0434\u0430 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u0431\u043E\u0442\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+          return;
+        }
+        const subcommand = interaction.options.getSubcommand();
+        if (subcommand === "panel") {
+          const status = await runtime.runtimeConfig.getPowerProfileStatus();
+          await interaction.reply({
+            content: await runtime.slashAdmin.powerPanel(),
+            components: buildPowerPanelRows(status.activeProfile),
+            flags: import_discord3.MessageFlags.Ephemeral
+          });
+          return;
+        }
+        const content = subcommand === "apply" ? await runtime.slashAdmin.powerApply(
+          interaction.options.getString("profile", true),
+          interaction.user.id
+        ) : await runtime.slashAdmin.powerStatus();
+        await interaction.reply({ content, flags: import_discord3.MessageFlags.Ephemeral });
+        return;
+      }
       case "bot-debug":
         await interaction.reply({
           content: await runtime.slashAdmin.debugTrace(interaction.options.getString("message-id", true)),
@@ -380,6 +468,10 @@ ${status}`
       }
       case "bot-media": {
         const subcommand = interaction.options.getSubcommand();
+        if (subcommand === "sync-pack" && !isOwner) {
+          await interaction.reply({ content: "\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F pack \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0430 \u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0443 \u0431\u043E\u0442\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+          return;
+        }
         const content = subcommand === "add" ? await runtime.slashAdmin.mediaAdd({
           mediaId: interaction.options.getString("id", true),
           type: interaction.options.getString("type", true),
@@ -389,7 +481,7 @@ ${status}`
           allowedChannels: interaction.options.getString("channels"),
           allowedMoods: interaction.options.getString("moods"),
           nsfw: interaction.options.getBoolean("nsfw")
-        }) : subcommand === "disable" ? await runtime.slashAdmin.mediaDisable(interaction.options.getString("id", true)) : await runtime.slashAdmin.mediaList();
+        }) : subcommand === "sync-pack" ? await runtime.slashAdmin.mediaSyncPack(interaction.options.getString("path") ?? "assets/memes/catalog.json") : subcommand === "disable" ? await runtime.slashAdmin.mediaDisable(interaction.options.getString("id", true)) : await runtime.slashAdmin.mediaList();
         await interaction.reply({ content, flags: import_discord3.MessageFlags.Ephemeral });
         return;
       }
@@ -528,6 +620,124 @@ ${status}`
   });
   await interaction.reply({ content: result, flags: import_discord3.MessageFlags.Ephemeral });
 }
+async function handleHoriCommand(runtime, interaction, isOwner, isModerator) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043D\u0443\u0442\u0440\u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  const subcommand = interaction.options.getSubcommand();
+  if (subcommand === "panel") {
+    const tab = parseHoriPanelTab(interaction.options.getString("tab")) ?? "main";
+    await interaction.reply({
+      ...buildHoriPanelResponse(tab, isOwner, isModerator),
+      flags: import_discord3.MessageFlags.Ephemeral
+    });
+    return;
+  }
+  if (subcommand === "search") {
+    await handleHoriSearchCommand(runtime, interaction, isModerator);
+    return;
+  }
+  if (subcommand === "memory-build") {
+    const scope = interaction.options.getString("scope", true);
+    const depth = interaction.options.getString("depth") ?? "recent";
+    if (!isOwner && (!isModerator || scope === "server")) {
+      await interaction.reply({
+        content: scope === "server" ? "\u0421\u0431\u043E\u0440\u043A\u0430 \u043F\u0430\u043C\u044F\u0442\u0438 \u043F\u043E \u0432\u0441\u0435\u043C\u0443 \u0441\u0435\u0440\u0432\u0435\u0440\u0443 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430." : "Memory-build \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u043C\u043E\u0434\u0435\u0440\u043E\u0432.",
+        flags: import_discord3.MessageFlags.Ephemeral
+      });
+      return;
+    }
+    await interaction.reply({
+      content: await startMemoryBuildRun(runtime, interaction.guildId, scope === "channel" ? interaction.channelId : null, scope, depth, interaction.user.id),
+      flags: import_discord3.MessageFlags.Ephemeral
+    });
+    return;
+  }
+  if (subcommand === "profile") {
+    const target = interaction.options.getUser("user")?.id ?? interaction.user.id;
+    if (target !== interaction.user.id && !isOwner && !isModerator) {
+      await interaction.reply({ content: "\u0427\u0443\u0436\u043E\u0439 \u043F\u0440\u043E\u0444\u0438\u043B\u044C \u0432\u0438\u0434\u0438\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043C\u043E\u0434\u0435\u0440/\u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446.", flags: import_discord3.MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.reply({
+      content: await runtime.slashAdmin.personalMemory(interaction.guildId, target, isOwner || isModerator),
+      flags: import_discord3.MessageFlags.Ephemeral
+    });
+    return;
+  }
+  if (subcommand === "relationship") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Relationship-\u0446\u0438\u0444\u0440\u044B \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+      return;
+    }
+    const targetUserId = interaction.options.getUser("user", true).id;
+    const hasUpdate = interaction.options.getString("tone-bias") !== null || interaction.options.getInteger("roast-level") !== null || interaction.options.getInteger("praise-bias") !== null || interaction.options.getInteger("interrupt-priority") !== null || interaction.options.getBoolean("do-not-mock") !== null || interaction.options.getBoolean("do-not-initiate") !== null || interaction.options.getString("protected-topics") !== null || interaction.options.getNumber("closeness") !== null || interaction.options.getNumber("trust") !== null || interaction.options.getNumber("familiarity") !== null || interaction.options.getNumber("proactivity") !== null;
+    const content = hasUpdate ? [
+      await runtime.slashAdmin.updateRelationship(interaction.guildId, targetUserId, interaction.user.id, {
+        toneBias: interaction.options.getString("tone-bias") ?? void 0,
+        roastLevel: interaction.options.getInteger("roast-level") ?? void 0,
+        praiseBias: interaction.options.getInteger("praise-bias") ?? void 0,
+        interruptPriority: interaction.options.getInteger("interrupt-priority") ?? void 0,
+        doNotMock: interaction.options.getBoolean("do-not-mock") ?? void 0,
+        doNotInitiate: interaction.options.getBoolean("do-not-initiate") ?? void 0,
+        protectedTopics: interaction.options.getString("protected-topics") ? (0, import_shared3.parseCsv)(interaction.options.getString("protected-topics") ?? void 0) : void 0,
+        closeness: interaction.options.getNumber("closeness") ?? void 0,
+        trustLevel: interaction.options.getNumber("trust") ?? void 0,
+        familiarity: interaction.options.getNumber("familiarity") ?? void 0,
+        proactivityPreference: interaction.options.getNumber("proactivity") ?? void 0
+      }),
+      "",
+      await runtime.slashAdmin.relationshipDetails(interaction.guildId, targetUserId)
+    ].join("\n") : await runtime.slashAdmin.relationshipDetails(interaction.guildId, targetUserId);
+    await interaction.reply({
+      content,
+      flags: import_discord3.MessageFlags.Ephemeral
+    });
+    return;
+  }
+  await interaction.reply({ content: "\u041D\u0435 \u0437\u043D\u0430\u044E \u0442\u0430\u043A\u0443\u044E \u0432\u0435\u0442\u043A\u0443 `/hori`.", flags: import_discord3.MessageFlags.Ephemeral });
+}
+async function handleHoriSearchCommand(runtime, interaction, isModerator) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043D\u0443\u0442\u0440\u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  await interaction.deferReply({ flags: import_discord3.MessageFlags.Ephemeral });
+  const query = interaction.options.getString("query", true).trim();
+  const routingConfig = await runtime.runtimeConfig.getRoutingConfig(interaction.guildId, interaction.channelId);
+  const envelope = {
+    messageId: `slash:hori-search:${interaction.id}`,
+    guildId: interaction.guildId,
+    channelId: interaction.channelId,
+    userId: interaction.user.id,
+    username: interaction.user.username,
+    displayName: getInteractionDisplayName(interaction),
+    channelName: interaction.channel && "name" in interaction.channel ? interaction.channel.name : null,
+    content: `\u0425\u043E\u0440\u0438 \u043D\u0430\u0439\u0434\u0438 \u0432 \u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442\u0435: ${query}`,
+    createdAt: /* @__PURE__ */ new Date(),
+    replyToMessageId: null,
+    mentionCount: 0,
+    mentionedBot: true,
+    mentionsBotByName: true,
+    mentionedUserIds: [],
+    triggerSource: "name",
+    isModerator,
+    explicitInvocation: true
+  };
+  const result = await runtime.orchestrator.handleMessage(envelope, routingConfig);
+  const reply = typeof result.reply === "string" ? result.reply : result.reply?.text;
+  await interaction.editReply({
+    content: reply?.trim() || "\u041F\u043E\u0438\u0441\u043A \u043D\u0435 \u0434\u0430\u043B \u043D\u043E\u0440\u043C\u0430\u043B\u044C\u043D\u043E\u0433\u043E \u043E\u0442\u0432\u0435\u0442\u0430. \u041E\u0442\u043A\u0440\u043E\u0439 `/hori panel` -> \u041F\u043E\u0438\u0441\u043A -> \u0414\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430, \u0442\u0430\u043C \u0431\u0443\u0434\u0435\u0442 \u0432\u0438\u0434\u043D\u043E \u0433\u0434\u0435 \u0437\u0430\u0442\u044B\u043A."
+  });
+}
+async function routeStringSelectInteraction(runtime, interaction, isOwner) {
+  if (interaction.customId !== `${HORI_PANEL_PREFIX}:tab`) {
+    return;
+  }
+  const tab = parseHoriPanelTab(interaction.values[0]) ?? "main";
+  await interaction.update(buildHoriPanelResponse(tab, isOwner, hasManageGuild(interaction)));
+}
 async function handleOwnerLockdownCommand(runtime, interaction, isOwner) {
   if (!isOwner) {
     await interaction.reply({ content: "\u042D\u0442\u0430 \u043A\u043E\u043C\u0430\u043D\u0434\u0430 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u0431\u043E\u0442\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
@@ -643,6 +853,442 @@ async function routeModalSubmit(runtime, interaction) {
     flags: import_discord3.MessageFlags.Ephemeral
   });
 }
+async function routeButtonInteraction(runtime, interaction, isOwner) {
+  if (interaction.customId.startsWith(`${HORI_ACTION_PREFIX}:`)) {
+    await handleHoriPanelAction(runtime, interaction, isOwner, hasManageGuild(interaction));
+    return;
+  }
+  if (!interaction.customId.startsWith(`${POWER_PANEL_PREFIX}:`)) {
+    return;
+  }
+  if (!isOwner) {
+    await interaction.reply({ content: "\u042D\u0442\u0430 \u043F\u0430\u043D\u0435\u043B\u044C \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u0431\u043E\u0442\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  const [, action, profile] = interaction.customId.split(":");
+  if (action !== "apply" || !isPowerProfile(profile)) {
+    await interaction.reply({ content: "\u041D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u0430\u044F \u043A\u043D\u043E\u043F\u043A\u0430 \u043F\u0430\u043D\u0435\u043B\u0438 \u043C\u043E\u0449\u043D\u043E\u0441\u0442\u0438.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  const content = await runtime.slashAdmin.powerApply(profile, interaction.user.id);
+  const status = await runtime.runtimeConfig.getPowerProfileStatus();
+  await interaction.update({
+    content,
+    components: buildPowerPanelRows(status.activeProfile)
+  });
+}
+async function handleHoriPanelAction(runtime, interaction, isOwner, isModerator) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043D\u0443\u0442\u0440\u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  const action = interaction.customId.slice(`${HORI_ACTION_PREFIX}:`.length);
+  if (action === "power_panel") {
+    if (!isOwner) {
+      await interaction.reply({ content: "\u042D\u0442\u0430 \u043F\u0430\u043D\u0435\u043B\u044C \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u0431\u043E\u0442\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+      return;
+    }
+    const status = await runtime.runtimeConfig.getPowerProfileStatus();
+    await interaction.update({
+      content: await runtime.slashAdmin.powerPanel(),
+      components: buildPowerPanelRows(status.activeProfile)
+    });
+    return;
+  }
+  if (action.startsWith("lockdown_")) {
+    if (!isOwner) {
+      await interaction.reply({ content: "\u041B\u043E\u043A\u0434\u0430\u0443\u043D \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+      return;
+    }
+    const mode = action.replace("lockdown_", "");
+    if (mode === "status") {
+      const state = await getOwnerLockdownState(runtime, true);
+      await interaction.update({
+        content: `Owner lockdown: ${state.enabled ? "on" : "off"}${state.updatedBy ? `
+\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0435\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435: ${state.updatedBy}` : ""}`,
+        components: buildHoriPanelRows("owner", isOwner, isModerator)
+      });
+      return;
+    }
+    const enabled = mode === "on";
+    await setOwnerLockdownState(runtime, enabled, interaction.user.id);
+    const cleared = enabled ? await runtime.replyQueue.clearAll() : { count: 0 };
+    await interaction.update({
+      content: enabled ? `\u041B\u043E\u043A\u0434\u0430\u0443\u043D \u0432\u043A\u043B\u044E\u0447\u0451\u043D. \u0412\u0441\u0435 \u043A\u0440\u043E\u043C\u0435 \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u043C\u043E\u043B\u0447\u0430 \u0438\u0433\u043D\u043E\u0440\u0438\u0440\u0443\u044E\u0442\u0441\u044F. \u041E\u0447\u0435\u0440\u0435\u0434\u044C \u0441\u0431\u0440\u043E\u0448\u0435\u043D\u0430: ${cleared.count}.` : "\u041B\u043E\u043A\u0434\u0430\u0443\u043D \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D.",
+      components: buildHoriPanelRows("owner", isOwner, isModerator)
+    });
+    return;
+  }
+  if (action === "memory_build_channel" || action === "memory_build_server") {
+    const scope = action.endsWith("server") ? "server" : "channel";
+    if (!isOwner && (!isModerator || scope === "server")) {
+      await interaction.reply({
+        content: scope === "server" ? "\u0421\u0431\u043E\u0440\u043A\u0430 \u043F\u0430\u043C\u044F\u0442\u0438 \u043F\u043E \u0432\u0441\u0435\u043C\u0443 \u0441\u0435\u0440\u0432\u0435\u0440\u0443 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430." : "Memory-build \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u043C\u043E\u0434\u0435\u0440\u043E\u0432.",
+        flags: import_discord3.MessageFlags.Ephemeral
+      });
+      return;
+    }
+    await interaction.update({
+      content: await startMemoryBuildRun(runtime, interaction.guildId, scope === "channel" ? interaction.channelId : null, scope, "recent", interaction.user.id),
+      components: buildHoriPanelRows("memory", isOwner, isModerator)
+    });
+    return;
+  }
+  const content = await resolveHoriActionContent(runtime, interaction, action, isOwner, isModerator);
+  const tab = inferTabForHoriAction(action);
+  await interaction.update({
+    content,
+    components: buildHoriPanelRows(tab, isOwner, isModerator)
+  });
+}
+async function resolveHoriActionContent(runtime, interaction, action, isOwner, isModerator) {
+  const guildId = interaction.guildId;
+  switch (action) {
+    case "status":
+      return buildHoriStatus(runtime, guildId, interaction.channelId);
+    case "help":
+      return `${await runtime.slashAdmin.handleHelp()}
+
+\u0413\u043B\u0430\u0432\u043D\u044B\u0439 \u0432\u0445\u043E\u0434 \u0442\u0435\u043F\u0435\u0440\u044C /hori panel. \u0421\u0442\u0430\u0440\u044B\u0435 /bot-* \u043E\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u044B \u043A\u0430\u043A \u0430\u043B\u0438\u0430\u0441\u044B.`;
+    case "profile_self":
+    case "memory_self":
+      return runtime.slashAdmin.personalMemory(guildId, interaction.user.id, isOwner || isModerator);
+    case "relationship_self":
+      return runtime.slashAdmin.relationshipDetails(guildId, interaction.user.id);
+    case "relationship_hint":
+      return "\u0414\u043B\u044F \u0442\u043E\u0447\u043D\u043E\u0439 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438: `/bot-relationship user:@\u0447\u0435\u043B\u043E\u0432\u0435\u043A ...` \u0438\u043B\u0438 `/hori relationship user:@\u0447\u0435\u043B\u043E\u0432\u0435\u043A`. Owner \u043C\u043E\u0436\u0435\u0442 \u043C\u0435\u043D\u044F\u0442\u044C toneBias, roast/praise/interrupt \u0438 \u0446\u0438\u0444\u0440\u044B closeness/trust/familiarity/proactivity.";
+    case "style_default":
+      return runtime.slashAdmin.updateStyle(guildId, {
+        botName: "\u0425\u043E\u0440\u0438",
+        roughnessLevel: 2,
+        sarcasmLevel: 3,
+        roastLevel: 2,
+        replyLength: "short",
+        preferredStyle: "\u0436\u0435\u043D\u0441\u043A\u0430\u044F \u043F\u0435\u0440\u0441\u043E\u043D\u0430; \u043A\u043E\u0440\u043E\u0442\u043A\u043E; \u0442\u0435\u043F\u043B\u043E, \u043D\u043E \u043D\u0435 \u0441\u0430\u0445\u0430\u0440\u043D\u043E; \u0443\u043C\u0435\u0440\u0435\u043D\u043D\u043E \u044F\u0437\u0432\u0438\u0442\u0435\u043B\u044C\u043D\u043E; \u043D\u043E\u0440\u043C\u0430\u043B\u044C\u043D\u044B\u0439 \u0436\u0438\u0432\u043E\u0439 \u0441\u043B\u0435\u043D\u0433 \u0431\u0435\u0437 \u043A\u0440\u0438\u043D\u0436\u0430; \u043D\u0435 \u0441\u0442\u0430\u0432\u044C \u0444\u0438\u043D\u0430\u043B\u044C\u043D\u044B\u0435 \u0442\u043E\u0447\u043A\u0438 \u0432 \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0445 \u0440\u0435\u043F\u043B\u0438\u043A\u0430\u0445",
+        forbiddenWords: null,
+        forbiddenTopics: null
+      });
+    case "natural_split_on":
+      if (!isModerator && !isOwner) {
+        return "\u042D\u0442\u043E \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u043C\u043E\u0434\u0435\u0440\u043E\u0432.";
+      }
+      return runtime.slashAdmin.updateFeature(guildId, "natural_message_splitting_enabled", true);
+    case "read_chat_on":
+      if (!isModerator && !isOwner) {
+        return "\u042D\u0442\u043E \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u043C\u043E\u0434\u0435\u0440\u043E\u0432.";
+      }
+      return runtime.slashAdmin.channelConfig(guildId, interaction.channelId, {
+        allowBotReplies: true,
+        allowInterjections: true,
+        isMuted: false,
+        topicInterestTags: null
+      });
+    case "media_sync":
+      if (!isOwner) {
+        return "Media sync-pack \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430.";
+      }
+      return runtime.slashAdmin.mediaSyncPack();
+    case "memory_status":
+      return runtime.slashAdmin.channelMemoryStatus(guildId, interaction.channelId);
+    case "search_diagnose":
+      return diagnoseSearch(runtime);
+    case "feature_status":
+      return buildFeatureStatus(runtime, guildId);
+    case "channel_policy":
+      return buildChannelPolicyStatus(runtime, guildId, interaction.channelId);
+    case "debug_latest":
+      return buildLatestDebugTrace(runtime, guildId);
+    default:
+      return "\u041D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u0430\u044F \u043A\u043D\u043E\u043F\u043A\u0430 \u043F\u0430\u043D\u0435\u043B\u0438.";
+  }
+}
+function buildHoriPanelResponse(tab, isOwner, isModerator) {
+  return {
+    content: buildHoriPanelContent(tab, isOwner, isModerator),
+    components: buildHoriPanelRows(tab, isOwner, isModerator)
+  };
+}
+function buildHoriPanelContent(tab, isOwner, isModerator) {
+  const ownerLine = isOwner ? "owner-\u0434\u043E\u0441\u0442\u0443\u043F \u0430\u043A\u0442\u0438\u0432\u0435\u043D" : isModerator ? "moderator-\u0434\u043E\u0441\u0442\u0443\u043F \u0430\u043A\u0442\u0438\u0432\u0435\u043D" : "\u043E\u0431\u044B\u0447\u043D\u044B\u0439 \u0434\u043E\u0441\u0442\u0443\u043F: \u0432\u0438\u0434\u0438\u0448\u044C \u0442\u043E\u043B\u044C\u043A\u043E \u0441\u0432\u043E\u0451";
+  const actions = [
+    "status/help",
+    "style preset",
+    "identity/female persona",
+    "shortness",
+    "slang/warmth",
+    "sarcasm",
+    "punctuation/no-periods",
+    "natural splitting",
+    "read-chat in channel",
+    "interjection limits",
+    "gif/media frequency",
+    "mood",
+    "feature flags",
+    "power profile",
+    "Ollama URL",
+    "search diagnose",
+    "search tuning",
+    "memory-build channel",
+    "memory-build server",
+    "memory inspect self",
+    "memory inspect user",
+    "relationship inspect",
+    "relationship edit",
+    "profile inspect",
+    "profile refresh",
+    "channel policy",
+    "server memory",
+    "event memory",
+    "debug trace",
+    "lockdown"
+  ].join(", ");
+  const tabText = {
+    main: `Hori Control Panel
+${ownerLine}
+
+30 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439: ${actions}`,
+    owner: isOwner ? "Owner panel: power profile, lockdown, relationship \u0446\u0438\u0444\u0440\u044B, media sync-pack, server memory-build" : "Owner panel \u0441\u043A\u0440\u044B\u0442\u0430. \u0422\u0443\u0442 \u043D\u0438\u0447\u0435\u0433\u043E \u0441\u0442\u0440\u0430\u0448\u043D\u043E\u0433\u043E, \u043F\u0440\u043E\u0441\u0442\u043E \u043D\u0435 \u0442\u0432\u043E\u0451 \u043C\u0435\u043D\u044E",
+    style: "\u0421\u0442\u0438\u043B\u044C: \u0436\u0435\u043D\u0441\u043A\u0430\u044F \u043F\u0435\u0440\u0441\u043E\u043D\u0430, \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0435 \u043E\u0442\u0432\u0435\u0442\u044B, \u0442\u0435\u043F\u043B\u043E \u0431\u0435\u0437 \u0441\u0430\u0445\u0430\u0440\u0430, \u0443\u043C\u0435\u0440\u0435\u043D\u043D\u0430\u044F \u044F\u0437\u0432\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C, \u0436\u0438\u0432\u043E\u0439 \u0441\u043B\u0435\u043D\u0433 \u0438 \u0431\u0435\u0437 \u0444\u0438\u043D\u0430\u043B\u044C\u043D\u044B\u0445 \u0442\u043E\u0447\u0435\u043A \u0432 \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0445 \u0440\u0435\u043F\u043B\u0438\u043A\u0430\u0445",
+    liveliness: "\u0416\u0438\u0432\u043E\u0441\u0442\u044C: \u0447\u0442\u0435\u043D\u0438\u0435 \u0447\u0430\u0442\u0430, \u0440\u0435\u0434\u043A\u0438\u0435 \u0430\u043A\u043A\u0443\u0440\u0430\u0442\u043D\u044B\u0435 \u0432\u043C\u0435\u0448\u0430\u0442\u0435\u043B\u044C\u0441\u0442\u0432\u0430, natural message sprinting \u043C\u0430\u043A\u0441\u0438\u043C\u0443\u043C \u0432 2 \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0445 \u0447\u0430\u043D\u043A\u0430",
+    memory: "\u041F\u0430\u043C\u044F\u0442\u044C: Active Memory + Hybrid Recall \u043F\u0440\u0438\u043C\u0435\u043D\u044F\u0435\u0442\u0441\u044F \u043A \u043A\u0430\u0436\u0434\u043E\u043C\u0443 \u043E\u0442\u0432\u0435\u0442\u0443; memory-build \u0441\u043E\u0431\u0438\u0440\u0430\u0435\u0442 user/channel/server/event \u0444\u0430\u043A\u0442\u044B \u0438\u0437 \u0411\u0414",
+    people: "\u041B\u044E\u0434\u0438: \u0441\u0432\u043E\u0439 \u043F\u0440\u043E\u0444\u0438\u043B\u044C \u0432\u0438\u0434\u0438\u0442 \u043A\u0430\u0436\u0434\u044B\u0439; owner/moderator \u043C\u043E\u0433\u0443\u0442 \u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u043F\u043E\u0434\u0440\u043E\u0431\u043D\u0435\u0435, owner \u043D\u0430\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0435\u0442 relationship \u0446\u0438\u0444\u0440\u044B",
+    channels: "\u041A\u0430\u043D\u0430\u043B\u044B: \u043C\u043E\u0436\u043D\u043E \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u044C replies/interjections, \u043F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C policy \u0438 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u0443\u044E channel memory",
+    search: "\u041F\u043E\u0438\u0441\u043A: \u0434\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430 Brave/Ollama/cooldown/denylist \u0438 \u0443\u0441\u0438\u043B\u0435\u043D\u043D\u044B\u0439 fallback \u0447\u0435\u0440\u0435\u0437 \u043F\u0440\u044F\u043C\u043E\u0439 Brave search + fetch \u0441\u0442\u0440\u0430\u043D\u0438\u0446",
+    experiments: "\u042D\u043A\u0441\u043F\u0435\u0440\u0438\u043C\u0435\u043D\u0442\u044B: natural splitting, media reactions, selective engagement, reflection \u0438 link understanding",
+    diagnostics: "\u0414\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430: \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 trace, feature flags, search preflight \u0438 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u043F\u0430\u043C\u044F\u0442\u0438"
+  };
+  return tabText[tab];
+}
+function buildHoriPanelRows(tab, isOwner, isModerator) {
+  const rows = [
+    new import_discord3.ActionRowBuilder().addComponents(
+      new import_discord3.StringSelectMenuBuilder().setCustomId(`${HORI_PANEL_PREFIX}:tab`).setPlaceholder("\u0420\u0430\u0437\u0434\u0435\u043B \u043F\u0430\u043D\u0435\u043B\u0438").addOptions(
+        ...HORI_PANEL_TABS.map((value) => ({
+          label: horiTabLabel(value),
+          value,
+          default: value === tab
+        }))
+      )
+    )
+  ];
+  const actions = getHoriTabActions(tab, isOwner, isModerator);
+  for (let index = 0; index < actions.length; index += 5) {
+    rows.push(
+      new import_discord3.ActionRowBuilder().addComponents(
+        ...actions.slice(index, index + 5).map(
+          (action) => new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:${action.id}`).setLabel(action.label).setStyle(action.style ?? import_discord3.ButtonStyle.Secondary)
+        )
+      )
+    );
+  }
+  return rows;
+}
+function getHoriTabActions(tab, isOwner, isModerator) {
+  const common = [
+    { id: "status", label: "\u0421\u0442\u0430\u0442\u0443\u0441", style: import_discord3.ButtonStyle.Primary },
+    { id: "help", label: "Help" },
+    { id: "profile_self", label: "\u041C\u043E\u0439 \u043F\u0440\u043E\u0444\u0438\u043B\u044C" },
+    { id: "memory_self", label: "\u041C\u043E\u044F \u043F\u0430\u043C\u044F\u0442\u044C" }
+  ];
+  const byTab = {
+    main: common,
+    owner: [
+      { id: "power_panel", label: "Power", ownerOnly: true, style: import_discord3.ButtonStyle.Primary },
+      { id: "lockdown_status", label: "Lockdown?", ownerOnly: true },
+      { id: "lockdown_on", label: "Lockdown on", ownerOnly: true, style: import_discord3.ButtonStyle.Danger },
+      { id: "lockdown_off", label: "Lockdown off", ownerOnly: true },
+      { id: "media_sync", label: "Media sync", ownerOnly: true }
+    ],
+    style: [
+      { id: "style_default", label: "\u0416\u0438\u0432\u043E\u0439 preset", modOnly: true, style: import_discord3.ButtonStyle.Primary },
+      { id: "natural_split_on", label: "Sprinting on", modOnly: true },
+      { id: "feature_status", label: "\u0424\u0438\u0447\u0438" },
+      { id: "status", label: "\u0421\u0442\u0430\u0442\u0443\u0441" }
+    ],
+    liveliness: [
+      { id: "read_chat_on", label: "\u0427\u0438\u0442\u0430\u0442\u044C \u0447\u0430\u0442", modOnly: true, style: import_discord3.ButtonStyle.Primary },
+      { id: "natural_split_on", label: "2 \u0447\u0430\u043D\u043A\u0430", modOnly: true },
+      { id: "media_sync", label: "GIF pack", ownerOnly: true },
+      { id: "feature_status", label: "\u0424\u0438\u0447\u0438" }
+    ],
+    memory: [
+      { id: "memory_status", label: "Memory status", style: import_discord3.ButtonStyle.Primary },
+      { id: "memory_build_channel", label: "Build \u043A\u0430\u043D\u0430\u043B", modOnly: true },
+      { id: "memory_build_server", label: "Build \u0441\u0435\u0440\u0432\u0435\u0440", ownerOnly: true },
+      { id: "memory_self", label: "\u041C\u043E\u044F \u043F\u0430\u043C\u044F\u0442\u044C" }
+    ],
+    people: [
+      { id: "profile_self", label: "\u041C\u043E\u0439 \u043F\u0440\u043E\u0444\u0438\u043B\u044C", style: import_discord3.ButtonStyle.Primary },
+      { id: "relationship_self", label: "\u041E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435 \u043A\u043E \u043C\u043D\u0435" },
+      { id: "relationship_hint", label: "Owner edit", ownerOnly: true },
+      { id: "memory_self", label: "\u041C\u043E\u044F \u043F\u0430\u043C\u044F\u0442\u044C" }
+    ],
+    channels: [
+      { id: "channel_policy", label: "Policy", style: import_discord3.ButtonStyle.Primary },
+      { id: "read_chat_on", label: "Interject on", modOnly: true },
+      { id: "memory_status", label: "Channel memory" }
+    ],
+    search: [
+      { id: "search_diagnose", label: "\u0414\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430", style: import_discord3.ButtonStyle.Primary },
+      { id: "feature_status", label: "\u0424\u0438\u0447\u0438" }
+    ],
+    experiments: [
+      { id: "natural_split_on", label: "Sprinting on", modOnly: true, style: import_discord3.ButtonStyle.Primary },
+      { id: "feature_status", label: "\u0424\u0438\u0447\u0438" },
+      { id: "media_sync", label: "Media sync", ownerOnly: true }
+    ],
+    diagnostics: [
+      { id: "debug_latest", label: "Latest trace", style: import_discord3.ButtonStyle.Primary },
+      { id: "search_diagnose", label: "Search diag" },
+      { id: "feature_status", label: "\u0424\u0438\u0447\u0438" },
+      { id: "status", label: "\u0421\u0442\u0430\u0442\u0443\u0441" }
+    ]
+  };
+  return byTab[tab].filter((action) => {
+    if (action.ownerOnly) {
+      return isOwner;
+    }
+    if (action.modOnly) {
+      return isOwner || isModerator;
+    }
+    return true;
+  });
+}
+function parseHoriPanelTab(value) {
+  return HORI_PANEL_TABS.includes(value) ? value : null;
+}
+function horiTabLabel(tab) {
+  const labels = {
+    main: "\u0413\u043B\u0430\u0432\u043D\u0430\u044F",
+    owner: "\u0412\u043B\u0430\u0434\u0435\u043B\u0435\u0446",
+    style: "\u0421\u0442\u0438\u043B\u044C",
+    liveliness: "\u0416\u0438\u0432\u043E\u0441\u0442\u044C",
+    memory: "\u041F\u0430\u043C\u044F\u0442\u044C",
+    people: "\u041B\u044E\u0434\u0438",
+    channels: "\u041A\u0430\u043D\u0430\u043B\u044B",
+    search: "\u041F\u043E\u0438\u0441\u043A",
+    experiments: "\u042D\u043A\u0441\u043F\u0435\u0440\u0438\u043C\u0435\u043D\u0442\u044B",
+    diagnostics: "\u0414\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430"
+  };
+  return labels[tab];
+}
+function inferTabForHoriAction(action) {
+  if (action.startsWith("memory")) return "memory";
+  if (action.startsWith("search")) return "search";
+  if (action.startsWith("lockdown") || action === "power_panel") return "owner";
+  if (action.startsWith("relationship") || action.startsWith("profile")) return "people";
+  if (action.startsWith("channel") || action === "read_chat_on") return "channels";
+  if (action.startsWith("debug") || action === "feature_status") return "diagnostics";
+  if (action.startsWith("style") || action.startsWith("natural")) return "style";
+  return "main";
+}
+async function buildHoriStatus(runtime, guildId, channelId) {
+  const [power, lockdown, memory] = await Promise.all([
+    runtime.slashAdmin.powerStatus(),
+    getOwnerLockdownState(runtime, true),
+    runtime.slashAdmin.channelMemoryStatus(guildId, channelId)
+  ]);
+  return [
+    "Hori status",
+    power,
+    `Owner lockdown: ${lockdown.enabled ? "on" : "off"}`,
+    memory
+  ].join("\n\n");
+}
+async function buildFeatureStatus(runtime, guildId) {
+  const flags = await runtime.runtimeConfig.getFeatureFlags(guildId);
+  return Object.entries(flags).map(([key, value]) => `${value ? "on " : "off"} ${key}`).join("\n").slice(0, 1900);
+}
+async function buildChannelPolicyStatus(runtime, guildId, channelId) {
+  const policy = await runtime.runtimeConfig.getChannelPolicy(guildId, channelId);
+  return [
+    `Channel policy for ${channelId}`,
+    `allowBotReplies=${policy.allowBotReplies}`,
+    `allowInterjections=${policy.allowInterjections}`,
+    `isMuted=${policy.isMuted}`,
+    `topicInterestTags=${policy.topicInterestTags.join(", ") || "none"}`
+  ].join("\n");
+}
+async function buildLatestDebugTrace(runtime, guildId) {
+  const trace = await runtime.prisma.botEventLog.findFirst({
+    where: { guildId },
+    orderBy: { createdAt: "desc" },
+    select: {
+      messageId: true,
+      eventType: true,
+      intent: true,
+      routeReason: true,
+      usedSearch: true,
+      toolCalls: true,
+      memoryLayers: true,
+      debugTrace: true,
+      createdAt: true
+    }
+  });
+  if (!trace) {
+    return "Trace \u043F\u043E\u043A\u0430 \u043D\u0435\u0442.";
+  }
+  return JSON.stringify(trace, null, 2).slice(0, 1900);
+}
+async function diagnoseSearch(runtime) {
+  const lines = [
+    `BRAVE_SEARCH_API_KEY: ${runtime.env.BRAVE_SEARCH_API_KEY ? "set" : "missing"}`,
+    `SEARCH_USER_COOLDOWN_SEC: ${runtime.env.SEARCH_USER_COOLDOWN_SEC}`,
+    `SEARCH_MAX_REQUESTS_PER_RESPONSE: ${runtime.env.SEARCH_MAX_REQUESTS_PER_RESPONSE}`,
+    `SEARCH_MAX_PAGES_PER_RESPONSE: ${runtime.env.SEARCH_MAX_PAGES_PER_RESPONSE}`,
+    `SEARCH_DOMAIN_DENYLIST: ${runtime.env.SEARCH_DOMAIN_DENYLIST.join(", ") || "none"}`,
+    `OLLAMA_BASE_URL: ${runtime.env.OLLAMA_BASE_URL ?? "missing"}`,
+    `OLLAMA_SMART_MODEL: ${runtime.env.OLLAMA_SMART_MODEL}`,
+    `OLLAMA_TIMEOUT_MS: ${runtime.env.OLLAMA_TIMEOUT_MS}`
+  ];
+  if (runtime.env.OLLAMA_BASE_URL) {
+    try {
+      const response = await fetch(new URL("/api/tags", runtime.env.OLLAMA_BASE_URL), {
+        signal: AbortSignal.timeout(5e3)
+      });
+      if (response.ok) {
+        const payload = await response.json();
+        lines.push(`Ollama tags: ok (${payload.models?.map((model) => model.name).filter(Boolean).join(", ") || "no models"})`);
+      } else {
+        lines.push(`Ollama tags: status ${response.status}`);
+      }
+    } catch (error) {
+      lines.push(`Ollama tags: ${(0, import_shared3.asErrorMessage)(error)}`);
+    }
+  }
+  return lines.join("\n");
+}
+async function startMemoryBuildRun(runtime, guildId, channelId, scope, depth, requestedBy) {
+  const run = await runtime.prisma.memoryBuildRun.create({
+    data: {
+      guildId,
+      channelId,
+      scope,
+      depth,
+      status: "queued",
+      requestedBy,
+      progressJson: {
+        phase: "queued",
+        processedChunks: 0,
+        totalChunks: 0
+      }
+    }
+  });
+  const payload = { runId: run.id, guildId, channelId, scope, depth, requestedBy };
+  await runtime.queues.memoryFormation.add("memory.formation", payload, { jobId: `memory-formation:${run.id}` });
+  return [
+    "Memory-build \u043F\u043E\u0441\u0442\u0430\u0432\u043B\u0435\u043D \u0432 \u043E\u0447\u0435\u0440\u0435\u0434\u044C",
+    `runId: ${run.id}`,
+    `scope=${scope}, depth=${depth}${channelId ? `, channel=${channelId}` : ""}`,
+    "\u0421\u0442\u0430\u0442\u0443\u0441 \u0441\u043C\u043E\u0442\u0440\u0438 \u0432 /hori panel -> \u041F\u0430\u043C\u044F\u0442\u044C -> Memory status"
+  ].join("\n");
+}
+function getInteractionDisplayName(interaction) {
+  return interaction.member && "displayName" in interaction.member ? interaction.member.displayName : interaction.user.globalName;
+}
+function hasManageGuild(interaction) {
+  return interaction.memberPermissions?.has(import_discord3.PermissionFlagsBits.ManageGuild) ?? false;
+}
 async function fetchSourceMessageForAlbum(runtime, interaction, messageId) {
   if (interaction.channel && "messages" in interaction.channel) {
     try {
@@ -674,6 +1320,18 @@ function parseMemoryAlbumModalId(customId) {
     return null;
   }
   return { requestId, messageId };
+}
+function buildPowerPanelRows(activeProfile) {
+  return [
+    new import_discord3.ActionRowBuilder().addComponents(
+      ...POWER_PROFILES.map(
+        (profile) => new import_discord3.ButtonBuilder().setCustomId(`${POWER_PANEL_PREFIX}:apply:${profile}`).setLabel(profile).setStyle(profile === activeProfile ? import_discord3.ButtonStyle.Primary : import_discord3.ButtonStyle.Secondary)
+      )
+    )
+  ];
+}
+function isPowerProfile(value) {
+  return POWER_PROFILES.includes(value);
 }
 
 // src/router/message-router.ts
@@ -734,6 +1392,7 @@ async function enqueueBackgroundJobs(runtime, envelope) {
 }
 
 // src/responders/message-responder.ts
+var import_node_path = require("path");
 var import_shared5 = require("@hori/shared");
 async function sendReply(message, reply, options = {}) {
   const text = typeof reply === "string" ? reply : reply.text;
@@ -751,10 +1410,11 @@ async function sendReply(message, reply, options = {}) {
   }
 }
 function mediaReplyPayload(content, filePath) {
-  return content ? { content, files: [filePath] } : { files: [filePath] };
+  const resolvedPath = (0, import_node_path.isAbsolute)(filePath) ? filePath : (0, import_node_path.resolve)(process.cwd(), filePath);
+  return content ? { content, files: [resolvedPath] } : { files: [resolvedPath] };
 }
 function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve2) => setTimeout(resolve2, ms));
 }
 
 // src/router/message-router.ts
@@ -1087,7 +1747,7 @@ function registerEvents(runtime) {
   });
   runtime.client.on("interactionCreate", async (interaction) => {
     try {
-      if (interaction.isChatInputCommand() || interaction.isMessageContextMenuCommand() || interaction.isModalSubmit()) {
+      if (interaction.isChatInputCommand() || interaction.isMessageContextMenuCommand() || interaction.isModalSubmit() || interaction.isButton() || interaction.isStringSelectMenu()) {
         await routeInteraction(runtime, interaction);
       }
     } catch (error) {
@@ -1119,6 +1779,7 @@ function createNoopQueues(logger, prefix) {
     profile: createNoopQueue("profile"),
     embedding: createNoopQueue("embedding"),
     topic: createNoopQueue("topic"),
+    memoryFormation: createNoopQueue("memoryFormation"),
     cleanup: createNoopQueue("cleanup"),
     searchCache: createNoopQueue("searchCache"),
     prefix
@@ -1152,6 +1813,7 @@ async function bootstrapBot() {
   const summaryService = new import_memory2.SummaryService(prisma);
   const relationshipService = new import_memory2.RelationshipService(prisma);
   const retrievalService = new import_memory2.RetrievalService(prisma);
+  const activeMemoryService = new import_memory2.ActiveMemoryService(retrievalService);
   const memoryAlbumService = new import_memory2.MemoryAlbumService(prisma);
   const interactionRequestService = new import_memory2.InteractionRequestService(prisma);
   const reflectionService = new import_memory2.ReflectionService(prisma);
@@ -1161,7 +1823,7 @@ async function bootstrapBot() {
   const moodService = new import_core2.MoodService(prisma);
   const mediaReactionService = new import_core2.MediaReactionService(prisma);
   const replyQueueService = new import_core2.ReplyQueueService(prisma, env.REPLY_QUEUE_BUSY_TTL_SEC);
-  const contextService = new import_memory2.ContextService(prisma, summaryService, profileService, relationshipService, retrievalService);
+  const contextService = new import_memory2.ContextService(prisma, summaryService, profileService, relationshipService, retrievalService, activeMemoryService);
   const llmClient = new import_llm.OllamaClient(env, logger);
   if (env.OLLAMA_BASE_URL) {
     try {

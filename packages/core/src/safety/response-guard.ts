@@ -29,6 +29,22 @@ function removeRepeatedSentences(text: string) {
   return text.replace(/([^.!?\n]{6,}[.!?])\s+\1/giu, "$1");
 }
 
+function stripShortFinalPeriod(text: string) {
+  if (text.length > 180 || text.includes("\n") || /\bhttps?:\/\//i.test(text)) {
+    return text;
+  }
+
+  if (!/[.!?…]$/.test(text) || !text.endsWith(".")) {
+    return text;
+  }
+
+  if (/\d\.$/.test(text) || /\.\.\.$/.test(text)) {
+    return text;
+  }
+
+  return text.slice(0, -1).trimEnd();
+}
+
 export function normalizeOutput(text: string): string {
   let result = text;
 
@@ -69,11 +85,11 @@ export class ResponseGuard {
       guarded = guarded.replace(new RegExp(escaped, "gi"), "[скрыто]");
     }
 
-    if (guarded.length > options.maxChars) {
+  if (guarded.length > options.maxChars) {
       guarded = `${guarded.slice(0, options.maxChars - 3).trim()}...`;
     }
 
-    return guarded;
+    return stripShortFinalPeriod(guarded);
   }
 }
 

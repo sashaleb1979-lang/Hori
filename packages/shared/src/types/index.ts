@@ -21,6 +21,11 @@ export type MemoryLayer =
   | "recent_messages"
   | "channel_summaries"
   | "server_memory"
+  | "user_memory"
+  | "channel_memory"
+  | "event_memory"
+  | "active_memory"
+  | "similar_messages"
   | "user_profile"
   | "relationship"
   | "reply_chain"
@@ -290,6 +295,19 @@ export interface BotTrace {
     fetched: number;
     reason?: string;
   };
+  activeMemory?: {
+    enabled: boolean;
+    entries: number;
+    layers: string[];
+    reason?: string;
+  };
+  searchDiagnostics?: {
+    ok: boolean;
+    provider?: string;
+    error?: string;
+    fetchedPages?: number;
+    fallbackUsed?: boolean;
+  };
   reflection?: {
     recorded: boolean;
     sentiment?: "positive" | "negative" | "neutral";
@@ -320,6 +338,27 @@ export interface ContextEntity {
   surface: string;
   canonical?: string;
   score: number;
+}
+
+export interface ActiveMemoryEntry {
+  scope: "user" | "server" | "channel" | "event" | "message";
+  key: string;
+  value: string;
+  type: string;
+  score: number;
+  reason: string;
+  sourceId?: string;
+  sourceUserId?: string | null;
+  createdAt?: Date;
+}
+
+export interface ActiveMemoryContext {
+  entries: ActiveMemoryEntry[];
+  trace: {
+    enabled: boolean;
+    layers: string[];
+    reason?: string;
+  };
 }
 
 export interface ContextScores {
@@ -388,6 +427,7 @@ export interface ContextBundleV2 extends ContextBundle {
   topicWindow: ContextMessage[];
   entities: ContextEntity[];
   entityMemories: Array<{ key: string; value: string; type: string; score: number }>;
+  activeMemory?: ActiveMemoryContext;
 }
 
 export interface AnalyticsTopItem {
@@ -413,6 +453,7 @@ export interface QueueJobNames {
   profile: "profile.refresh";
   embedding: "embedding.generate";
   topic: "topic.update";
+  memoryFormation: "memory.formation";
   cleanup: "cleanup.execute";
   searchCache: "search-cache.cleanup";
 }
@@ -428,8 +469,17 @@ export interface ProfileJobPayload {
 }
 
 export interface EmbeddingJobPayload {
-  entityType: "message" | "server_memory" | "user_memory";
+  entityType: "message" | "server_memory" | "user_memory" | "channel_memory" | "event_memory";
   entityId: string;
+}
+
+export interface MemoryFormationJobPayload {
+  runId: string;
+  guildId: string;
+  channelId?: string | null;
+  scope: "channel" | "server";
+  depth: "recent" | "deep";
+  requestedBy: string;
 }
 
 export interface TopicJobPayload {

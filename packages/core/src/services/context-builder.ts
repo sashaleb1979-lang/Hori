@@ -132,6 +132,27 @@ export class ContextBuilderService {
       );
     }
 
+    if (bundle.activeMemory?.entries.length) {
+      memoryLayers.push("active_memory");
+      sectionsUsed.push("active_memory");
+
+      const activeLines = bundle.activeMemory.entries.slice(0, 8).map((entry) => {
+        if (entry.scope === "message") {
+          return `- [similar message/${entry.reason}/${entry.score}] ${entry.value}`;
+        }
+
+        return `- [${entry.scope}/${entry.type}/${entry.reason}/${entry.score}] ${entry.key}: ${entry.value}`;
+      });
+
+      anchorSections.push("[ACTIVE MEMORY]\n" + activeLines.join("\n"));
+
+      const scopes = new Set(bundle.activeMemory.entries.map((entry) => entry.scope));
+      if (scopes.has("user")) memoryLayers.push("user_memory");
+      if (scopes.has("channel")) memoryLayers.push("channel_memory");
+      if (scopes.has("event")) memoryLayers.push("event_memory");
+      if (scopes.has("message")) memoryLayers.push("similar_messages");
+    }
+
     if (bundle.userProfile) {
       memoryLayers.push("user_profile");
       sectionsUsed.push("user_profile");

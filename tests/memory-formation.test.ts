@@ -38,12 +38,22 @@ describe("memory-formation", () => {
         },
         updateMany: async () => ({ count: 0 }),
       },
+      channelMemoryNote: {
+        findMany: async () => [],
+      },
+      eventMemory: {
+        findMany: async () => [],
+      },
     } as unknown as AppPrismaClient;
 
     const retrieval = {
       findRelevantServerMemory: async () => [],
       findRelevantUserMemory: async () => [],
+      findRelevantChannelMemory: async () => [],
+      findRelevantEventMemory: async () => [],
       rememberServerFact: async () => ({ id: "server-1" }),
+      rememberChannelFact: async () => ({ id: "channel-1" }),
+      rememberEventFact: async () => ({ id: "event-1" }),
       setEmbedding: async () => undefined,
     };
 

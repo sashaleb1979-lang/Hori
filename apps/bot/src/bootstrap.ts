@@ -4,7 +4,7 @@ import { AnalyticsQueryService, MessageIngestService } from "@hori/analytics";
 import { assertEnvForRole, loadEnv } from "@hori/config";
 import { AffinityService, createChatOrchestrator, MediaReactionService, MoodService, ReplyQueueService, RuntimeConfigService, SlashAdminService } from "@hori/core";
 import { EmbeddingAdapter, ModelRouter, OllamaClient, ToolOrchestrator } from "@hori/llm";
-import { ContextService, InteractionRequestService, MemoryAlbumService, ProfileService, ReflectionService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
+import { ActiveMemoryService, ContextService, InteractionRequestService, MemoryAlbumService, ProfileService, ReflectionService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
 import { BraveSearchClient, SearchCacheService } from "@hori/search";
 import { createLogger, createPrismaClient, createRedisClient, createAppQueues, ensureInfrastructureReady, loadPersistedOllamaBaseUrl } from "@hori/shared";
 
@@ -20,6 +20,7 @@ interface BotQueues {
   profile: BotQueueHandle;
   embedding: BotQueueHandle;
   topic: BotQueueHandle;
+  memoryFormation: BotQueueHandle;
   cleanup: BotQueueHandle;
   searchCache: BotQueueHandle;
   prefix: string;
@@ -65,6 +66,7 @@ function createNoopQueues(logger: ReturnType<typeof createLogger>, prefix: strin
     profile: createNoopQueue("profile"),
     embedding: createNoopQueue("embedding"),
     topic: createNoopQueue("topic"),
+    memoryFormation: createNoopQueue("memoryFormation"),
     cleanup: createNoopQueue("cleanup"),
     searchCache: createNoopQueue("searchCache"),
     prefix
@@ -106,6 +108,7 @@ export async function bootstrapBot() {
   const summaryService = new SummaryService(prisma);
   const relationshipService = new RelationshipService(prisma);
   const retrievalService = new RetrievalService(prisma);
+  const activeMemoryService = new ActiveMemoryService(retrievalService);
   const memoryAlbumService = new MemoryAlbumService(prisma);
   const interactionRequestService = new InteractionRequestService(prisma);
   const reflectionService = new ReflectionService(prisma);
@@ -115,7 +118,7 @@ export async function bootstrapBot() {
   const moodService = new MoodService(prisma);
   const mediaReactionService = new MediaReactionService(prisma);
   const replyQueueService = new ReplyQueueService(prisma, env.REPLY_QUEUE_BUSY_TTL_SEC);
-  const contextService = new ContextService(prisma, summaryService, profileService, relationshipService, retrievalService);
+  const contextService = new ContextService(prisma, summaryService, profileService, relationshipService, retrievalService, activeMemoryService);
   const llmClient = new OllamaClient(env, logger);
 
   // --- Ollama health check: сразу видно в логах, жива ли нейронка ---

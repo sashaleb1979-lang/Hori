@@ -3,6 +3,7 @@ export const QUEUE_NAMES = {
   profile: "profile.refresh",
   embedding: "embedding.generate",
   topic: "topic.update",
+  memoryFormation: "memory.formation",
   cleanup: "cleanup.execute",
   searchCache: "search-cache.cleanup"
 } as const;
@@ -33,7 +34,8 @@ export const SLASH_COMMANDS = [
   "bot-media",
   "bot-ai-url",
   "bot-lockdown",
-  "bot-import"
+  "bot-import",
+  "hori"
 ] as const;
 
 export const HALF_HOUR_MS = 30 * 60 * 1000;

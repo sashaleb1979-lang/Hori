@@ -147,6 +147,69 @@ export function pickClosestInstalledModel(requestedModel: string, availableModel
   return best.model.name;
 }
 
+export function pickBestInstalledChatModel(availableModels: string[], fallbackModel: string) {
+  const chatCandidates = availableModels
+    .map(describeModel)
+    .filter((model) => !model.isEmbedding);
+
+  if (!chatCandidates.length) {
+    return fallbackModel;
+  }
+
+  const best = chatCandidates
+    .map((model) => ({
+      model,
+      score:
+        (model.sizeValue ?? 0) * 100 +
+        (model.familyNormalized.includes("qwen") ? 8 : 0) +
+        (model.familyNormalized.includes("llama") ? 4 : 0) +
+        (model.familyNormalized.includes("mistral") ? 3 : 0)
+    }))
+    .sort((left, right) => right.score - left.score)[0];
+
+  return best?.model.name ?? fallbackModel;
+}
+
+export async function resolveBestInstalledChatModel(
+  baseUrl: string | undefined,
+  fallbackModel: string,
+  logger?: AppLogger,
+  timeoutMs = 10000
+) {
+  if (!baseUrl) {
+    return { model: fallbackModel, availableModels: [] as string[], reason: "no_ollama_base_url" };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(new URL("/api/tags", baseUrl), {
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      return { model: fallbackModel, availableModels: [] as string[], reason: `tags_status_${response.status}` };
+    }
+
+    const payload = (await response.json()) as OllamaTagsResponse;
+    const availableModels = (payload.models ?? [])
+      .map((model) => model.name?.trim())
+      .filter((model): model is string => Boolean(model));
+
+    return {
+      model: pickBestInstalledChatModel(availableModels, fallbackModel),
+      availableModels,
+      reason: availableModels.length ? "largest_installed_chat_model" : "no_installed_models"
+    };
+  } catch (error) {
+    logger?.warn({ error: asErrorMessage(error), baseUrl }, "failed to resolve best installed ollama model");
+    return { model: fallbackModel, availableModels: [] as string[], reason: "tags_fetch_failed" };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function buildChatPayload(
   options: LlmChatOptions,
   model: string,
