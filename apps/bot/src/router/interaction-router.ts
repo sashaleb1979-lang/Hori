@@ -5,6 +5,7 @@ import {
   ButtonStyle,
   ChatInputCommandInteraction,
   ContextMenuCommandInteraction,
+  EmbedBuilder,
   MessageFlags,
   ModalBuilder,
   ModalSubmitInteraction,
@@ -20,12 +21,15 @@ import { RelationshipService } from "@hori/memory";
 
 import type { BotRuntime } from "../bootstrap";
 import { getOwnerLockdownState, isBotOwner, setOwnerLockdownState, shouldIgnoreForOwnerLockdown } from "./owner-lockdown";
+import { BotStateService, HORI_STATE_TABS, horiStateTabLabel, parseHoriStateTab, type HoriStateTab } from "../services/bot-state-service";
 
 const PUBLIC_COMMANDS = new Set(["hori", "bot-help", "bot-album"]);
 const OWNER_COMMANDS = new Set(["bot-ai-url", "bot-import", "bot-lockdown", "bot-power"]);
 const MEMORY_ALBUM_MODAL_PREFIX = "memory-album";
+const HORI_MODAL_PREFIX = "hori-modal";
 const HORI_PANEL_PREFIX = "hori-panel";
 const HORI_ACTION_PREFIX = "hori-action";
+const HORI_STATE_PANEL_PREFIX = "hori-state";
 const POWER_PANEL_PREFIX = "power-panel";
 const POWER_PROFILES = ["economy", "balanced", "expanded", "max"] as const;
 const HORI_PANEL_TABS = ["main", "owner", "style", "liveliness", "memory", "people", "channels", "search", "experiments", "diagnostics"] as const;
@@ -524,6 +528,20 @@ async function handleHoriCommand(
     return;
   }
 
+  if (subcommand === "state") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Панель состояния только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const tab = parseHoriStateTab(interaction.options.getString("tab")) ?? "persona";
+    await interaction.reply({
+      ...(await buildHoriStatePanelResponse(runtime, tab, interaction.guildId, interaction.channelId)),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
   if (subcommand === "search") {
     await handleHoriSearchCommand(runtime, interaction, isModerator);
     return;
@@ -611,6 +629,232 @@ async function handleHoriCommand(
     return;
   }
 
+  if (subcommand === "memory") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Память сервера через `/hori memory` только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const action = interaction.options.getString("action", true);
+    const key = interaction.options.getString("key", true);
+    const content = action === "remember"
+      ? await runtime.slashAdmin.remember(interaction.guildId, interaction.user.id, key, interaction.options.getString("value") ?? "")
+      : await runtime.slashAdmin.forget(interaction.guildId, key);
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (subcommand === "channel") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Настройки канала только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.reply({
+      content: await runtime.slashAdmin.channelConfig(
+        interaction.guildId,
+        interaction.options.getChannel("channel")?.id ?? interaction.channelId,
+        {
+          allowBotReplies: interaction.options.getBoolean("allow-bot-replies"),
+          allowInterjections: interaction.options.getBoolean("allow-interjections"),
+          isMuted: interaction.options.getBoolean("is-muted"),
+          topicInterestTags: interaction.options.getString("topic-interest-tags")
+        }
+      ),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (subcommand === "summary") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Сводки канала только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.reply({
+      content: await runtime.slashAdmin.summary(interaction.guildId, interaction.options.getChannel("channel")?.id ?? interaction.channelId),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (subcommand === "stats") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Статистика только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.reply({ content: await runtime.slashAdmin.stats(interaction.guildId), flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (subcommand === "topic") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Темы канала только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const channelId = interaction.options.getChannel("channel")?.id ?? interaction.channelId;
+    const content = interaction.options.getString("action", true) === "reset"
+      ? await runtime.slashAdmin.topicReset(interaction.guildId, channelId)
+      : await runtime.slashAdmin.topicStatus(interaction.guildId, channelId);
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (subcommand === "mood") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Mood только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const action = interaction.options.getString("action", true);
+    const content = action === "set"
+      ? await runtime.slashAdmin.moodSet(
+          interaction.guildId,
+          (interaction.options.getString("mode") ?? "normal") as PersonaMode,
+          interaction.options.getInteger("minutes") ?? 60,
+          interaction.options.getString("reason")
+        )
+      : action === "clear"
+        ? await runtime.slashAdmin.moodClear(interaction.guildId)
+        : await runtime.slashAdmin.moodStatus(interaction.guildId);
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (subcommand === "queue") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Очередь только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const channelId = interaction.options.getChannel("channel")?.id ?? null;
+    const content = interaction.options.getString("action", true) === "clear"
+      ? await runtime.slashAdmin.queueClear(interaction.guildId, channelId)
+      : await runtime.slashAdmin.queueStatus(interaction.guildId, channelId);
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (subcommand === "album") {
+    const featureFlags = await runtime.runtimeConfig.getFeatureFlags(interaction.guildId);
+    if (!featureFlags.memoryAlbumEnabled) {
+      await interaction.reply({ content: "Memory Album сейчас выключен.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const action = interaction.options.getString("action", true);
+    const content = action === "remove"
+      ? await runtime.slashAdmin.albumRemove(interaction.guildId, interaction.user.id, interaction.options.getString("id") ?? "")
+      : await runtime.slashAdmin.albumList(interaction.guildId, interaction.user.id, interaction.options.getInteger("limit") ?? 8);
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (subcommand === "debug") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Debug trace только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const messageId = interaction.options.getString("message-id");
+    await interaction.reply({
+      content: messageId ? await runtime.slashAdmin.debugTrace(messageId) : await buildLatestDebugTrace(runtime, interaction.guildId),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (subcommand === "feature") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Feature flags только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.reply({
+      content: await runtime.slashAdmin.updateFeature(
+        interaction.guildId,
+        interaction.options.getString("key", true),
+        interaction.options.getBoolean("enabled", true)
+      ),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (subcommand === "media") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Media registry только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const action = interaction.options.getString("action", true);
+    if (action === "sync-pack" && !isOwner) {
+      await interaction.reply({ content: "Синхронизация pack доступна только владельцу.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const content = action === "add"
+      ? await runtime.slashAdmin.mediaAdd({
+          mediaId: interaction.options.getString("id") ?? "",
+          type: interaction.options.getString("type") ?? "image",
+          filePath: interaction.options.getString("path") ?? "",
+          triggerTags: interaction.options.getString("trigger-tags"),
+          toneTags: interaction.options.getString("tone-tags"),
+          allowedChannels: interaction.options.getString("channels"),
+          allowedMoods: interaction.options.getString("moods"),
+          nsfw: interaction.options.getBoolean("nsfw")
+        })
+      : action === "sync-pack"
+        ? await runtime.slashAdmin.mediaSyncPack(interaction.options.getString("path") ?? "assets/memes/catalog.json")
+      : action === "disable"
+        ? await runtime.slashAdmin.mediaDisable(interaction.options.getString("id") ?? "")
+        : await runtime.slashAdmin.mediaList();
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (subcommand === "power") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Power только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const action = interaction.options.getString("action", true);
+    if (action === "panel") {
+      const status = await runtime.runtimeConfig.getPowerProfileStatus();
+      await interaction.reply({
+        content: await runtime.slashAdmin.powerPanel(),
+        components: buildPowerPanelRows(status.activeProfile),
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    const content = action === "apply"
+      ? await runtime.slashAdmin.powerApply((interaction.options.getString("profile") ?? "balanced") as (typeof POWER_PROFILES)[number], interaction.user.id)
+      : await runtime.slashAdmin.powerStatus();
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (subcommand === "ai-url") {
+    await handleHoriAiUrlCommand(runtime, interaction, isOwner);
+    return;
+  }
+
+  if (subcommand === "lockdown") {
+    await handleHoriLockdownCommand(runtime, interaction, isOwner);
+    return;
+  }
+
+  if (subcommand === "import") {
+    await handleHoriImportCommand(runtime, interaction, isOwner);
+    return;
+  }
+
   await interaction.reply({ content: "Не знаю такую ветку `/hori`.", flags: MessageFlags.Ephemeral });
 }
 
@@ -654,17 +898,253 @@ async function handleHoriSearchCommand(
   });
 }
 
+async function handleHoriAiUrlCommand(
+  runtime: BotRuntime,
+  interaction: ChatInputCommandInteraction,
+  isOwner: boolean
+) {
+  if (!isOwner) {
+    await interaction.reply({ content: "AI URL только для владельца.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const newUrl = interaction.options.getString("url", true).trim();
+
+  try {
+    new URL(newUrl);
+  } catch {
+    await interaction.reply({ content: `Невалидный URL: ${newUrl}`, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const oldUrl = runtime.env.OLLAMA_BASE_URL ?? "(не задан)";
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  let status = "проверяю...";
+  let appliedUrl = oldUrl;
+  try {
+    const probe = await fetch(new URL("/api/tags", newUrl), { signal: AbortSignal.timeout(5000) });
+    if (probe.ok) {
+      const data = (await probe.json()) as { models?: { name: string }[] };
+      const models = data.models?.map((m) => m.name).join(", ") ?? "?";
+      runtime.env.OLLAMA_BASE_URL = newUrl;
+      appliedUrl = newUrl;
+      status = `Ollama доступен: ${models}`;
+
+      try {
+        await persistOllamaBaseUrl(runtime.prisma, newUrl, interaction.user.id);
+        status += "\nURL сохранён и переживёт рестарт.";
+      } catch (error) {
+        runtime.logger.warn({ error: asErrorMessage(error), url: newUrl }, "failed to persist ollama url");
+        status += "\nURL применён только в памяти процесса.";
+      }
+    } else {
+      status = `URL не применён: Ollama вернул ${probe.status}`;
+    }
+  } catch (err) {
+    status = `URL не применён: ${err instanceof Error ? err.message : "unknown"}`;
+  }
+
+  await interaction.editReply({
+    content: `AI URL ${appliedUrl === newUrl ? "обновлён" : "не изменён"}\nТекущий: \`${appliedUrl}\`\nПроверяли: \`${newUrl}\`\n\n${status}`
+  });
+}
+
+async function handleHoriLockdownCommand(
+  runtime: BotRuntime,
+  interaction: ChatInputCommandInteraction,
+  isOwner: boolean
+) {
+  if (!isOwner) {
+    await interaction.reply({ content: "Локдаун только для владельца.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (!runtime.env.DISCORD_OWNER_IDS.length) {
+    await interaction.reply({ content: "Сначала укажи Discord user ID владельца в BOT_OWNERS.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const mode = interaction.options.getString("mode", true);
+  if (mode === "status") {
+    const state = await getOwnerLockdownState(runtime, true);
+    await interaction.reply({
+      content: `Owner lockdown: ${state.enabled ? "on" : "off"}${state.updatedBy ? `\nПоследнее изменение: ${state.updatedBy}` : ""}`,
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const enabled = mode === "on";
+  await setOwnerLockdownState(runtime, enabled, interaction.user.id);
+  const cleared = enabled ? await runtime.replyQueue.clearAll() : { count: 0 };
+
+  await interaction.reply({
+    content: enabled
+      ? `Локдаун включён. Теперь Хори молча игнорирует всех, кроме владельца. Очередь ответов сброшена: ${cleared.count}.`
+      : "Локдаун выключен. Хори снова слушает обычные правила сервера.",
+    flags: MessageFlags.Ephemeral
+  });
+}
+
+async function handleHoriImportCommand(
+  runtime: BotRuntime,
+  interaction: ChatInputCommandInteraction,
+  isOwner: boolean
+) {
+  if (!isOwner) {
+    await interaction.reply({ content: "Импорт доступен только владельцу.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const attachment = interaction.options.getAttachment("file", true);
+  if (!attachment.name.endsWith(".json")) {
+    await interaction.reply({ content: "Нужен .json файл.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (attachment.size > 50 * 1024 * 1024) {
+    await interaction.reply({ content: "Файл слишком большой (макс 50 МБ).", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  try {
+    const response = await fetch(attachment.url);
+    if (!response.ok) {
+      await interaction.editReply({ content: `Не удалось скачать файл: ${response.status}` });
+      return;
+    }
+
+    const data = (await response.json()) as {
+      guildId?: string;
+      messages?: { userId: string; username?: string; content: string; timestamp: string; channelId?: string; replyToId?: string }[];
+    };
+
+    const guildId = data.guildId ?? interaction.guildId;
+    const messages = data.messages;
+
+    if (!guildId || !Array.isArray(messages) || messages.length === 0) {
+      await interaction.editReply({ content: "Файл пуст или не содержит массив messages." });
+      return;
+    }
+
+    if (messages.length > 50000) {
+      await interaction.editReply({ content: "Максимум 50 000 сообщений за раз." });
+      return;
+    }
+
+    await runtime.prisma.guild.upsert({
+      where: { id: guildId },
+      update: {},
+      create: { id: guildId }
+    });
+
+    let imported = 0;
+    let skipped = 0;
+    let errors = 0;
+    const seenUsers = new Set<string>();
+    const userMsgCounts = new Map<string, number>();
+
+    for (const entry of messages) {
+      if (!entry.userId || !entry.content || !entry.timestamp) {
+        skipped += 1;
+        continue;
+      }
+
+      const createdAt = new Date(entry.timestamp);
+      if (Number.isNaN(createdAt.getTime())) {
+        skipped += 1;
+        continue;
+      }
+
+      const messageId = `import:${guildId}:${entry.userId}:${createdAt.getTime()}`;
+      try {
+        const exists = await runtime.prisma.message.findUnique({ where: { id: messageId }, select: { id: true } });
+        if (exists) {
+          skipped += 1;
+          continue;
+        }
+
+        await runtime.prisma.user.upsert({
+          where: { id: entry.userId },
+          update: { username: entry.username ?? undefined },
+          create: { id: entry.userId, username: entry.username ?? null }
+        });
+        await runtime.prisma.message.create({
+          data: {
+            id: messageId,
+            guildId,
+            channelId: entry.channelId ?? "imported",
+            userId: entry.userId,
+            content: entry.content,
+            createdAt,
+            charCount: entry.content.length,
+            tokenEstimate: Math.ceil(entry.content.length / 4),
+            mentionCount: 0,
+            replyToMessageId: entry.replyToId ? `import:${guildId}:${entry.replyToId}` : undefined
+          }
+        });
+
+        seenUsers.add(entry.userId);
+        userMsgCounts.set(entry.userId, (userMsgCounts.get(entry.userId) ?? 0) + 1);
+        imported += 1;
+      } catch {
+        errors += 1;
+      }
+    }
+
+    let seeded = 0;
+    if (userMsgCounts.size > 0) {
+      try {
+        const relService = new RelationshipService(runtime.prisma);
+        seeded = await relService.seedFromImportedHistory(guildId, userMsgCounts);
+      } catch {
+        // Non-critical.
+      }
+    }
+
+    await interaction.editReply({
+      content: [
+        "Импорт завершён",
+        `Импортировано: ${imported}`,
+        `Пропущено: ${skipped}`,
+        `Ошибок: ${errors}`,
+        `Пользователей: ${seenUsers.size}`,
+        `Профилей отношений создано: ${seeded}`
+      ].join("\n")
+    });
+  } catch (err) {
+    await interaction.editReply({ content: `Ошибка импорта: ${err instanceof Error ? err.message : "unknown"}` });
+  }
+}
+
 async function routeStringSelectInteraction(
   runtime: BotRuntime,
   interaction: StringSelectMenuInteraction,
   isOwner: boolean
 ) {
-  if (interaction.customId !== `${HORI_PANEL_PREFIX}:tab`) {
+  if (interaction.customId === `${HORI_STATE_PANEL_PREFIX}:tab`) {
+    if (!interaction.guildId) {
+      await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    if (!isOwner) {
+      await interaction.reply({ content: "Панель состояния только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const tab = parseHoriStateTab(interaction.values[0]) ?? "persona";
+    await interaction.update(await buildHoriStatePanelResponse(runtime, tab, interaction.guildId, interaction.channelId));
     return;
   }
 
-  const tab = parseHoriPanelTab(interaction.values[0]) ?? "main";
-  await interaction.update(buildHoriPanelResponse(tab, isOwner, hasManageGuild(interaction)));
+  if (interaction.customId === `${HORI_PANEL_PREFIX}:tab`) {
+    const tab = parseHoriPanelTab(interaction.values[0]) ?? "main";
+    await interaction.update(buildHoriPanelResponse(tab, isOwner, hasManageGuild(interaction)));
+  }
 }
 
 async function handleOwnerLockdownCommand(
@@ -766,6 +1246,11 @@ async function handleRememberMomentContext(
 }
 
 async function routeModalSubmit(runtime: BotRuntime, interaction: ModalSubmitInteraction) {
+  if (interaction.customId.startsWith(`${HORI_MODAL_PREFIX}:`)) {
+    await handleHoriModalSubmit(runtime, interaction);
+    return;
+  }
+
   const parsed = parseMemoryAlbumModalId(interaction.customId);
 
   if (!parsed) {
@@ -830,6 +1315,113 @@ async function routeModalSubmit(runtime: BotRuntime, interaction: ModalSubmitInt
   });
 }
 
+async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubmitInteraction) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const isOwner = isBotOwner(runtime, interaction.user.id);
+  const isModerator = ensureModerator(interaction);
+  const [, modalKind, channelIdFromModal] = interaction.customId.split(":");
+
+  if (modalKind === "ai-url") {
+    if (!isOwner) {
+      await interaction.reply({ content: "AI URL только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const url = interaction.fields.getTextInputValue("url").trim();
+    try {
+      new URL(url);
+    } catch {
+      await interaction.reply({ content: `Невалидный URL: ${url}`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    runtime.env.OLLAMA_BASE_URL = url;
+    await persistOllamaBaseUrl(runtime.prisma, url, interaction.user.id);
+    await interaction.reply({ content: `AI URL сохранён: ${url}`, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (modalKind === "relationship") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Relationship-цифры только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const [roastLevel, praiseBias, interruptPriority] = readNumberList(interaction.fields.getTextInputValue("levels"));
+    const [closeness, trustLevel, familiarity, proactivityPreference] = readNumberList(interaction.fields.getTextInputValue("signals"));
+    const [doNotMock, doNotInitiate, ...topics] = interaction.fields.getTextInputValue("switches").split(",").map((part) => part.trim()).filter(Boolean);
+    const userId = interaction.fields.getTextInputValue("userId").trim();
+    const toneBias = interaction.fields.getTextInputValue("toneBias").trim();
+
+    const content = [
+      await runtime.slashAdmin.updateRelationship(interaction.guildId, userId, interaction.user.id, {
+        toneBias: toneBias || undefined,
+        roastLevel: readIntInRange(roastLevel, 0, 5),
+        praiseBias: readIntInRange(praiseBias, 0, 5),
+        interruptPriority: readIntInRange(interruptPriority, 0, 5),
+        doNotMock: readOptionalBoolean(doNotMock),
+        doNotInitiate: readOptionalBoolean(doNotInitiate),
+        protectedTopics: topics.length ? topics : undefined,
+        closeness: readUnitFloat(closeness),
+        trustLevel: readUnitFloat(trustLevel),
+        familiarity: readUnitFloat(familiarity),
+        proactivityPreference: readUnitFloat(proactivityPreference)
+      }),
+      "",
+      await runtime.slashAdmin.relationshipDetails(interaction.guildId, userId)
+    ].join("\n");
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (modalKind === "style") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Стиль только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const [roughness, sarcasm, roast] = readNumberList(interaction.fields.getTextInputValue("levels"));
+    const replyLength = interaction.fields.getTextInputValue("replyLength").trim();
+    const [forbiddenWords, forbiddenTopics] = interaction.fields.getTextInputValue("forbidden").split("|").map((part) => part.trim());
+
+    await interaction.reply({
+      content: await runtime.slashAdmin.updateStyle(interaction.guildId, {
+        botName: blankToNull(interaction.fields.getTextInputValue("botName")),
+        roughnessLevel: readIntInRange(roughness, 0, 5) ?? null,
+        sarcasmLevel: readIntInRange(sarcasm, 0, 5) ?? null,
+        roastLevel: readIntInRange(roast, 0, 5) ?? null,
+        replyLength: replyLength === "short" || replyLength === "medium" || replyLength === "long" ? replyLength : null,
+        preferredStyle: blankToNull(interaction.fields.getTextInputValue("preferredStyle")),
+        forbiddenWords: blankToNull(forbiddenWords ?? ""),
+        forbiddenTopics: blankToNull(forbiddenTopics ?? "")
+      }),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (modalKind === "channel") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Канал только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.reply({
+      content: await runtime.slashAdmin.channelConfig(interaction.guildId, channelIdFromModal ?? interaction.channelId, {
+        allowBotReplies: readOptionalBoolean(interaction.fields.getTextInputValue("allowBotReplies")),
+        allowInterjections: readOptionalBoolean(interaction.fields.getTextInputValue("allowInterjections")),
+        isMuted: readOptionalBoolean(interaction.fields.getTextInputValue("isMuted")),
+        topicInterestTags: blankToNull(interaction.fields.getTextInputValue("topicInterestTags"))
+      }),
+      flags: MessageFlags.Ephemeral
+    });
+  }
+}
+
 async function routeButtonInteraction(runtime: BotRuntime, interaction: ButtonInteraction, isOwner: boolean) {
   if (interaction.customId.startsWith(`${HORI_ACTION_PREFIX}:`)) {
     await handleHoriPanelAction(runtime, interaction, isOwner, hasManageGuild(interaction));
@@ -857,6 +1449,7 @@ async function routeButtonInteraction(runtime: BotRuntime, interaction: ButtonIn
 
   await interaction.update({
     content,
+    embeds: [],
     components: buildPowerPanelRows(status.activeProfile)
   });
 }
@@ -874,6 +1467,56 @@ async function handleHoriPanelAction(
 
   const action = interaction.customId.slice(`${HORI_ACTION_PREFIX}:`.length);
 
+  if (action === "state_panel") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Панель состояния только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.update(await buildHoriStatePanelResponse(runtime, "persona", interaction.guildId, interaction.channelId));
+    return;
+  }
+
+  if (action === "ai_url_modal") {
+    if (!isOwner) {
+      await interaction.reply({ content: "AI URL только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.showModal(buildAiUrlModal(runtime.env.OLLAMA_BASE_URL));
+    return;
+  }
+
+  if (action === "relationship_edit_modal") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Relationship-цифры только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.showModal(buildRelationshipModal());
+    return;
+  }
+
+  if (action === "style_edit_modal") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Стиль только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.showModal(buildStyleModal());
+    return;
+  }
+
+  if (action === "channel_edit_modal") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Канал только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.showModal(buildChannelModal(interaction.channelId));
+    return;
+  }
+
   if (action === "power_panel") {
     if (!isOwner) {
       await interaction.reply({ content: "Эта панель только для владельца бота.", flags: MessageFlags.Ephemeral });
@@ -883,6 +1526,7 @@ async function handleHoriPanelAction(
     const status = await runtime.runtimeConfig.getPowerProfileStatus();
     await interaction.update({
       content: await runtime.slashAdmin.powerPanel(),
+      embeds: [],
       components: buildPowerPanelRows(status.activeProfile)
     });
     return;
@@ -899,6 +1543,7 @@ async function handleHoriPanelAction(
       const state = await getOwnerLockdownState(runtime, true);
       await interaction.update({
         content: `Owner lockdown: ${state.enabled ? "on" : "off"}${state.updatedBy ? `\nПоследнее изменение: ${state.updatedBy}` : ""}`,
+        embeds: [],
         components: buildHoriPanelRows("owner", isOwner, isModerator)
       });
       return;
@@ -911,6 +1556,7 @@ async function handleHoriPanelAction(
       content: enabled
         ? `Локдаун включён. Все кроме владельца молча игнорируются. Очередь сброшена: ${cleared.count}.`
         : "Локдаун выключен.",
+      embeds: [],
       components: buildHoriPanelRows("owner", isOwner, isModerator)
     });
     return;
@@ -928,6 +1574,7 @@ async function handleHoriPanelAction(
 
     await interaction.update({
       content: await startMemoryBuildRun(runtime, interaction.guildId, scope === "channel" ? interaction.channelId : null, scope, "recent", interaction.user.id),
+      embeds: [],
       components: buildHoriPanelRows("memory", isOwner, isModerator)
     });
     return;
@@ -937,6 +1584,7 @@ async function handleHoriPanelAction(
   const tab = inferTabForHoriAction(action);
   await interaction.update({
     content,
+    embeds: [],
     components: buildHoriPanelRows(tab, isOwner, isModerator)
   });
 }
@@ -954,14 +1602,14 @@ async function resolveHoriActionContent(
     case "status":
       return buildHoriStatus(runtime, guildId, interaction.channelId);
     case "help":
-      return `${await runtime.slashAdmin.handleHelp()}\n\nГлавный вход теперь /hori panel. Старые /bot-* оставлены как алиасы.`;
+      return `${await runtime.slashAdmin.handleHelp()}\n\nВидимый список команд теперь держится вокруг /hori. Старые /bot-* можно вернуть через DISCORD_REGISTER_LEGACY_COMMANDS=true.`;
     case "profile_self":
     case "memory_self":
       return runtime.slashAdmin.personalMemory(guildId, interaction.user.id, isOwner || isModerator);
     case "relationship_self":
       return runtime.slashAdmin.relationshipDetails(guildId, interaction.user.id);
     case "relationship_hint":
-      return "Для точной настройки: `/bot-relationship user:@человек ...` или `/hori relationship user:@человек`. Owner может менять toneBias, roast/praise/interrupt и цифры closeness/trust/familiarity/proactivity.";
+      return "Для точной настройки: `/hori relationship user:@человек ...` или кнопка Edit relation в owner panel. Owner может менять toneBias, roast/praise/interrupt и цифры closeness/trust/familiarity/proactivity.";
     case "style_default":
       return runtime.slashAdmin.updateStyle(guildId, {
         botName: "Хори",
@@ -1010,50 +1658,19 @@ async function resolveHoriActionContent(
 
 function buildHoriPanelResponse(tab: HoriPanelTab, isOwner: boolean, isModerator: boolean) {
   return {
-    content: buildHoriPanelContent(tab, isOwner, isModerator),
+    content: "",
+    embeds: [buildHoriPanelEmbed(tab, isOwner, isModerator)],
     components: buildHoriPanelRows(tab, isOwner, isModerator)
   };
 }
 
-function buildHoriPanelContent(tab: HoriPanelTab, isOwner: boolean, isModerator: boolean) {
+function buildHoriPanelEmbed(tab: HoriPanelTab, isOwner: boolean, isModerator: boolean) {
   const ownerLine = isOwner ? "owner-доступ активен" : isModerator ? "moderator-доступ активен" : "обычный доступ: видишь только своё";
-  const actions = [
-    "status/help",
-    "style preset",
-    "identity/female persona",
-    "shortness",
-    "slang/warmth",
-    "sarcasm",
-    "punctuation/no-periods",
-    "natural splitting",
-    "read-chat in channel",
-    "interjection limits",
-    "gif/media frequency",
-    "mood",
-    "feature flags",
-    "power profile",
-    "Ollama URL",
-    "search diagnose",
-    "search tuning",
-    "memory-build channel",
-    "memory-build server",
-    "memory inspect self",
-    "memory inspect user",
-    "relationship inspect",
-    "relationship edit",
-    "profile inspect",
-    "profile refresh",
-    "channel policy",
-    "server memory",
-    "event memory",
-    "debug trace",
-    "lockdown"
-  ].join(", ");
 
   const tabText: Record<HoriPanelTab, string> = {
-    main: `Hori Control Panel\n${ownerLine}\n\n30 действий: ${actions}`,
+    main: "Главный вход: профиль, память, поиск, канал, стиль и диагностика без старого командного шума.",
     owner: isOwner
-      ? "Owner panel: power profile, lockdown, relationship цифры, media sync-pack, server memory-build"
+      ? "Owner panel: power profile, lockdown, relationship редактор, media sync-pack, server memory-build и отдельная state-панель."
       : "Owner panel скрыта. Тут ничего страшного, просто не твоё меню",
     style: "Стиль: женская персона, короткие ответы, тепло без сахара, умеренная язвительность, живой сленг и без финальных точек в коротких репликах",
     liveliness: "Живость: чтение чата, редкие аккуратные вмешательства, natural message sprinting максимум в 2 коротких чанка",
@@ -1065,7 +1682,16 @@ function buildHoriPanelContent(tab: HoriPanelTab, isOwner: boolean, isModerator:
     diagnostics: "Диагностика: последние trace, feature flags, search preflight и состояние памяти"
   };
 
-  return tabText[tab];
+  const actions = getHoriTabActions(tab, isOwner, isModerator).map((action) => action.label).join(" / ") || "нет доступных кнопок";
+
+  return new EmbedBuilder()
+    .setTitle(`Hori Panel: ${horiTabLabel(tab)}`)
+    .setDescription(tabText[tab])
+    .addFields(
+      { name: "Доступ", value: ownerLine, inline: true },
+      { name: "Кнопки", value: actions.slice(0, 1024) },
+      { name: "Команды", value: "Основной вход: `/hori`. Legacy `/bot-*` скрыты из регистрации по умолчанию." }
+    );
 }
 
 function buildHoriPanelRows(tab: HoriPanelTab, isOwner: boolean, isModerator: boolean) {
@@ -1101,6 +1727,57 @@ function buildHoriPanelRows(tab: HoriPanelTab, isOwner: boolean, isModerator: bo
   return rows;
 }
 
+async function buildHoriStatePanelResponse(runtime: BotRuntime, tab: HoriStateTab, guildId: string, channelId: string) {
+  const service = new BotStateService(runtime);
+  const panel = await service.build(tab, guildId, channelId);
+
+  return {
+    content: "",
+    embeds: [
+      new EmbedBuilder()
+        .setTitle(panel.title)
+        .setDescription(panel.description)
+        .addFields(...panel.fields.map((field) => ({
+          name: field.name,
+          value: field.value || "none",
+          inline: field.inline
+        })))
+    ],
+    components: buildHoriStatePanelRows(tab)
+  };
+}
+
+function buildHoriStatePanelRows(tab: HoriStateTab) {
+  return [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`${HORI_STATE_PANEL_PREFIX}:tab`)
+        .setPlaceholder("Состояние")
+        .addOptions(
+          ...HORI_STATE_TABS.map((value) => ({
+            label: horiStateTabLabel(value),
+            value,
+            default: value === tab
+          }))
+        )
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${HORI_ACTION_PREFIX}:debug_latest`)
+        .setLabel("Latest trace")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${HORI_ACTION_PREFIX}:search_diagnose`)
+        .setLabel("Search diag")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${HORI_ACTION_PREFIX}:power_panel`)
+        .setLabel("Power")
+        .setStyle(ButtonStyle.Primary)
+    )
+  ];
+}
+
 function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boolean) {
   const common = [
     { id: "status", label: "Статус", style: ButtonStyle.Primary },
@@ -1112,7 +1789,10 @@ function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boo
   const byTab: Record<HoriPanelTab, Array<{ id: string; label: string; style?: ButtonStyle; ownerOnly?: boolean; modOnly?: boolean }>> = {
     main: common,
     owner: [
+      { id: "state_panel", label: "State", ownerOnly: true, style: ButtonStyle.Primary },
       { id: "power_panel", label: "Power", ownerOnly: true, style: ButtonStyle.Primary },
+      { id: "ai_url_modal", label: "AI URL", ownerOnly: true },
+      { id: "relationship_edit_modal", label: "Edit relation", ownerOnly: true },
       { id: "lockdown_status", label: "Lockdown?", ownerOnly: true },
       { id: "lockdown_on", label: "Lockdown on", ownerOnly: true, style: ButtonStyle.Danger },
       { id: "lockdown_off", label: "Lockdown off", ownerOnly: true },
@@ -1120,6 +1800,7 @@ function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boo
     ],
     style: [
       { id: "style_default", label: "Живой preset", modOnly: true, style: ButtonStyle.Primary },
+      { id: "style_edit_modal", label: "Edit style", modOnly: true },
       { id: "natural_split_on", label: "Sprinting on", modOnly: true },
       { id: "feature_status", label: "Фичи" },
       { id: "status", label: "Статус" }
@@ -1144,6 +1825,7 @@ function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boo
     ],
     channels: [
       { id: "channel_policy", label: "Policy", style: ButtonStyle.Primary },
+      { id: "channel_edit_modal", label: "Edit channel", modOnly: true },
       { id: "read_chat_on", label: "Interject on", modOnly: true },
       { id: "memory_status", label: "Channel memory" }
     ],
@@ -1198,7 +1880,7 @@ function horiTabLabel(tab: HoriPanelTab) {
 function inferTabForHoriAction(action: string): HoriPanelTab {
   if (action.startsWith("memory")) return "memory";
   if (action.startsWith("search")) return "search";
-  if (action.startsWith("lockdown") || action === "power_panel") return "owner";
+  if (action.startsWith("lockdown") || action === "power_panel" || action === "state_panel" || action === "ai_url_modal") return "owner";
   if (action.startsWith("relationship") || action.startsWith("profile")) return "people";
   if (action.startsWith("channel") || action === "read_chat_on") return "channels";
   if (action.startsWith("debug") || action === "feature_status") return "diagnostics";
@@ -1373,6 +2055,184 @@ function buildMemoryAlbumModalId(requestId: string, messageId: string) {
   return `${MEMORY_ALBUM_MODAL_PREFIX}:${requestId}:${messageId}`;
 }
 
+function buildAiUrlModal(currentUrl?: string) {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:ai-url`)
+    .setTitle("Ollama URL");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("url")
+        .setLabel("Новый Ollama URL")
+        .setPlaceholder("https://...")
+        .setValue(currentUrl ?? "")
+        .setRequired(true)
+        .setMaxLength(300)
+        .setStyle(TextInputStyle.Short)
+    )
+  );
+
+  return modal;
+}
+
+function buildRelationshipModal() {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:relationship`)
+    .setTitle("Relationship editor");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("userId")
+        .setLabel("Discord user ID")
+        .setRequired(true)
+        .setMaxLength(40)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("toneBias")
+        .setLabel("toneBias")
+        .setPlaceholder("neutral / friendly / sharp / playful")
+        .setRequired(false)
+        .setMaxLength(40)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("levels")
+        .setLabel("roast,praise,interrupt")
+        .setPlaceholder("2,1,0")
+        .setRequired(false)
+        .setMaxLength(30)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("signals")
+        .setLabel("closeness,trust,familiarity,proactivity")
+        .setPlaceholder("0.6,0.5,0.7,0.5")
+        .setRequired(false)
+        .setMaxLength(60)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("switches")
+        .setLabel("doNotMock,doNotInitiate,topics")
+        .setPlaceholder("false,false,тема1,тема2")
+        .setRequired(false)
+        .setMaxLength(200)
+        .setStyle(TextInputStyle.Paragraph)
+    )
+  );
+
+  return modal;
+}
+
+function buildStyleModal() {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:style`)
+    .setTitle("Style editor");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("botName")
+        .setLabel("Имя")
+        .setPlaceholder("Хори")
+        .setRequired(false)
+        .setMaxLength(40)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("levels")
+        .setLabel("roughness,sarcasm,roast")
+        .setPlaceholder("2,3,2")
+        .setRequired(false)
+        .setMaxLength(30)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("replyLength")
+        .setLabel("replyLength")
+        .setPlaceholder("short / medium / long")
+        .setRequired(false)
+        .setMaxLength(20)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("preferredStyle")
+        .setLabel("Стиль")
+        .setRequired(false)
+        .setMaxLength(900)
+        .setStyle(TextInputStyle.Paragraph)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("forbidden")
+        .setLabel("forbiddenWords | forbiddenTopics")
+        .setPlaceholder("слово1,слово2 | тема1,тема2")
+        .setRequired(false)
+        .setMaxLength(400)
+        .setStyle(TextInputStyle.Paragraph)
+    )
+  );
+
+  return modal;
+}
+
+function buildChannelModal(channelId: string) {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:channel:${channelId}`)
+    .setTitle("Channel policy");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("allowBotReplies")
+        .setLabel("allowBotReplies")
+        .setPlaceholder("true / false / пусто")
+        .setRequired(false)
+        .setMaxLength(10)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("allowInterjections")
+        .setLabel("allowInterjections")
+        .setPlaceholder("true / false / пусто")
+        .setRequired(false)
+        .setMaxLength(10)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("isMuted")
+        .setLabel("isMuted")
+        .setPlaceholder("true / false / пусто")
+        .setRequired(false)
+        .setMaxLength(10)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("topicInterestTags")
+        .setLabel("topicInterestTags")
+        .setPlaceholder("мемы,тех,игры")
+        .setRequired(false)
+        .setMaxLength(200)
+        .setStyle(TextInputStyle.Paragraph)
+    )
+  );
+
+  return modal;
+}
+
 function parseMemoryAlbumModalId(customId: string) {
   const [prefix, requestId, messageId] = customId.split(":");
 
@@ -1398,4 +2258,49 @@ function buildPowerPanelRows(activeProfile: (typeof POWER_PROFILES)[number]) {
 
 function isPowerProfile(value: string): value is (typeof POWER_PROFILES)[number] {
   return POWER_PROFILES.includes(value as (typeof POWER_PROFILES)[number]);
+}
+
+function blankToNull(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function readNumberList(value: string) {
+  return value.split(",").map((part) => {
+    const parsed = Number(part.trim());
+    return Number.isFinite(parsed) ? parsed : undefined;
+  });
+}
+
+function readIntInRange(value: number | undefined, min: number, max: number) {
+  if (value === undefined || !Number.isInteger(value)) {
+    return undefined;
+  }
+
+  return Math.max(min, Math.min(max, value));
+}
+
+function readUnitFloat(value: number | undefined) {
+  if (value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.min(1, value));
+}
+
+function readOptionalBoolean(value: string | undefined) {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (["true", "1", "yes", "on", "да"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "0", "no", "off", "нет"].includes(normalized)) {
+    return false;
+  }
+
+  return undefined;
 }

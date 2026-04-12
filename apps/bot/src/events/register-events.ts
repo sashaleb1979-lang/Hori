@@ -1,18 +1,24 @@
 import { MessageFlags, REST, Routes } from "discord.js";
 
 import type { BotRuntime } from "../bootstrap";
-import { slashCommandDefinitions, contextMenuDefinitions } from "../commands/definitions";
+import { contextMenuDefinitions, getSlashCommandDefinitions } from "../commands/definitions";
 import { routeInteraction } from "../router/interaction-router";
 import { routeMessage } from "../router/message-router";
 
 async function syncCommands(runtime: BotRuntime) {
   const rest = new REST({ version: "10" }).setToken(runtime.env.DISCORD_TOKEN!);
+  const slashCommandDefinitions = getSlashCommandDefinitions({
+    includeLegacy: runtime.env.DISCORD_REGISTER_LEGACY_COMMANDS
+  });
   const body = [...slashCommandDefinitions, ...contextMenuDefinitions];
   const slashCount = slashCommandDefinitions.length;
   const contextCount = contextMenuDefinitions.length;
 
   await rest.put(Routes.applicationCommands(runtime.env.DISCORD_CLIENT_ID!), { body });
-  runtime.logger.info({ scope: "global", slash: slashCount, context: contextCount, total: body.length }, "discord commands synced globally");
+  runtime.logger.info(
+    { scope: "global", slash: slashCount, context: contextCount, total: body.length, legacy: runtime.env.DISCORD_REGISTER_LEGACY_COMMANDS },
+    "discord commands synced globally"
+  );
 }
 
 export function registerEvents(runtime: BotRuntime) {

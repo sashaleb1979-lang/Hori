@@ -301,6 +301,13 @@ export interface BotTrace {
     layers: string[];
     reason?: string;
   };
+  microReaction?: {
+    kind: "toxicity" | "praise";
+    rule: string;
+    confidence: number;
+    splitChunks?: string[];
+  };
+  llmCalls?: LlmCallTrace[];
   searchDiagnostics?: {
     ok: boolean;
     provider?: string;
@@ -359,6 +366,16 @@ export interface ActiveMemoryContext {
     layers: string[];
     reason?: string;
   };
+}
+
+export interface LlmCallTrace {
+  purpose: string;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  source: "ollama" | "estimated";
+  durationMs?: number;
 }
 
 export interface ContextScores {

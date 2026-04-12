@@ -21,6 +21,11 @@ interface ModelDescriptor {
 interface OllamaChatChunk {
   error?: string;
   done?: boolean;
+  total_duration?: number;
+  prompt_eval_count?: number;
+  prompt_eval_duration?: number;
+  eval_count?: number;
+  eval_duration?: number;
   message?: {
     role?: "assistant";
     content?: string;
@@ -258,20 +263,25 @@ export function parseOllamaChatResponseBody(bodyText: string): LlmChatResponse {
   const payloads = lines.map((line) => JSON.parse(line) as OllamaChatChunk);
 
   if (payloads.length === 1 && payloads[0]?.message?.content !== undefined && !trimmedBody.includes("\n")) {
-    const message = payloads[0].message;
+    const payload = payloads[0];
+    const message = payload.message;
+
+    const usage = buildUsageFromOllamaChunk(payload);
 
     return {
       message: {
         role: message?.role ?? "assistant",
         content: message?.content ?? "",
         ...(message?.tool_calls ? { tool_calls: message.tool_calls } : {})
-      }
+      },
+      ...(usage ? { usage } : {})
     };
   }
 
   let role: "assistant" = "assistant";
   let content = "";
   let toolCalls: LlmToolCall[] | undefined;
+  let finalPayload: OllamaChatChunk | undefined;
 
   for (const payload of payloads) {
     if (payload.error) {
@@ -289,14 +299,50 @@ export function parseOllamaChatResponseBody(bodyText: string): LlmChatResponse {
     if (payload.message?.tool_calls?.length) {
       toolCalls = payload.message.tool_calls;
     }
+
+    if (payload.done || payload.prompt_eval_count !== undefined || payload.eval_count !== undefined) {
+      finalPayload = payload;
+    }
   }
+
+  const usage = buildUsageFromOllamaChunk(finalPayload);
 
   return {
     message: {
       role,
       content,
       ...(toolCalls ? { tool_calls: toolCalls } : {})
-    }
+    },
+    ...(usage ? { usage } : {})
+  };
+}
+
+function nsToMs(value?: number) {
+  return value === undefined ? undefined : Math.round(value / 1_000_000);
+}
+
+function buildUsageFromOllamaChunk(payload?: OllamaChatChunk): LlmChatResponse["usage"] {
+  if (!payload) {
+    return undefined;
+  }
+
+  const promptTokens = payload.prompt_eval_count;
+  const completionTokens = payload.eval_count;
+
+  if (promptTokens === undefined && completionTokens === undefined) {
+    return undefined;
+  }
+
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens:
+      promptTokens !== undefined || completionTokens !== undefined
+        ? (promptTokens ?? 0) + (completionTokens ?? 0)
+        : undefined,
+    totalDurationMs: nsToMs(payload.total_duration),
+    promptEvalDurationMs: nsToMs(payload.prompt_eval_duration),
+    evalDurationMs: nsToMs(payload.eval_duration)
   };
 }
 

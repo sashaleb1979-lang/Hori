@@ -129,6 +129,7 @@ export const defaultRuntimeTuning = {
   MEDIA_AUTO_GLOBAL_COOLDOWN_SEC: 7200,
   MEDIA_AUTO_MIN_CONFIDENCE: 0.82,
   MEDIA_AUTO_MIN_INTENSITY: 0.62,
+  DISCORD_REGISTER_LEGACY_COMMANDS: false,
 
   // --- Quiet hours + rate limits (из AICO agency.yaml) ---
   QUIET_HOURS_ENABLED: true,

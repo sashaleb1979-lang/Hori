@@ -27,6 +27,14 @@ export interface LlmChatResponse {
     content: string;
     tool_calls?: LlmToolCall[];
   };
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+    totalDurationMs?: number;
+    promptEvalDurationMs?: number;
+    evalDurationMs?: number;
+  };
 }
 
 export interface LlmChatOptions {

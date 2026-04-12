@@ -313,9 +313,16 @@ async function processInvocation(
 
   const replyText = typeof result.reply === "string" ? result.reply : result.reply.text;
   const hasMedia = typeof result.reply !== "string" && Boolean(result.reply.media);
+  const microSplitChunks = result.trace.microReaction?.splitChunks;
   const splitPlan = hasMedia
     ? null
-    : planNaturalMessageSplit({
+    : microSplitChunks?.length
+      ? {
+          chunks: microSplitChunks,
+          delayMs: 650,
+          reason: "micro_reaction"
+        }
+      : planNaturalMessageSplit({
         text: replyText,
         enabled: routingConfig.featureFlags.naturalMessageSplittingEnabled,
         intent: result.trace.intent,

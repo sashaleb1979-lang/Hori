@@ -26,7 +26,12 @@ export class SlashAdminService {
   ) {}
 
   async handleHelp() {
-    return "Команды: /bot-album для своих сохранённых моментов. Админка: /bot-style, /bot-memory, /bot-relationship, /bot-feature, /bot-debug, /bot-profile, /bot-channel, /bot-summary, /bot-stats, /bot-topic, /bot-mood, /bot-queue, /bot-reflection, /bot-media. Владелец: /bot-lockdown, /bot-power.";
+    return [
+      "Главный вход: `/hori panel`.",
+      "Частые ветки: `/hori profile`, `/hori search`, `/hori memory`, `/hori channel`, `/hori mood`, `/hori queue`, `/hori album`.",
+      "Owner: `/hori state`, `/hori relationship`, `/hori power`, `/hori lockdown`, `/hori ai-url`, `/hori import`.",
+      "Legacy `/bot-*` команды скрыты из регистрации по умолчанию; их можно вернуть флагом `DISCORD_REGISTER_LEGACY_COMMANDS=true`."
+    ].join("\n");
   }
 
   async updateStyle(
@@ -116,7 +121,7 @@ export class SlashAdminService {
       return "Power panel недоступна.";
     }
 
-    return `${formatPowerProfileStatus(await this.runtimeConfig.getPowerProfileStatus())}\n\nВыбери пресет кнопками ниже или через /bot-power apply.`;
+    return `${formatPowerProfileStatus(await this.runtimeConfig.getPowerProfileStatus())}\n\nВыбери пресет кнопками ниже или через /hori power action:apply.`;
   }
 
   async powerApply(profile: PowerProfileName, updatedBy?: string) {

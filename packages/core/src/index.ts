@@ -13,6 +13,7 @@ export * from "./services/context-scoring-service";
 export * from "./services/emotion-media-decision-service";
 export * from "./services/affinity-service";
 export * from "./services/media-reaction-service";
+export * from "./services/micro-reaction-service";
 export * from "./services/mood-service";
 export * from "./services/reply-queue-service";
 export * from "./services/runtime-config-service";

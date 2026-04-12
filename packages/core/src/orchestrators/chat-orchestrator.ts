@@ -1,9 +1,9 @@
 import type { AppEnv } from "@hori/config";
-import type { AppLogger, AppPrismaClient, BotReplyPayload, BotTrace, MessageEnvelope, SearchHit } from "@hori/shared";
+import type { AppLogger, AppPrismaClient, BotReplyPayload, BotTrace, LlmCallTrace, LlmChatMessage, MessageEnvelope, SearchHit } from "@hori/shared";
 import { asErrorMessage, botLatencyHistogram, botRepliesCounter, buildMemoryKey, clamp, normalizeWhitespace } from "@hori/shared";
 
 import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet, getModelProfile } from "@hori/llm";
-import type { LlmClient } from "@hori/llm";
+import type { LlmChatResponse, LlmClient } from "@hori/llm";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
 import { ContextService, ReflectionService, RelationshipService, RetrievalService } from "@hori/memory";
 import { BraveSearchClient, buildSourceDigest, extractLinksFromMessage, fetchWebPage } from "@hori/search";
@@ -22,6 +22,7 @@ import { ContextScoringService } from "../services/context-scoring-service";
 import { EmotionMediaDecisionService } from "../services/emotion-media-decision-service";
 import type { AffinityService } from "../services/affinity-service";
 import type { MediaReactionService } from "../services/media-reaction-service";
+import { MicroReactionService, type MicroReactionResult } from "../services/micro-reaction-service";
 import type { MoodService } from "../services/mood-service";
 import type { EffectiveRoutingConfig, EffectiveRuntimeSettings } from "../services/runtime-config-service";
 import { RuntimeConfigService } from "../services/runtime-config-service";
@@ -58,6 +59,10 @@ export interface DebugTraceRecord {
   contextMessages: number | null;
   memoryLayers: unknown;
   latencyMs: number | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  tokenSource: string | null;
   relationshipApplied: boolean;
   debugTrace: unknown;
   createdAt: Date;
@@ -71,6 +76,7 @@ export class ChatOrchestrator {
   private readonly contextBuilder = new ContextBuilderService();
   private readonly contextScoring = new ContextScoringService();
   private readonly emotionMediaDecision = new EmotionMediaDecisionService();
+  private readonly microReactions = new MicroReactionService();
   private readonly embeddingCache = new Map<string, { expiresAt: number; value: number[] }>();
   private readonly emotionStateByScope = new Map<string, ReturnType<typeof createEngineState>>();
 
@@ -98,6 +104,7 @@ export class ChatOrchestrator {
 
   async handleMessage(message: MessageEnvelope, prefetchedConfig?: EffectiveRoutingConfig, queueTrace?: BotTrace["queue"]) {
     const startedAt = Date.now();
+    const llmCalls: LlmCallTrace[] = [];
     const runtimeConfig = prefetchedConfig ?? (await this.deps.runtimeConfig.getRoutingConfig(message.guildId, message.channelId));
     const guildSettings = runtimeConfig.guildSettings;
     const runtimeSettings = runtimeConfig.runtimeSettings;
@@ -122,7 +129,7 @@ export class ChatOrchestrator {
       );
     }
 
-    const intent = initialIntent.confidence < 0.7 ? await this.classifyWithLlm(initialIntent.cleanedContent, initialIntent, runtimeSettings) : initialIntent;
+    const intent = initialIntent.confidence < 0.7 ? await this.classifyWithLlm(initialIntent.cleanedContent, initialIntent, runtimeSettings, llmCalls) : initialIntent;
     const queryEmbedding = intent.intent !== "help" ? await this.safeEmbed(intent.cleanedContent) : undefined;
     const contextBundle = await this.deps.contextService.buildContext({
       guildId: message.guildId,
@@ -295,6 +302,7 @@ export class ChatOrchestrator {
             reason: contextBundle.activeMemory.trace.reason
           }
         : { enabled: false, entries: 0, layers: [], reason: "not_available" },
+      llmCalls,
       context: {
         ...contextTrace,
         contextConfidence: contextScores?.contextConfidence,
@@ -303,21 +311,39 @@ export class ChatOrchestrator {
     };
 
     let reply = "";
+    const microReaction =
+      intent.intent === "chat"
+        ? this.microReactions.detect({
+            content: intent.cleanedContent,
+            message,
+            messageKind
+          })
+        : null;
 
     try {
-      switch (intent.intent) {
+      if (microReaction) {
+        reply = microReaction.reply;
+        trace.microReaction = {
+          kind: microReaction.kind,
+          rule: microReaction.rule,
+          confidence: microReaction.confidence,
+          ...(microReaction.splitChunks ? { splitChunks: microReaction.splitChunks } : {})
+        };
+        trace.routeReason = `${trace.routeReason}; micro_reaction:${microReaction.rule}`;
+        trace.modelKind = undefined;
+      } else switch (intent.intent) {
         case "help":
           reply = HELP_TEXT;
           break;
         case "analytics":
-          reply = await this.handleAnalytics(message.guildId, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens);
+          reply = await this.handleAnalytics(message.guildId, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens, llmCalls);
           break;
         case "summary":
-          reply = await this.handleSummary(intent.cleanedContent, systemPrompt, promptContextText, runtimeSettings, behavior.limits.maxTokens);
+          reply = await this.handleSummary(intent.cleanedContent, systemPrompt, promptContextText, runtimeSettings, behavior.limits.maxTokens, llmCalls);
           break;
         case "search": {
           const result = runtimeConfig.featureFlags.webSearch
-            ? await this.handleSearch(message, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens)
+            ? await this.handleSearch(message, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens, llmCalls)
             : { text: "Поиск сейчас выключен.", toolNames: [], usedSearch: false };
           reply = result.text;
           trace.usedSearch = result.usedSearch;
@@ -332,7 +358,7 @@ export class ChatOrchestrator {
           reply = await this.handleMemoryForget(message, intent.cleanedContent);
           break;
         case "rewrite":
-          reply = await this.handleRewrite(message, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens);
+          reply = await this.handleRewrite(message, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens, llmCalls);
           break;
         case "profile":
           reply = runtimeConfig.featureFlags.userProfiles ? await this.handleProfile(message) : "Профили сейчас выключены.";
@@ -344,7 +370,7 @@ export class ChatOrchestrator {
         default:
           reply = contour.contour === "A"
             ? pickContourAResponse()
-            : await this.handleChat(intent.cleanedContent, systemPrompt, promptContextText, runtimeSettings, behavior.limits.maxTokens, contour.contour);
+            : await this.handleChat(intent.cleanedContent, systemPrompt, promptContextText, runtimeSettings, behavior.limits.maxTokens, contour.contour, llmCalls);
           break;
       }
     } catch (error) {
@@ -370,6 +396,7 @@ export class ChatOrchestrator {
       messageKind
     });
     await this.recordRelationshipInteraction(message, messageKind, conflict);
+    await this.recordMicroReactionRelationshipSignal(microReaction, message);
     const reflectionTrace = await this.recordSelfReflectionLesson(
       runtimeConfig.featureFlags.selfReflectionLessonsEnabled,
       message,
@@ -505,6 +532,10 @@ export class ChatOrchestrator {
         contextMessages: true,
         memoryLayers: true,
         latencyMs: true,
+        promptTokens: true,
+        completionTokens: true,
+        totalTokens: true,
+        tokenSource: true,
         relationshipApplied: true,
         debugTrace: true,
         createdAt: true
@@ -515,13 +546,15 @@ export class ChatOrchestrator {
   private async classifyWithLlm(
     cleanedContent: string,
     fallback: ReturnType<IntentRouter["route"]>,
-    runtimeSettings: EffectiveRuntimeSettings
+    runtimeSettings: EffectiveRuntimeSettings,
+    llmCalls?: LlmCallTrace[]
   ) {
     try {
       const llm = this.getLlmSettings("chat", runtimeSettings, 96, { temperature: 0 });
+      const messages = buildIntentClassifierPrompt(cleanedContent);
       const response = await this.deps.llmClient.chat({
         model: llm.model,
-        messages: buildIntentClassifierPrompt(cleanedContent),
+        messages,
         format: "json",
         temperature: llm.temperature,
         topP: llm.topP,
@@ -530,6 +563,7 @@ export class ChatOrchestrator {
         numCtx: llm.numCtx,
         numBatch: llm.numBatch
       });
+      this.recordLlmCall(llmCalls, "intent_classifier", llm.model, messages, response);
 
       const raw = response.message.content.trim();
       let parsed: { intent?: string; confidence?: number; reason?: string } | null = null;
@@ -565,7 +599,8 @@ export class ChatOrchestrator {
     contextText: string,
     runtimeSettings: EffectiveRuntimeSettings,
     maxTokens?: number,
-    contour: Contour = "B"
+    contour: Contour = "B",
+    llmCalls?: LlmCallTrace[]
   ) {
     const llm = this.getChatSettingsForContour(contour, runtimeSettings, maxTokens);
     const messages: Array<{ role: "system" | "user"; content: string }> = [{ role: "system", content: systemPrompt }];
@@ -589,6 +624,7 @@ export class ChatOrchestrator {
       numCtx: llm.numCtx,
       numBatch: llm.numBatch
     });
+    this.recordLlmCall(llmCalls, "chat", llm.model, messages, response);
 
     return response.message.content;
   }
@@ -598,7 +634,8 @@ export class ChatOrchestrator {
     systemPrompt: string,
     contextText: string,
     runtimeSettings: EffectiveRuntimeSettings,
-    maxTokens?: number
+    maxTokens?: number,
+    llmCalls?: LlmCallTrace[]
   ) {
     const llm = this.getLlmSettings("summary", runtimeSettings, maxTokens);
     const messages = buildSummaryPrompt(contextText || "Контекста почти нет.", content);
@@ -614,6 +651,7 @@ export class ChatOrchestrator {
       numCtx: llm.numCtx,
       numBatch: llm.numBatch
     });
+    this.recordLlmCall(llmCalls, "summary", llm.model, messages, response);
 
     return response.message.content;
   }
@@ -623,16 +661,18 @@ export class ChatOrchestrator {
     request: string,
     systemPrompt: string,
     runtimeSettings: EffectiveRuntimeSettings,
-    maxTokens?: number
+    maxTokens?: number,
+    llmCalls?: LlmCallTrace[]
   ) {
     const llm = this.getLlmSettings("analytics", runtimeSettings, maxTokens);
     const window = /за день|сегодня/i.test(request) ? "day" : /за месяц|месяц/i.test(request) ? "month" : "week";
     const overview = await this.deps.analytics.getOverview(guildId, window);
     const analyticsText = formatAnalyticsOverview(overview);
 
+    const messages = [{ role: "system", content: systemPrompt }, ...buildAnalyticsNarrationPrompt(analyticsText, request)];
     const response = await this.deps.llmClient.chat({
       model: llm.model,
-      messages: [{ role: "system", content: systemPrompt }, ...buildAnalyticsNarrationPrompt(analyticsText, request)],
+      messages,
       temperature: llm.temperature,
       topP: llm.topP,
       maxTokens: llm.maxTokens,
@@ -640,6 +680,7 @@ export class ChatOrchestrator {
       numCtx: llm.numCtx,
       numBatch: llm.numBatch
     });
+    this.recordLlmCall(llmCalls, "analytics", llm.model, messages, response);
 
     return response.message.content || analyticsText;
   }
@@ -649,7 +690,8 @@ export class ChatOrchestrator {
     request: string,
     systemPrompt: string,
     runtimeSettings: EffectiveRuntimeSettings,
-    maxTokens?: number
+    maxTokens?: number,
+    llmCalls?: LlmCallTrace[]
   ) {
     const llm = this.getLlmSettings("search", runtimeSettings, maxTokens);
     const fetchedPages: Array<{ url: string; title: string; content: string }> = [];
@@ -694,12 +736,13 @@ export class ChatOrchestrator {
       }
     ];
 
+    const toolMessages: LlmChatMessage[] = [
+      { role: "system", content: `${systemPrompt}\nЕсли нужен интернет, сначала вызывай инструменты.` },
+      { role: "user", content: request }
+    ];
     const run = await this.deps.toolOrchestrator.runChatWithTools({
       model: llm.model,
-      messages: [
-        { role: "system", content: `${systemPrompt}\nЕсли нужен интернет, сначала вызывай инструменты.` },
-        { role: "user", content: request }
-      ],
+      messages: toolMessages,
       tools,
       maxToolCalls: this.deps.env.LLM_MAX_TOOL_CALLS,
       temperature: llm.temperature,
@@ -719,7 +762,8 @@ export class ChatOrchestrator {
         llm,
         [],
         "tool_calls_missing",
-        true
+        true,
+        llmCalls
       );
     }
 
@@ -735,7 +779,8 @@ export class ChatOrchestrator {
         llm,
         run.toolCalls.map((call) => call.toolName),
         "tool_calls_without_search_hits",
-        false
+        false,
+        llmCalls
       );
     }
 
@@ -752,6 +797,8 @@ export class ChatOrchestrator {
       numCtx: llm.numCtx,
       numBatch: llm.numBatch
     });
+    this.recordEstimatedLlmCall(llmCalls, "search_tool_loop", llm.model, toolMessages, run.text);
+    this.recordLlmCall(llmCalls, "search_synthesis", llm.model, finalPrompt, response);
 
     return {
       text: response.message.content || run.text,
@@ -774,7 +821,8 @@ export class ChatOrchestrator {
     llm: ReturnType<ChatOrchestrator["getLlmSettings"]>,
     priorToolNames: string[],
     reason: string,
-    applyCooldown: boolean
+    applyCooldown: boolean,
+    llmCalls?: LlmCallTrace[]
   ) {
     const fetchedPages: Array<{ url: string; title: string; content: string }> = [];
 
@@ -809,6 +857,7 @@ export class ChatOrchestrator {
         numCtx: runtimeSettings.ollamaNumCtx,
         numBatch: runtimeSettings.ollamaNumBatch
       });
+      this.recordLlmCall(llmCalls, `search_fallback:${reason}`, llm.model, finalPrompt, response);
 
       return {
         text: response.message.content || buildSourceDigest(request, searchHits, fetchedPages).slice(0, 1500),
@@ -885,7 +934,8 @@ export class ChatOrchestrator {
     cleanedContent: string,
     systemPrompt: string,
     runtimeSettings: EffectiveRuntimeSettings,
-    maxTokens?: number
+    maxTokens?: number,
+    llmCalls?: LlmCallTrace[]
   ) {
     const llm = this.getLlmSettings("rewrite", runtimeSettings, maxTokens);
     const source = message.replyToMessageId ? await this.deps.prisma.message.findUnique({ where: { id: message.replyToMessageId } }) : null;
@@ -907,6 +957,7 @@ export class ChatOrchestrator {
       numCtx: llm.numCtx,
       numBatch: llm.numBatch
     });
+    this.recordLlmCall(llmCalls, "rewrite", llm.model, prompt, response);
 
     return response.message.content;
   }
@@ -1225,6 +1276,77 @@ export class ChatOrchestrator {
     }
   }
 
+  private async recordMicroReactionRelationshipSignal(
+    microReaction: MicroReactionResult | null,
+    message: MessageEnvelope
+  ) {
+    if (!microReaction || !this.deps.relationships) {
+      return;
+    }
+
+    try {
+      if (microReaction.kind === "toxicity") {
+        await this.deps.relationships.recordToxicBehavior(message.guildId, message.userId);
+        return;
+      }
+
+      await this.deps.relationships.recordInteraction(message.guildId, message.userId, 0.22);
+    } catch (error) {
+      this.deps.logger.warn({ error }, "failed to record micro reaction relationship signal");
+    }
+  }
+
+  private recordLlmCall(
+    target: LlmCallTrace[] | undefined,
+    purpose: string,
+    model: string,
+    messages: LlmChatMessage[],
+    response: LlmChatResponse
+  ) {
+    if (!target) {
+      return;
+    }
+
+    const estimatedPrompt = estimateMessageTokens(messages);
+    const estimatedCompletion = estimateTextTokens(response.message.content);
+    const promptTokens = response.usage?.promptTokens ?? estimatedPrompt;
+    const completionTokens = response.usage?.completionTokens ?? estimatedCompletion;
+
+    target.push({
+      purpose,
+      model,
+      promptTokens,
+      completionTokens,
+      totalTokens: response.usage?.totalTokens ?? promptTokens + completionTokens,
+      source: response.usage?.promptTokens !== undefined || response.usage?.completionTokens !== undefined ? "ollama" : "estimated",
+      durationMs: response.usage?.totalDurationMs
+    });
+  }
+
+  private recordEstimatedLlmCall(
+    target: LlmCallTrace[] | undefined,
+    purpose: string,
+    model: string,
+    messages: LlmChatMessage[],
+    completion: string
+  ) {
+    if (!target) {
+      return;
+    }
+
+    const promptTokens = estimateMessageTokens(messages);
+    const completionTokens = estimateTextTokens(completion);
+
+    target.push({
+      purpose,
+      model,
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      source: "estimated"
+    });
+  }
+
   private async recordSelfReflectionLesson(
     enabled: boolean,
     message: MessageEnvelope,
@@ -1316,6 +1438,7 @@ export class ChatOrchestrator {
     }
 
     if (message) {
+      const tokenTotals = summarizeLlmTokenTrace(trace.llmCalls);
       await this.deps.prisma.botEventLog.create({
         data: {
           guildId: message.guildId,
@@ -1331,6 +1454,10 @@ export class ChatOrchestrator {
           contextMessages: trace.contextMessages,
           memoryLayers: trace.memoryLayers,
           latencyMs: trace.latencyMs,
+          promptTokens: tokenTotals.promptTokens,
+          completionTokens: tokenTotals.completionTokens,
+          totalTokens: tokenTotals.totalTokens,
+          tokenSource: tokenTotals.tokenSource,
           relationshipApplied: trace.relationshipApplied,
           debugTrace: trace as never
         }
@@ -1339,6 +1466,36 @@ export class ChatOrchestrator {
 
     return { reply, trace };
   }
+}
+
+function estimateTextTokens(text: string) {
+  return Math.max(1, Math.ceil(normalizeWhitespace(text).length / 4));
+}
+
+function estimateMessageTokens(messages: LlmChatMessage[]) {
+  return Math.max(1, messages.reduce((sum, message) => sum + estimateTextTokens(message.content), 0));
+}
+
+function summarizeLlmTokenTrace(llmCalls?: LlmCallTrace[]) {
+  if (!llmCalls?.length) {
+    return {
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      tokenSource: null
+    };
+  }
+
+  const promptTokens = llmCalls.reduce((sum, call) => sum + call.promptTokens, 0);
+  const completionTokens = llmCalls.reduce((sum, call) => sum + call.completionTokens, 0);
+  const tokenSource = llmCalls.every((call) => call.source === "ollama") ? "ollama" : "estimated";
+
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens: promptTokens + completionTokens,
+    tokenSource
+  };
 }
 
 export function createChatOrchestrator(deps: OrchestratorDeps) {

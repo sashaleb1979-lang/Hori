@@ -7,86 +7,342 @@ import {
 
 import { CONTEXT_ACTIONS } from "@hori/shared";
 
-export const slashCommandDefinitions = [
-  new SlashCommandBuilder()
-    .setName("hori")
-    .setDescription("Главная панель Хори")
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName("panel")
-        .setDescription("Открыть подробную панель настроек")
-        .addStringOption((option) =>
-          option
-            .setName("tab")
-            .setDescription("Вкладка")
-            .addChoices(
-              { name: "Главная", value: "main" },
-              { name: "Владелец", value: "owner" },
-              { name: "Стиль", value: "style" },
-              { name: "Живость", value: "liveliness" },
-              { name: "Память", value: "memory" },
-              { name: "Люди", value: "people" },
-              { name: "Каналы", value: "channels" },
-              { name: "Поиск", value: "search" },
-              { name: "Эксперименты", value: "experiments" },
-              { name: "Диагностика", value: "diagnostics" }
-            )
-        )
-    )
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName("search")
-        .setDescription("Сделать web search через усиленный fallback")
-        .addStringOption((option) => option.setName("query").setDescription("Что искать").setRequired(true))
-    )
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName("memory-build")
-        .setDescription("Долго собрать active memory из уже сохранённых сообщений")
-        .addStringOption((option) =>
-          option
-            .setName("scope")
-            .setDescription("Область")
-            .setRequired(true)
-            .addChoices(
-              { name: "текущий канал", value: "channel" },
-              { name: "весь сервер", value: "server" }
-            )
-        )
-        .addStringOption((option) =>
-          option
-            .setName("depth")
-            .setDescription("Глубина")
-            .addChoices(
-              { name: "recent", value: "recent" },
-              { name: "deep", value: "deep" }
-            )
-        )
-    )
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName("profile")
-        .setDescription("Показать краткий профиль/память")
-        .addUserOption((option) => option.setName("user").setDescription("Пользователь"))
-    )
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName("relationship")
-        .setDescription("Owner: посмотреть отношение к человеку")
-        .addUserOption((option) => option.setName("user").setDescription("Пользователь").setRequired(true))
-        .addStringOption((option) => option.setName("tone-bias").setDescription("neutral, friendly, sharp, playful"))
-        .addIntegerOption((option) => option.setName("roast-level").setDescription("0-5").setMinValue(0).setMaxValue(5))
-        .addIntegerOption((option) => option.setName("praise-bias").setDescription("0-5").setMinValue(0).setMaxValue(5))
-        .addIntegerOption((option) => option.setName("interrupt-priority").setDescription("0-5").setMinValue(0).setMaxValue(5))
-        .addBooleanOption((option) => option.setName("do-not-mock").setDescription("Не подкалывать"))
-        .addBooleanOption((option) => option.setName("do-not-initiate").setDescription("Не инициировать общение"))
-        .addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics"))
-        .addNumberOption((option) => option.setName("closeness").setDescription("Близость 0-1").setMinValue(0).setMaxValue(1))
-        .addNumberOption((option) => option.setName("trust").setDescription("Доверие 0-1").setMinValue(0).setMaxValue(1))
-        .addNumberOption((option) => option.setName("familiarity").setDescription("Знакомость 0-1").setMinValue(0).setMaxValue(1))
-        .addNumberOption((option) => option.setName("proactivity").setDescription("Желательность инициативы 0-1").setMinValue(0).setMaxValue(1))
-    ),
-  new SlashCommandBuilder().setName("bot-help").setDescription("Короткая справка по админ-командам"),
+const panelTabChoices = [
+  { name: "Главная", value: "main" },
+  { name: "Владелец", value: "owner" },
+  { name: "Стиль", value: "style" },
+  { name: "Живость", value: "liveliness" },
+  { name: "Память", value: "memory" },
+  { name: "Люди", value: "people" },
+  { name: "Каналы", value: "channels" },
+  { name: "Поиск", value: "search" },
+  { name: "Эксперименты", value: "experiments" },
+  { name: "Диагностика", value: "diagnostics" }
+] as const;
+
+const stateTabChoices = [
+  { name: "Персона", value: "persona" },
+  { name: "Мозги", value: "brain" },
+  { name: "Память", value: "memory" },
+  { name: "Канал", value: "channel" },
+  { name: "Поиск", value: "search" },
+  { name: "Очередь", value: "queue" },
+  { name: "Медиа", value: "media" },
+  { name: "Фичи", value: "features" },
+  { name: "Trace", value: "trace" },
+  { name: "Токены", value: "tokens" }
+] as const;
+
+const powerProfileChoices = [
+  { name: "economy", value: "economy" },
+  { name: "balanced", value: "balanced" },
+  { name: "expanded", value: "expanded" },
+  { name: "max", value: "max" }
+] as const;
+
+const moodChoices = [
+  { name: "normal", value: "normal" },
+  { name: "playful", value: "playful" },
+  { name: "dry", value: "dry" },
+  { name: "irritated", value: "irritated" },
+  { name: "focused", value: "focused" },
+  { name: "sleepy", value: "sleepy" },
+  { name: "detached", value: "detached" }
+] as const;
+
+const mediaTypeChoices = [
+  { name: "image", value: "image" },
+  { name: "gif", value: "gif" },
+  { name: "video", value: "video" },
+  { name: "audio", value: "audio" }
+] as const;
+
+const horiCommandDefinition = new SlashCommandBuilder()
+  .setName("hori")
+  .setDescription("Главный центр управления Хори")
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("panel")
+      .setDescription("Открыть подробную панель настроек")
+      .addStringOption((option) =>
+        option
+          .setName("tab")
+          .setDescription("Вкладка")
+          .addChoices(...panelTabChoices)
+      )
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("state")
+      .setDescription("Owner: панель состояния Хори")
+      .addStringOption((option) =>
+        option
+          .setName("tab")
+          .setDescription("Раздел состояния")
+          .addChoices(...stateTabChoices)
+      )
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("search")
+      .setDescription("Сделать web search через усиленный fallback")
+      .addStringOption((option) => option.setName("query").setDescription("Что искать").setRequired(true))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("memory-build")
+      .setDescription("Долго собрать active memory из уже сохранённых сообщений")
+      .addStringOption((option) =>
+        option
+          .setName("scope")
+          .setDescription("Область")
+          .setRequired(true)
+          .addChoices(
+            { name: "текущий канал", value: "channel" },
+            { name: "весь сервер", value: "server" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("depth")
+          .setDescription("Глубина")
+          .addChoices(
+            { name: "recent", value: "recent" },
+            { name: "deep", value: "deep" }
+          )
+      )
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("profile")
+      .setDescription("Показать краткий профиль/память")
+      .addUserOption((option) => option.setName("user").setDescription("Пользователь"))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("relationship")
+      .setDescription("Owner: посмотреть или изменить отношение к человеку")
+      .addUserOption((option) => option.setName("user").setDescription("Пользователь").setRequired(true))
+      .addStringOption((option) => option.setName("tone-bias").setDescription("neutral, friendly, sharp, playful"))
+      .addIntegerOption((option) => option.setName("roast-level").setDescription("0-5").setMinValue(0).setMaxValue(5))
+      .addIntegerOption((option) => option.setName("praise-bias").setDescription("0-5").setMinValue(0).setMaxValue(5))
+      .addIntegerOption((option) => option.setName("interrupt-priority").setDescription("0-5").setMinValue(0).setMaxValue(5))
+      .addBooleanOption((option) => option.setName("do-not-mock").setDescription("Не подкалывать"))
+      .addBooleanOption((option) => option.setName("do-not-initiate").setDescription("Не инициировать общение"))
+      .addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics"))
+      .addNumberOption((option) => option.setName("closeness").setDescription("Близость 0-1").setMinValue(0).setMaxValue(1))
+      .addNumberOption((option) => option.setName("trust").setDescription("Доверие 0-1").setMinValue(0).setMaxValue(1))
+      .addNumberOption((option) => option.setName("familiarity").setDescription("Знакомость 0-1").setMinValue(0).setMaxValue(1))
+      .addNumberOption((option) => option.setName("proactivity").setDescription("Желательность инициативы 0-1").setMinValue(0).setMaxValue(1))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("memory")
+      .setDescription("Управлять долгой памятью")
+      .addStringOption((option) =>
+        option
+          .setName("action")
+          .setDescription("Действие")
+          .setRequired(true)
+          .addChoices(
+            { name: "remember", value: "remember" },
+            { name: "forget", value: "forget" }
+          )
+      )
+      .addStringOption((option) => option.setName("key").setDescription("Ключ").setRequired(true))
+      .addStringOption((option) => option.setName("value").setDescription("Значение для remember"))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("channel")
+      .setDescription("Настроить канал")
+      .addChannelOption((option) =>
+        option
+          .setName("channel")
+          .setDescription("Канал")
+          .addChannelTypes(ChannelType.GuildText, ChannelType.PublicThread, ChannelType.PrivateThread)
+      )
+      .addBooleanOption((option) => option.setName("allow-bot-replies").setDescription("Разрешить ответы"))
+      .addBooleanOption((option) => option.setName("allow-interjections").setDescription("Разрешить автовмешательства"))
+      .addBooleanOption((option) => option.setName("is-muted").setDescription("Хори должна молчать"))
+      .addStringOption((option) => option.setName("topic-interest-tags").setDescription("CSV tags"))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("summary")
+      .setDescription("Показать последние channel summaries")
+      .addChannelOption((option) =>
+        option
+          .setName("channel")
+          .setDescription("Канал")
+          .addChannelTypes(ChannelType.GuildText, ChannelType.PublicThread, ChannelType.PrivateThread)
+      )
+  )
+  .addSubcommand((subcommand) => subcommand.setName("stats").setDescription("Показать недельную статистику"))
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("topic")
+      .setDescription("Посмотреть или сбросить активную тему")
+      .addStringOption((option) =>
+        option
+          .setName("action")
+          .setDescription("Действие")
+          .setRequired(true)
+          .addChoices(
+            { name: "status", value: "status" },
+            { name: "reset", value: "reset" }
+          )
+      )
+      .addChannelOption((option) =>
+        option
+          .setName("channel")
+          .setDescription("Канал")
+          .addChannelTypes(ChannelType.GuildText, ChannelType.PublicThread, ChannelType.PrivateThread)
+      )
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("mood")
+      .setDescription("Управлять mood Hori")
+      .addStringOption((option) =>
+        option
+          .setName("action")
+          .setDescription("Действие")
+          .setRequired(true)
+          .addChoices(
+            { name: "status", value: "status" },
+            { name: "set", value: "set" },
+            { name: "clear", value: "clear" }
+          )
+      )
+      .addStringOption((option) => option.setName("mode").setDescription("Режим").addChoices(...moodChoices))
+      .addIntegerOption((option) => option.setName("minutes").setDescription("Сколько минут").setMinValue(1).setMaxValue(1440))
+      .addStringOption((option) => option.setName("reason").setDescription("Причина"))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("queue")
+      .setDescription("Управлять reply queue")
+      .addStringOption((option) =>
+        option
+          .setName("action")
+          .setDescription("Действие")
+          .setRequired(true)
+          .addChoices(
+            { name: "status", value: "status" },
+            { name: "clear", value: "clear" }
+          )
+      )
+      .addChannelOption((option) =>
+        option
+          .setName("channel")
+          .setDescription("Канал")
+          .addChannelTypes(ChannelType.GuildText, ChannelType.PublicThread, ChannelType.PrivateThread)
+      )
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("album")
+      .setDescription("Личный альбом сохранённых моментов")
+      .addStringOption((option) =>
+        option
+          .setName("action")
+          .setDescription("Действие")
+          .setRequired(true)
+          .addChoices(
+            { name: "list", value: "list" },
+            { name: "remove", value: "remove" }
+          )
+      )
+      .addIntegerOption((option) => option.setName("limit").setDescription("Сколько показать").setMinValue(1).setMaxValue(10))
+      .addStringOption((option) => option.setName("id").setDescription("ID момента для remove"))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("debug")
+      .setDescription("Owner/mod: получить debug trace")
+      .addStringOption((option) => option.setName("message-id").setDescription("ID сообщения"))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("feature")
+      .setDescription("Переключить feature flag")
+      .addStringOption((option) => option.setName("key").setDescription("Название флага").setRequired(true))
+      .addBooleanOption((option) => option.setName("enabled").setDescription("Включить/выключить").setRequired(true))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("media")
+      .setDescription("Управлять media registry")
+      .addStringOption((option) =>
+        option
+          .setName("action")
+          .setDescription("Действие")
+          .setRequired(true)
+          .addChoices(
+            { name: "list", value: "list" },
+            { name: "add", value: "add" },
+            { name: "sync-pack", value: "sync-pack" },
+            { name: "disable", value: "disable" }
+          )
+      )
+      .addStringOption((option) => option.setName("id").setDescription("media id"))
+      .addStringOption((option) => option.setName("type").setDescription("Тип").addChoices(...mediaTypeChoices))
+      .addStringOption((option) => option.setName("path").setDescription("Путь к файлу или catalog.json"))
+      .addStringOption((option) => option.setName("trigger-tags").setDescription("CSV trigger tags"))
+      .addStringOption((option) => option.setName("tone-tags").setDescription("CSV tone tags"))
+      .addStringOption((option) => option.setName("channels").setDescription("CSV channel kinds"))
+      .addStringOption((option) => option.setName("moods").setDescription("CSV moods"))
+      .addBooleanOption((option) => option.setName("nsfw").setDescription("NSFW"))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("power")
+      .setDescription("Owner: пресеты мощности Ollama и контекста")
+      .addStringOption((option) =>
+        option
+          .setName("action")
+          .setDescription("Действие")
+          .setRequired(true)
+          .addChoices(
+            { name: "panel", value: "panel" },
+            { name: "status", value: "status" },
+            { name: "apply", value: "apply" }
+          )
+      )
+      .addStringOption((option) => option.setName("profile").setDescription("Пресет мощности").addChoices(...powerProfileChoices))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("ai-url")
+      .setDescription("Owner: сменить Ollama URL")
+      .addStringOption((option) => option.setName("url").setDescription("Новый URL (https://...)").setRequired(true))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("lockdown")
+      .setDescription("Owner: Хори слушает только владельца")
+      .addStringOption((option) =>
+        option
+          .setName("mode")
+          .setDescription("Режим")
+          .setRequired(true)
+          .addChoices(
+            { name: "on", value: "on" },
+            { name: "off", value: "off" },
+            { name: "status", value: "status" }
+          )
+      )
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("import")
+      .setDescription("Owner: импортировать историю чата из JSON файла")
+      .addAttachmentOption((option) => option.setName("file").setDescription(".json файл с историей чата").setRequired(true))
+  );
+
+const legacySlashCommandBuilders = [
+  new SlashCommandBuilder().setName("bot-help").setDescription("Короткая справка по legacy-командам"),
   new SlashCommandBuilder()
     .setName("bot-style")
     .setDescription("Настроить стиль Хори")
@@ -156,9 +412,7 @@ export const slashCommandDefinitions = [
   new SlashCommandBuilder()
     .setName("bot-feature")
     .setDescription("Переключить feature flag")
-    .addStringOption((option) =>
-      option.setName("key").setDescription("Название флага").setRequired(true)
-    )
+    .addStringOption((option) => option.setName("key").setDescription("Название флага").setRequired(true))
     .addBooleanOption((option) => option.setName("enabled").setDescription("Включить/выключить").setRequired(true)),
   new SlashCommandBuilder()
     .setName("bot-debug")
@@ -221,19 +475,7 @@ export const slashCommandDefinitions = [
         .setName("set")
         .setDescription("Задать mood")
         .addStringOption((option) =>
-          option
-            .setName("mode")
-            .setDescription("Режим")
-            .setRequired(true)
-            .addChoices(
-              { name: "normal", value: "normal" },
-              { name: "playful", value: "playful" },
-              { name: "dry", value: "dry" },
-              { name: "irritated", value: "irritated" },
-              { name: "focused", value: "focused" },
-              { name: "sleepy", value: "sleepy" },
-              { name: "detached", value: "detached" }
-            )
+          option.setName("mode").setDescription("Режим").setRequired(true).addChoices(...moodChoices)
         )
         .addIntegerOption((option) => option.setName("minutes").setDescription("Сколько минут").setMinValue(1).setMaxValue(1440))
         .addStringOption((option) => option.setName("reason").setDescription("Причина"))
@@ -276,18 +518,7 @@ export const slashCommandDefinitions = [
         .setName("add")
         .setDescription("Зарегистрировать локальный media-файл")
         .addStringOption((option) => option.setName("id").setDescription("media id").setRequired(true))
-        .addStringOption((option) =>
-          option
-            .setName("type")
-            .setDescription("Тип")
-            .setRequired(true)
-            .addChoices(
-              { name: "image", value: "image" },
-              { name: "gif", value: "gif" },
-              { name: "video", value: "video" },
-              { name: "audio", value: "audio" }
-            )
-        )
+        .addStringOption((option) => option.setName("type").setDescription("Тип").setRequired(true).addChoices(...mediaTypeChoices))
         .addStringOption((option) => option.setName("path").setDescription("Абсолютный путь к файлу").setRequired(true))
         .addStringOption((option) => option.setName("trigger-tags").setDescription("CSV trigger tags"))
         .addStringOption((option) => option.setName("tone-tags").setDescription("CSV tone tags"))
@@ -317,18 +548,7 @@ export const slashCommandDefinitions = [
       subcommand
         .setName("apply")
         .setDescription("Применить power profile")
-        .addStringOption((option) =>
-          option
-            .setName("profile")
-            .setDescription("Пресет мощности")
-            .setRequired(true)
-            .addChoices(
-              { name: "economy", value: "economy" },
-              { name: "balanced", value: "balanced" },
-              { name: "expanded", value: "expanded" },
-              { name: "max", value: "max" }
-            )
-        )
+        .addStringOption((option) => option.setName("profile").setDescription("Пресет мощности").setRequired(true).addChoices(...powerProfileChoices))
     ),
   new SlashCommandBuilder()
     .setName("bot-ai-url")
@@ -344,7 +564,15 @@ export const slashCommandDefinitions = [
     .setName("bot-import")
     .setDescription("Импортировать историю чата из JSON файла")
     .addAttachmentOption((option) => option.setName("file").setDescription(".json файл с историей чата").setRequired(true))
-].map((command) => command.toJSON());
+];
+
+export const horiSlashCommandDefinitions = [horiCommandDefinition].map((command) => command.toJSON());
+export const legacySlashCommandDefinitions = legacySlashCommandBuilders.map((command) => command.toJSON());
+export const slashCommandDefinitions = [...horiSlashCommandDefinitions, ...legacySlashCommandDefinitions];
+
+export function getSlashCommandDefinitions(options: { includeLegacy?: boolean } = {}) {
+  return options.includeLegacy ? slashCommandDefinitions : horiSlashCommandDefinitions;
+}
 
 export const contextMenuDefinitions = [
   new ContextMenuCommandBuilder()
@@ -360,4 +588,3 @@ export const contextMenuDefinitions = [
     .setName(CONTEXT_ACTIONS.rememberMoment)
     .setType(ApplicationCommandType.Message)
 ].map((command) => command.toJSON());
-
