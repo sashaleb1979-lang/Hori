@@ -19,7 +19,7 @@ module.exports = __toCommonJS(index_exports);
 var import_analytics = require("@hori/analytics");
 var import_config = require("@hori/config");
 var import_llm3 = require("@hori/llm");
-var import_memory = require("@hori/memory");
+var import_memory2 = require("@hori/memory");
 var import_search = require("@hori/search");
 var import_shared5 = require("@hori/shared");
 
@@ -119,9 +119,11 @@ function createEmbeddingJob(runtime) {
 
 // src/jobs/profiles.ts
 var import_llm = require("@hori/llm");
+var import_memory = require("@hori/memory");
 var import_shared2 = require("@hori/shared");
 function createProfileJob(runtime) {
   return async (job) => {
+    const profile = (0, import_llm.getModelProfile)("smart");
     const stats = await runtime.analytics.getUserStats(job.data.guildId, job.data.userId);
     if (!stats || !runtime.profileService.isEligible(stats.totalMessages)) {
       return { skipped: true, reason: "user not eligible" };
@@ -148,7 +150,9 @@ function createProfileJob(runtime) {
         model: runtime.env.OLLAMA_SMART_MODEL,
         messages: prompt,
         format: "json",
-        temperature: 0.2
+        temperature: Math.min(profile.temperature, 0.2),
+        topP: profile.topP,
+        maxTokens: Math.min(profile.maxTokens, 220)
       });
       parsed = JSON.parse(response.message.content);
     } catch (error) {
@@ -165,6 +169,24 @@ function createProfileJob(runtime) {
       sourceWindowSize: stats.totalMessages,
       isEligible: true
     });
+    const latestChannelId = messages[0]?.channelId;
+    if (latestChannelId && messages.length) {
+      try {
+        const formationService = new import_memory.MemoryFormationService(runtime.prisma, runtime.retrievalService, runtime.llmClient, runtime.env);
+        const priorSummaries = await runtime.summaryService.getRecentSummaries(job.data.guildId, latestChannelId, 2);
+        await formationService.runFormation({
+          guildId: job.data.guildId,
+          channelId: latestChannelId,
+          userId: job.data.userId,
+          priorSummaries: priorSummaries.map((summary) => summary.summaryShort),
+          source: "profile_job",
+          createdBy: "worker",
+          messages: messages.slice().reverse().map((message) => ({ role: "user", content: message.content }))
+        });
+      } catch (error) {
+        runtime.logger.warn({ error: (0, import_shared2.asErrorMessage)(error), guildId: job.data.guildId, userId: job.data.userId, jobId: job.id }, "memory formation skipped");
+      }
+    }
     return { skipped: false };
   };
 }
@@ -182,6 +204,7 @@ var import_llm2 = require("@hori/llm");
 var import_shared3 = require("@hori/shared");
 function createSummaryJob(runtime) {
   return async (job) => {
+    const profile = (0, import_llm2.getModelProfile)("smart");
     const messages = await runtime.summaryService.getMessagesForNextSummary(
       job.data.guildId,
       job.data.channelId,
@@ -198,7 +221,10 @@ function createSummaryJob(runtime) {
     try {
       response = await runtime.llmClient.chat({
         model: runtime.env.OLLAMA_SMART_MODEL,
-        messages: prompt
+        messages: prompt,
+        temperature: profile.temperature,
+        topP: profile.topP,
+        maxTokens: profile.maxTokens
       });
     } catch (error) {
       runtime.logger.warn({ channelId: job.data.channelId, error: (0, import_shared3.asErrorMessage)(error), guildId: job.data.guildId, jobId: job.id }, "summary skipped because ollama is unavailable");
@@ -245,6 +271,7 @@ function createTopicJob(runtime) {
       channelId: message.channelId,
       messageId: message.id,
       content: message.content,
+      createdAt: message.createdAt,
       replyToMessageId: message.replyToMessageId,
       embedding
     });
@@ -278,10 +305,10 @@ async function main() {
   }
   const queues = (0, import_shared5.createAppQueues)(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
   const analytics = new import_analytics.AnalyticsQueryService(prisma);
-  const summaryService = new import_memory.SummaryService(prisma);
-  const profileService = new import_memory.ProfileService(prisma, env);
-  const retrievalService = new import_memory.RetrievalService(prisma);
-  const topicService = new import_memory.TopicService(prisma, {
+  const summaryService = new import_memory2.SummaryService(prisma);
+  const profileService = new import_memory2.ProfileService(prisma, env);
+  const retrievalService = new import_memory2.RetrievalService(prisma);
+  const topicService = new import_memory2.TopicService(prisma, {
     topicTtlMinutes: env.TOPIC_TTL_MINUTES,
     similarityThreshold: env.TOPIC_SIM_THRESHOLD
   });

@@ -1,9 +1,9 @@
-import type { Message } from "discord.js";
+import type { GuildMember, Message } from "discord.js";
 import { PermissionFlagsBits } from "discord.js";
 
 import { trackIngestedMessage } from "@hori/analytics";
 import { DEFAULT_DEBOUNCE, IntentRouter, createChannelDebouncer, detectMessageKind, implicitMentionKindWhen, resolveActivation, shouldDebounce } from "@hori/core";
-import { asErrorMessage, type ReplyQueueTrace, type TriggerSource } from "@hori/shared";
+import { type MessageEnvelope, type ReplyQueueTrace, type TriggerSource } from "@hori/shared";
 
 import type { BotRuntime } from "../bootstrap";
 import { enqueueBackgroundJobs } from "./background-jobs";
@@ -38,7 +38,7 @@ async function detectTriggerSource(message: Message, botName: string, botId: str
     }
   }
 
-  if (new RegExp(`^${botName}[,:!\\s-]*`, "i").test(content)) {
+  if (new RegExp(`^${escapeRegExp(botName)}[,:!\\s-]*`, "i").test(content)) {
     return { triggerSource: "name", wasMentioned: false, implicitMentionKinds: ["name_in_text"] };
   }
 
@@ -89,8 +89,9 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
 
   const routingConfig = await runtime.runtimeConfig.getRoutingConfig(message.guildId, message.channelId);
   const botName = routingConfig.guildSettings.botName;
+  const botId = runtime.client.user.id;
   const member = message.member ?? (await message.guild.members.fetch(message.author.id));
-  const triggerContext = await detectTriggerSource(message, botName, runtime.client.user.id);
+  const triggerContext = await detectTriggerSource(message, botName, botId);
   const activation = resolveActivation(
     {
       canDetectMention: true,
@@ -120,7 +121,7 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
     (!runtime.env.AUTOINTERJECT_CHANNEL_ALLOWLIST.length ||
       runtime.env.AUTOINTERJECT_CHANNEL_ALLOWLIST.includes(message.channelId)) &&
     (await shouldAutoInterject(runtime, message));
-  const envelope = buildEnvelope(runtime, message, member, botName, triggerSource, explicitInvocation, autoInterject);
+  const envelope = buildEnvelope(message, member, botName, botId, triggerSource, explicitInvocation, autoInterject);
 
   await runtime.ingestService.ingestMessage({
     ...envelope,
@@ -169,18 +170,23 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
 }
 
 function buildEnvelope(
-  runtime: BotRuntime,
   message: Message,
-  member: Awaited<ReturnType<Message["guild"]["members"]["fetch"]>>,
+  member: GuildMember,
   botName: string,
+  botId: string,
   triggerSource: TriggerSource | undefined,
   explicitInvocation: boolean,
   autoInterject: boolean,
   contentOverride?: string,
-) {
+): MessageEnvelope {
+  const guildId = message.guildId;
+  if (!guildId) {
+    throw new Error("Cannot build a guild message envelope without a guildId");
+  }
+
   return {
     messageId: message.id,
-    guildId: message.guildId,
+    guildId,
     channelId: message.channelId,
     userId: message.author.id,
     username: message.author.username,
@@ -190,8 +196,8 @@ function buildEnvelope(
     createdAt: message.createdAt,
     replyToMessageId: message.reference?.messageId ?? null,
     mentionCount: message.mentions.users.size,
-    mentionedBot: message.mentions.has(runtime.client.user.id),
-    mentionsBotByName: new RegExp(`\\b${botName}\\b`, "i").test(message.content),
+    mentionedBot: message.mentions.has(botId),
+    mentionsBotByName: new RegExp(`(?:^|[^\\p{L}\\p{N}_])${escapeRegExp(botName)}(?=$|[^\\p{L}\\p{N}_])`, "iu").test(message.content),
     mentionedUserIds: [...message.mentions.users.keys()],
     triggerSource: triggerSource ?? (autoInterject ? "auto_interject" : undefined),
     isModerator: member.permissions.has(PermissionFlagsBits.ManageGuild),
@@ -213,8 +219,9 @@ async function processInvocation(
 
   const member = message.member ?? (await message.guild.members.fetch(message.author.id));
   const botName = routingConfig.guildSettings.botName;
+  const botId = runtime.client.user.id;
   const explicitInvocation = Boolean(triggerSource) || /^(запомни|забудь)\b/i.test((contentOverride ?? message.content).trim());
-  const envelope = buildEnvelope(runtime, message, member, botName, triggerSource, explicitInvocation, autoInterject, contentOverride);
+  const envelope = buildEnvelope(message, member, botName, botId, triggerSource, explicitInvocation, autoInterject, contentOverride);
   const preliminaryIntent = intentRouter.route(envelope, botName);
   const queueMessageKind = detectMessageKind({
     content: preliminaryIntent.cleanedContent,
@@ -324,4 +331,8 @@ async function drainReplyQueue(runtime: BotRuntime, message: Message) {
     await runtime.replyQueue.complete(next.id);
     runtime.logger.warn({ error, sourceMsgId: next.sourceMsgId }, "queued reply source message could not be fetched");
   }
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -230,6 +230,9 @@ describe("context intelligence", () => {
       channelId: "channel",
       sourceMsgId: "m1",
       targetUserId: "user",
+      messageKind: "direct_mention",
+      mentionCount: 1,
+      createdAt: new Date("2026-04-12T10:00:00Z"),
       explicitInvocation: true
     });
 
@@ -262,6 +265,7 @@ describe("context intelligence", () => {
       guildId: "guild",
       channelId: "channel",
       messageId: "m4",
+      createdAt: new Date("2026-04-12T10:01:00Z"),
       content: "лол"
     });
 

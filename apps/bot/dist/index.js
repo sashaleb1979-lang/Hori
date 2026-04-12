@@ -3,7 +3,7 @@
 // src/bootstrap.ts
 var import_analytics2 = require("@hori/analytics");
 var import_config = require("@hori/config");
-var import_core = require("@hori/core");
+var import_core2 = require("@hori/core");
 var import_llm = require("@hori/llm");
 var import_memory = require("@hori/memory");
 var import_search = require("@hori/search");
@@ -357,27 +357,10 @@ ${status}`
 // src/router/message-router.ts
 var import_discord4 = require("discord.js");
 var import_analytics = require("@hori/analytics");
-var import_shared4 = require("@hori/shared");
+var import_core = require("@hori/core");
 
-// src/responders/message-responder.ts
+// src/router/background-jobs.ts
 var import_shared3 = require("@hori/shared");
-async function sendReply(message, reply) {
-  const text = typeof reply === "string" ? reply : reply.text;
-  const media = typeof reply === "string" ? null : reply.media;
-  const chunks = (0, import_shared3.splitLongMessage)(text);
-  for (let index = 0; index < chunks.length; index += 1) {
-    if (index === 0) {
-      await message.reply(media ? mediaReplyPayload(chunks[index], media.filePath) : chunks[index]);
-    } else if ("send" in message.channel) {
-      await message.channel.send(chunks[index]);
-    }
-  }
-}
-function mediaReplyPayload(content, filePath) {
-  return content ? { content, files: [filePath] } : { files: [filePath] };
-}
-
-// src/router/message-router.ts
 async function enqueueBackgroundJobs(runtime, envelope) {
   const jobs = [
     {
@@ -420,32 +403,54 @@ async function enqueueBackgroundJobs(runtime, envelope) {
         {
           queue: jobs[index]?.queue,
           messageId: envelope.messageId,
-          error: (0, import_shared4.asErrorMessage)(result.reason)
+          error: (0, import_shared3.asErrorMessage)(result.reason)
         },
         "background queue enqueue failed"
       );
     }
   }
 }
+
+// src/responders/message-responder.ts
+var import_shared4 = require("@hori/shared");
+async function sendReply(message, reply) {
+  const text = typeof reply === "string" ? reply : reply.text;
+  const media = typeof reply === "string" ? null : reply.media;
+  const chunks = (0, import_shared4.splitLongMessage)(text);
+  for (let index = 0; index < chunks.length; index += 1) {
+    if (index === 0) {
+      await message.reply(media ? mediaReplyPayload(chunks[index], media.filePath) : chunks[index]);
+    } else if ("send" in message.channel) {
+      await message.channel.send(chunks[index]);
+    }
+  }
+}
+function mediaReplyPayload(content, filePath) {
+  return content ? { content, files: [filePath] } : { files: [filePath] };
+}
+
+// src/router/message-router.ts
+var intentRouter = new import_core.IntentRouter();
+var inboundDebouncers = /* @__PURE__ */ new Map();
 async function detectTriggerSource(message, botName, botId) {
   const content = message.content.trim();
   if (message.mentions.has(botId)) {
-    return "mention";
+    return { triggerSource: "mention", wasMentioned: true, implicitMentionKinds: [] };
   }
   if (message.reference?.messageId) {
     try {
       const referenced = await message.fetchReference();
       if (referenced.author.id === botId) {
-        return "reply";
+        return { triggerSource: "reply", wasMentioned: false, implicitMentionKinds: ["reply_to_bot"] };
       }
     } catch {
-      return void 0;
+      return { triggerSource: void 0, wasMentioned: false, implicitMentionKinds: [] };
     }
   }
-  if (new RegExp(`^${botName}[,:!\\s-]*`, "i").test(content)) {
-    return "name";
+  if (new RegExp(`^${escapeRegExp(botName)}[,:!\\s-]*`, "i").test(content)) {
+    return { triggerSource: "name", wasMentioned: false, implicitMentionKinds: ["name_in_text"] };
   }
-  return void 0;
+  return { triggerSource: void 0, wasMentioned: false, implicitMentionKinds: [] };
 }
 async function shouldAutoInterject(runtime, message) {
   if (!message.guildId) {
@@ -481,29 +486,32 @@ async function routeMessage(runtime, message) {
   }
   const routingConfig = await runtime.runtimeConfig.getRoutingConfig(message.guildId, message.channelId);
   const botName = routingConfig.guildSettings.botName;
-  const triggerSource = await detectTriggerSource(message, botName, runtime.client.user.id);
-  const explicitInvocation = Boolean(triggerSource);
-  const autoInterject = !explicitInvocation && routingConfig.featureFlags.autoInterject && routingConfig.channelPolicy.allowInterjections && !routingConfig.channelPolicy.isMuted && (!runtime.env.AUTOINTERJECT_CHANNEL_ALLOWLIST.length || runtime.env.AUTOINTERJECT_CHANNEL_ALLOWLIST.includes(message.channelId)) && await shouldAutoInterject(runtime, message);
+  const botId = runtime.client.user.id;
   const member = message.member ?? await message.guild.members.fetch(message.author.id);
-  const envelope = {
-    messageId: message.id,
-    guildId: message.guildId,
-    channelId: message.channelId,
-    userId: message.author.id,
-    username: message.author.username,
-    displayName: member.displayName,
-    channelName: "name" in message.channel ? message.channel.name : null,
-    content: message.content,
-    createdAt: message.createdAt,
-    replyToMessageId: message.reference?.messageId ?? null,
-    mentionCount: message.mentions.users.size,
-    mentionedBot: message.mentions.has(runtime.client.user.id),
-    mentionsBotByName: new RegExp(`\\b${botName}\\b`, "i").test(message.content),
-    mentionedUserIds: [...message.mentions.users.keys()],
-    triggerSource: triggerSource ?? (autoInterject ? "auto_interject" : void 0),
-    isModerator: member.permissions.has(import_discord4.PermissionFlagsBits.ManageGuild),
-    explicitInvocation
-  };
+  const triggerContext = await detectTriggerSource(message, botName, botId);
+  const activation = (0, import_core.resolveActivation)(
+    {
+      canDetectMention: true,
+      wasMentioned: triggerContext.wasMentioned,
+      hasAnyMention: message.mentions.users.size > 0,
+      implicitMentionKinds: [
+        ...(0, import_core.implicitMentionKindWhen)("reply_to_bot", triggerContext.implicitMentionKinds.includes("reply_to_bot")),
+        ...(0, import_core.implicitMentionKindWhen)("name_in_text", triggerContext.implicitMentionKinds.includes("name_in_text"))
+      ]
+    },
+    {
+      isGroup: true,
+      requireMention: true,
+      allowedImplicitMentionKinds: ["reply_to_bot", "name_in_text"],
+      allowTextCommands: true,
+      hasControlCommand: /^(запомни|забудь)\b/i.test(message.content.trim()),
+      commandAuthorized: member.permissions.has(import_discord4.PermissionFlagsBits.ManageGuild)
+    }
+  );
+  const triggerSource = triggerContext.triggerSource ?? (activation.shouldBypassMention ? "name" : void 0);
+  const explicitInvocation = activation.effectiveWasMentioned;
+  const autoInterject = !explicitInvocation && routingConfig.featureFlags.autoInterject && routingConfig.channelPolicy.allowInterjections && !routingConfig.channelPolicy.isMuted && (!runtime.env.AUTOINTERJECT_CHANNEL_ALLOWLIST.length || runtime.env.AUTOINTERJECT_CHANNEL_ALLOWLIST.includes(message.channelId)) && await shouldAutoInterject(runtime, message);
+  const envelope = buildEnvelope(message, member, botName, botId, triggerSource, explicitInvocation, autoInterject);
   await runtime.ingestService.ingestMessage({
     ...envelope,
     guildName: message.guild.name,
@@ -536,6 +544,54 @@ async function routeMessage(runtime, message) {
     });
     return;
   }
+  const allowDebounce = explicitInvocation && (triggerSource === "reply" || triggerSource === "name");
+  if ((0, import_core.shouldDebounce)({ text: message.content, hasMedia: message.attachments.size > 0, allowDebounce })) {
+    const debouncer = getOrCreateInboundDebouncer(message.channelId);
+    await debouncer.enqueue({ runtime, message, routingConfig, triggerSource });
+    return;
+  }
+  await processInvocation(runtime, message, routingConfig, triggerSource, autoInterject);
+}
+function buildEnvelope(message, member, botName, botId, triggerSource, explicitInvocation, autoInterject, contentOverride) {
+  const guildId = message.guildId;
+  if (!guildId) {
+    throw new Error("Cannot build a guild message envelope without a guildId");
+  }
+  return {
+    messageId: message.id,
+    guildId,
+    channelId: message.channelId,
+    userId: message.author.id,
+    username: message.author.username,
+    displayName: member.displayName,
+    channelName: "name" in message.channel ? message.channel.name : null,
+    content: contentOverride ?? message.content,
+    createdAt: message.createdAt,
+    replyToMessageId: message.reference?.messageId ?? null,
+    mentionCount: message.mentions.users.size,
+    mentionedBot: message.mentions.has(botId),
+    mentionsBotByName: new RegExp(`(?:^|[^\\p{L}\\p{N}_])${escapeRegExp(botName)}(?=$|[^\\p{L}\\p{N}_])`, "iu").test(message.content),
+    mentionedUserIds: [...message.mentions.users.keys()],
+    triggerSource: triggerSource ?? (autoInterject ? "auto_interject" : void 0),
+    isModerator: member.permissions.has(import_discord4.PermissionFlagsBits.ManageGuild),
+    explicitInvocation
+  };
+}
+async function processInvocation(runtime, message, routingConfig, triggerSource, autoInterject, contentOverride) {
+  if (!message.inGuild() || !runtime.client.user) {
+    return;
+  }
+  const member = message.member ?? await message.guild.members.fetch(message.author.id);
+  const botName = routingConfig.guildSettings.botName;
+  const botId = runtime.client.user.id;
+  const explicitInvocation = Boolean(triggerSource) || /^(запомни|забудь)\b/i.test((contentOverride ?? message.content).trim());
+  const envelope = buildEnvelope(message, member, botName, botId, triggerSource, explicitInvocation, autoInterject, contentOverride);
+  const preliminaryIntent = intentRouter.route(envelope, botName);
+  const queueMessageKind = (0, import_core.detectMessageKind)({
+    content: preliminaryIntent.cleanedContent,
+    intent: preliminaryIntent.intent,
+    message: envelope
+  });
   let queueItemId = null;
   let queueTrace = { enabled: false, action: "none" };
   if (routingConfig.featureFlags.replyQueueEnabled) {
@@ -544,6 +600,9 @@ async function routeMessage(runtime, message) {
       channelId: envelope.channelId,
       sourceMsgId: envelope.messageId,
       targetUserId: envelope.userId,
+      messageKind: queueMessageKind,
+      mentionCount: Math.max(1, envelope.mentionCount),
+      createdAt: envelope.createdAt,
       triggerSource: envelope.triggerSource,
       explicitInvocation
     });
@@ -582,6 +641,25 @@ async function routeMessage(runtime, message) {
     });
   }
 }
+function getOrCreateInboundDebouncer(channelId) {
+  const existing = inboundDebouncers.get(channelId);
+  if (existing) {
+    return existing;
+  }
+  const debouncer = (0, import_core.createChannelDebouncer)(channelId, import_core.DEFAULT_DEBOUNCE, {
+    buildKey: (item) => `${item.message.channelId}:${item.message.author.id}`,
+    onFlush: async (items) => {
+      const latest = items.at(-1);
+      if (!latest) {
+        return;
+      }
+      const combinedContent = items.map((item) => item.message.content.trim()).filter(Boolean).join("\n");
+      await processInvocation(latest.runtime, latest.message, latest.routingConfig, latest.triggerSource, false, combinedContent);
+    }
+  });
+  inboundDebouncers.set(channelId, debouncer);
+  return debouncer;
+}
 async function drainReplyQueue(runtime, message) {
   if (!message.guildId) {
     return;
@@ -597,6 +675,9 @@ async function drainReplyQueue(runtime, message) {
     await runtime.replyQueue.complete(next.id);
     runtime.logger.warn({ error, sourceMsgId: next.sourceMsgId }, "queued reply source message could not be fetched");
   }
+}
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // src/events/register-events.ts
@@ -694,11 +775,11 @@ async function bootstrapBot() {
   const relationshipService = new import_memory.RelationshipService(prisma);
   const retrievalService = new import_memory.RetrievalService(prisma);
   const profileService = new import_memory.ProfileService(prisma, env);
-  const runtimeConfig = new import_core.RuntimeConfigService(prisma, env);
-  const affinityService = new import_core.AffinityService(prisma);
-  const moodService = new import_core.MoodService(prisma);
-  const mediaReactionService = new import_core.MediaReactionService(prisma);
-  const replyQueueService = new import_core.ReplyQueueService(prisma, env.REPLY_QUEUE_BUSY_TTL_SEC);
+  const runtimeConfig = new import_core2.RuntimeConfigService(prisma, env);
+  const affinityService = new import_core2.AffinityService(prisma);
+  const moodService = new import_core2.MoodService(prisma);
+  const mediaReactionService = new import_core2.MediaReactionService(prisma);
+  const replyQueueService = new import_core2.ReplyQueueService(prisma, env.REPLY_QUEUE_BUSY_TTL_SEC);
   const contextService = new import_memory.ContextService(prisma, summaryService, profileService, relationshipService, retrievalService);
   const llmClient = new import_llm.OllamaClient(env, logger);
   if (env.OLLAMA_BASE_URL) {
@@ -726,8 +807,8 @@ async function bootstrapBot() {
   const searchClient = new import_search.BraveSearchClient(env, logger, searchCache);
   const toolOrchestrator = new import_llm.ToolOrchestrator(llmClient, logger);
   const ingestService = new import_analytics2.MessageIngestService(prisma, logger);
-  const slashAdmin = new import_core.SlashAdminService(prisma, analytics, relationshipService, retrievalService, summaryService, runtimeConfig, moodService, replyQueueService);
-  const orchestrator = (0, import_core.createChatOrchestrator)({
+  const slashAdmin = new import_core2.SlashAdminService(prisma, analytics, relationshipService, retrievalService, summaryService, runtimeConfig, moodService, replyQueueService);
+  const orchestrator = (0, import_core2.createChatOrchestrator)({
     env,
     logger,
     prisma,
@@ -740,6 +821,7 @@ async function bootstrapBot() {
     searchClient,
     embeddingAdapter,
     runtimeConfig,
+    relationships: relationshipService,
     affinity: affinityService,
     mood: moodService,
     media: mediaReactionService

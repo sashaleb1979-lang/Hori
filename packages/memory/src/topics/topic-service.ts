@@ -56,10 +56,11 @@ export class TopicService {
     channelId: string;
     messageId: string;
     content: string;
+    createdAt?: Date;
     replyToMessageId?: string | null;
     embedding?: number[];
   }) {
-    const now = new Date();
+    const now = input.createdAt ?? new Date();
     const activeTopic = await this.getActiveTopic(input.guildId, input.channelId);
     const resetReason = activeTopic ? await this.getResetReason(input, activeTopic, now) : "no_active_topic";
 
@@ -93,7 +94,7 @@ export class TopicService {
         await this.setTopicEmbedding(createdTopic.id, input.embedding);
       }
     } else {
-      await this.prisma.topicSession.update({
+      topic = await this.prisma.topicSession.update({
         where: { id: topic.id },
         data: {
           summaryShort: buildSummary(input.content),

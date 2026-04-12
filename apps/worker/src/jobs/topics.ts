@@ -32,6 +32,7 @@ export function createTopicJob(runtime: WorkerRuntime) {
       channelId: message.channelId,
       messageId: message.id,
       content: message.content,
+      createdAt: message.createdAt,
       replyToMessageId: message.replyToMessageId,
       embedding
     });
