@@ -1,7 +1,7 @@
 import { buildFeatureFlags, defaultPersonaSettings, type AppEnv } from "@hori/config";
 import type { AppPrismaClient, FeatureFlags, PersonaSettings } from "@hori/shared";
 
-const FEATURE_KEY_MAP = {
+export const FEATURE_KEY_MAP = {
   web_search: "webSearch",
   auto_interject: "autoInterject",
   user_profiles: "userProfiles",

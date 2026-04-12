@@ -75,41 +75,7 @@ export const slashCommandDefinitions = [
     .setName("bot-feature")
     .setDescription("Переключить feature flag")
     .addStringOption((option) =>
-      option
-        .setName("key")
-        .setDescription("Название флага")
-        .setRequired(true)
-        .addChoices(
-          { name: "web_search", value: "web_search" },
-          { name: "auto_interject", value: "auto_interject" },
-          { name: "user_profiles", value: "user_profiles" },
-          { name: "context_actions", value: "context_actions" },
-          { name: "roast", value: "roast" },
-          { name: "context_v2_enabled", value: "context_v2_enabled" },
-          { name: "context_confidence_enabled", value: "context_confidence_enabled" },
-          { name: "topic_engine_enabled", value: "topic_engine_enabled" },
-          { name: "affinity_signals_enabled", value: "affinity_signals_enabled" },
-          { name: "mood_engine_enabled", value: "mood_engine_enabled" },
-          { name: "reply_queue_enabled", value: "reply_queue_enabled" },
-          { name: "media_reactions_enabled", value: "media_reactions_enabled" },
-          { name: "runtime_config_cache_enabled", value: "runtime_config_cache_enabled" },
-          { name: "embedding_cache_enabled", value: "embedding_cache_enabled" },
-          { name: "channel_aware_mode", value: "channel_aware_mode" },
-          { name: "message_kind_aware_mode", value: "message_kind_aware_mode" },
-          { name: "anti_slop_strict_mode", value: "anti_slop_strict_mode" },
-          { name: "playful_mode_enabled", value: "playful_mode_enabled" },
-          { name: "irritated_mode_enabled", value: "irritated_mode_enabled" },
-          { name: "ideological_flavour_enabled", value: "ideological_flavour_enabled" },
-          { name: "analogy_ban_enabled", value: "analogy_ban_enabled" },
-          { name: "slang_layer_enabled", value: "slang_layer_enabled" },
-          { name: "self_interjection_constraints_enabled", value: "self_interjection_constraints_enabled" },
-          { name: "memory_album_enabled", value: "memory_album_enabled" },
-          { name: "interaction_requests_enabled", value: "interaction_requests_enabled" },
-          { name: "link_understanding_enabled", value: "link_understanding_enabled" },
-          { name: "natural_message_splitting_enabled", value: "natural_message_splitting_enabled" },
-          { name: "selective_engagement_enabled", value: "selective_engagement_enabled" },
-          { name: "self_reflection_lessons_enabled", value: "self_reflection_lessons_enabled" }
-        )
+      option.setName("key").setDescription("Название флага").setRequired(true)
     )
     .addBooleanOption((option) => option.setName("enabled").setDescription("Включить/выключить").setRequired(true)),
   new SlashCommandBuilder()

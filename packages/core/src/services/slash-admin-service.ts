@@ -6,7 +6,7 @@ import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics"
 import { MemoryAlbumService, ReflectionService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
 import type { MoodService } from "./mood-service";
 import type { ReplyQueueService } from "./reply-queue-service";
-import type { RuntimeConfigService } from "./runtime-config-service";
+import { FEATURE_KEY_MAP, type RuntimeConfigService } from "./runtime-config-service";
 
 export class SlashAdminService {
   constructor(
@@ -70,12 +70,18 @@ export class SlashAdminService {
   }
 
   async updateFeature(guildId: string, key: string, enabled: boolean) {
+    const normalizedKey = key.trim().toLowerCase();
+
+    if (!(normalizedKey in FEATURE_KEY_MAP)) {
+      return `Неизвестный feature flag: ${normalizedKey}.`;
+    }
+
     await this.prisma.featureFlag.upsert({
       where: {
         scope_scopeId_key: {
           scope: "guild",
           scopeId: guildId,
-          key
+          key: normalizedKey
         }
       },
       update: {
@@ -85,13 +91,13 @@ export class SlashAdminService {
       create: {
         scope: "guild",
         scopeId: guildId,
-        key,
+        key: normalizedKey,
         enabled
       }
     });
 
     this.runtimeConfig?.invalidate(guildId);
-    return `Фича ${key}: ${enabled ? "on" : "off"}.`;
+    return `Фича ${normalizedKey}: ${enabled ? "on" : "off"}.`;
   }
 
   async updateRelationship(
