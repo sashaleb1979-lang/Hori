@@ -89,16 +89,28 @@ describe("composeBehaviorPrompt", () => {
 
     expect(result.trace.personaName).toBe("hori-default");
     expect(result.trace.channelKind).toBe("general");
-    expect(result.trace.messageKind).toBe("casual_address");
+    expect(result.trace.messageKind).toBe("smalltalk_hangout");
+    expect(result.trace.smalltalkContextHook).toBe(false);
+    expect(result.trace.stylePreset).toBe("low_pressure_short");
     expect(result.trace.compactness).toBe("short");
-    expect(result.trace.contextEnergy).toBe("medium");
+    expect(result.trace.contextEnergy).toBe("low");
     expect(result.trace.snarkConfidenceThreshold).toBe(0.68);
     expect(result.trace.mediaReactionEligible).toBe(false);
     expect(result.prompt).not.toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
     expect(result.prompt).not.toContain("[SELF-INITIATED INTERJECTION CONSTRAINTS BLOCK]");
     expect(result.prompt).not.toContain("[STALE TAKE / MEDIA REACTION BLOCK]");
-    expect(result.prompt.length).toBeLessThanOrEqual(5100);
+    expect(result.prompt).toContain("[LOW-PRESSURE SMALLTALK BLOCK]");
+    expect(result.prompt.length).toBeLessThanOrEqual(8500);
     expect(result.trace.blocksUsed[0]).toBe("STABLE IDENTITY BLOCK");
+    expect(result.trace.blocksUsed).toContain("MAIN GOAL");
+    expect(result.trace.blocksUsed).toContain("PERSONALITY CORE");
+    expect(result.trace.blocksUsed).toContain("BEHAVIOR POLICY");
+    expect(result.trace.blocksUsed).toContain("SMARTNESS POLICY");
+    expect(result.trace.blocksUsed).toContain("MEMORY USAGE");
+    expect(result.trace.blocksUsed).toContain("REPLY MODE");
+    expect(result.trace.blocksUsed).toContain("FEW-SHOT TONE ANCHORS");
+    expect(result.trace.blocksUsed).toContain("FINAL SELECTION RULE");
+    expect(result.trace.replyMode).toBeDefined();
     expect(uniqueBlocks.size).toBe(result.trace.blocksUsed.length);
   });
 
@@ -161,8 +173,85 @@ describe("composeBehaviorPrompt", () => {
     expect(nonPoliticalOpinion.prompt).not.toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
     expect(nonPoliticalOpinion.prompt).not.toContain("strong pro-Israel bias");
     expect(casual.trace.ideologicalFlavour).toBe("background");
+    expect(casual.trace.messageKind).toBe("smalltalk_hangout");
     expect(disabled.trace.ideologicalFlavour).toBe("disabled");
     expect(disabled.prompt).not.toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
+  });
+
+  it("detects low-pressure hangout smalltalk without forcing banter", () => {
+    const cases = ["привет", "хори привет", "как дела?", "просто поболтать хочу", "пока ничего не делаю"];
+
+    for (const content of cases) {
+      const result = compose(content);
+
+      expect(result.trace.messageKind).toBe("smalltalk_hangout");
+      expect(result.trace.smalltalkContextHook).toBe(false);
+      expect(result.trace.stylePreset).toBe("low_pressure_short");
+      expect(result.prompt).toContain("[LOW-PRESSURE SMALLTALK BLOCK]");
+      expect(result.prompt).not.toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
+      expect(result.prompt).not.toContain("[STALE TAKE / MEDIA REACTION BLOCK]");
+      expect(result.prompt).not.toContain("[SELF-INITIATED INTERJECTION CONSTRAINTS BLOCK]");
+      expect(result.prompt).not.toContain("controlled bite");
+    }
+  });
+
+  it("keeps smalltalk kind but marks contextual hook when fresh context exists", () => {
+    const result = compose("скучно", {
+      relationship: {
+        toneBias: "familiar",
+        roastLevel: 2,
+        praiseBias: 1,
+        interruptPriority: 0,
+        doNotMock: false,
+        doNotInitiate: false,
+        protectedTopics: []
+      },
+      context: {
+        version: "v2",
+        recentMessages: [
+          { author: "tester", content: "вечер опять скучно тянется", createdAt: new Date() },
+          { author: "friend", content: "да, скучно и тихо сегодня", createdAt: new Date() }
+        ],
+        summaries: [],
+        serverMemories: [{ key: "вечер", value: "В этом канале вечером часто жалуются, что скучно.", type: "pattern" }],
+        replyChain: [{ author: "friend", content: "ты опять пишешь что скучно", createdAt: new Date() }],
+        topicWindow: [],
+        entities: [{ type: "concept", surface: "вечер", score: 0.92 }],
+        entityMemories: [{ key: "вечер", value: "обычно тянет на спокойный бытовой чат", type: "note", score: 0.81 }],
+        activeTopic: {
+          topicId: "topic-1",
+          title: "Скучный вечер",
+          summaryShort: "Все жалуются, что вечер пустой и вялый.",
+          summaryFacts: ["В канале тихо", "Никто ничего не делает"],
+          lastUpdatedAt: new Date(),
+          confidence: 0.84
+        },
+        relationship: null,
+        userProfile: null
+      },
+      contextTrace: {
+        version: "v2",
+        activeTopicId: "topic-1",
+        replyChainCount: 1,
+        entityTriggers: ["вечер"],
+        sections: ["reply_chain", "active_topic", "entity_memory", "server_memory"]
+      },
+      message: {
+        triggerSource: "reply"
+      }
+    });
+
+    expect(result.trace.messageKind).toBe("smalltalk_hangout");
+    expect(result.trace.smalltalkContextHook).toBe(true);
+    expect(result.prompt).toContain("[LOW-PRESSURE SMALLTALK BLOCK]");
+    expect(result.prompt).toContain("можно оставить больше привычной теплоты или колкости");
+  });
+
+  it("does not misclassify utility, opinion, search or provocation as hangout smalltalk", () => {
+    expect(compose("объясни pgvector").trace.messageKind).toBe("request_for_explanation");
+    expect(compose("что думаешь про налоги").trace.messageKind).toBe("opinion_question");
+    expect(compose("найди X", { intent: "search" }).trace.messageKind).toBe("command_like_request");
+    expect(compose("заткнись ботяра").trace.messageKind).toBe("provocation");
   });
 
   it("applies self-initiated brevity and unsolicited presets", () => {

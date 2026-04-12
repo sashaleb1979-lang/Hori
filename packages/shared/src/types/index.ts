@@ -36,6 +36,7 @@ export type MessageKind =
   | "direct_mention"
   | "reply_to_bot"
   | "casual_address"
+  | "smalltalk_hangout"
   | "info_question"
   | "opinion_question"
   | "request_for_explanation"
@@ -49,6 +50,7 @@ export type RequestedDepth = "tiny" | "short" | "normal" | "long" | "deep";
 
 export type StylePresetName =
   | "curt"
+  | "low_pressure_short"
   | "neutral_short"
   | "playful_short"
   | "sharp_short"
@@ -63,6 +65,16 @@ export type AntiSlopProfile = "off" | "standard" | "strict";
 export type IdeologicalFlavourState = "disabled" | "background" | "enabled";
 
 export type ContextEnergy = "low" | "medium" | "high";
+
+export type ReplyMode =
+  | "dry"
+  | "mocking"
+  | "lazy"
+  | "sharp"
+  | "semi_meme"
+  | "weird_but_relevant"
+  | "surprisingly_helpful"
+  | "brief_warm";
 
 export interface PersonaResponseLimits {
   maxSentences: number;
@@ -80,6 +92,8 @@ export interface PersonaBehaviorTrace {
   activeMode: PersonaMode;
   channelKind: ChannelKind;
   messageKind: MessageKind;
+  smalltalkContextHook?: boolean;
+  replyMode: ReplyMode;
   stylePreset: StylePresetName;
   requestedDepth: RequestedDepth;
   compactness: RequestedDepth;

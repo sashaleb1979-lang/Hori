@@ -18,6 +18,8 @@ export class ToolOrchestrator {
     messages: LlmChatMessage[];
     tools: ExecutableTool[];
     maxToolCalls: number;
+    temperature?: number;
+    topP?: number;
     maxTokens?: number;
   }): Promise<ChatRunResult> {
     const transcript = [...options.messages];
@@ -29,6 +31,8 @@ export class ToolOrchestrator {
         model: options.model,
         messages: transcript,
         tools: options.tools.map((tool) => tool.definition),
+        temperature: options.temperature,
+        topP: options.topP,
         maxTokens: options.maxTokens
       });
 
@@ -78,6 +82,8 @@ export class ToolOrchestrator {
     const finalResponse = await this.client.chat({
       model: options.model,
       messages: transcript,
+      temperature: options.temperature,
+      topP: options.topP,
       maxTokens: options.maxTokens
     });
 

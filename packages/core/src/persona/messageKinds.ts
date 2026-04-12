@@ -6,6 +6,7 @@ export const messageKinds = [
   "direct_mention",
   "reply_to_bot",
   "casual_address",
+  "smalltalk_hangout",
   "info_question",
   "opinion_question",
   "request_for_explanation",
@@ -20,6 +21,7 @@ const messageKindNotes: Record<MessageKind, string[]> = {
   direct_mention: ["answer directly", "higher priority", "do not mumble"],
   reply_to_bot: ["preserve continuity", "do not restart the topic from scratch"],
   casual_address: ["shorter", "alive", "human-like Discord flow"],
+  smalltalk_hangout: ["low-pressure hangout chat", "short and natural", "do not treat it like a task"],
   info_question: ["less riffing if the question is real", "increase clarity when needed"],
   opinion_question: ["evaluation is allowed", "ideological flavour can show up if the topic fits"],
   request_for_explanation: ["can be longer", "higher density", "no article tone and no analogies"],
@@ -45,6 +47,24 @@ function isQuestionLike(content: string) {
 function isLowSignal(content: string) {
   const normalized = content.trim();
   return normalized.length <= 3 || /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s!?.,]+$/u.test(normalized);
+}
+
+function isSmalltalkHangout(content: string, intent: BotIntent) {
+  if (intent !== "chat") {
+    return false;
+  }
+
+  const normalized = content.trim();
+
+  if (!normalized || normalized.length > 160) {
+    return false;
+  }
+
+  return [
+    /^(?:хори[,.!\s-]*)?(?:привет|хай|хелло|здарова|здрасьте|доброе\s+утро|добрый\s+день|добрый\s+вечер|ку|йо)\b/i,
+    /^(?:ну\s+)?(?:как\s+дела|как\s+ты|че\s+как|ч[её]\s+как|что\s+делаешь|чем\s+занимаешься)\b/i,
+    /\b(?:просто\s+поболтать(?:\s+хочу)?|поболтать(?:\s+хочу)?|просто\s+поговорить(?:\s+хочу)?|скучно|мне\s+скучно|да\s+так|пока\s+ничего\s+не\s+делаю|ничего\s+не\s+делаю)\b/i
+  ].some((pattern) => pattern.test(normalized));
 }
 
 function repeatedInContext(content: string, context?: ContextBundle | null) {
@@ -109,6 +129,10 @@ export function detectMessageKind(options: {
 
   if (/(заткнись|тупая|ботяра|провокац|слабый бот|ты вообще|чушь нес[её]шь|идиот|дура)/i.test(content)) {
     return "provocation";
+  }
+
+  if (isSmalltalkHangout(content, options.intent)) {
+    return "smalltalk_hangout";
   }
 
   if (isQuestionLike(content)) {

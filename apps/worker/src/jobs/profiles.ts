@@ -1,12 +1,13 @@
 import type { Job } from "bullmq";
 
-import { buildUserProfilePrompt } from "@hori/llm";
+import { buildUserProfilePrompt, getModelProfile } from "@hori/llm";
 import { asErrorMessage, type ProfileJobPayload } from "@hori/shared";
 
 import type { WorkerRuntime } from "../index";
 
 export function createProfileJob(runtime: WorkerRuntime) {
   return async (job: Job<ProfileJobPayload>) => {
+    const profile = getModelProfile("smart");
     const stats = await runtime.analytics.getUserStats(job.data.guildId, job.data.userId);
 
     if (!stats || !runtime.profileService.isEligible(stats.totalMessages)) {
@@ -47,7 +48,9 @@ export function createProfileJob(runtime: WorkerRuntime) {
         model: runtime.env.OLLAMA_SMART_MODEL,
         messages: prompt,
         format: "json",
-        temperature: 0.2
+        temperature: Math.min(profile.temperature, 0.2),
+        topP: profile.topP,
+        maxTokens: Math.min(profile.maxTokens, 220)
       });
 
       parsed = JSON.parse(response.message.content) as {

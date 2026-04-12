@@ -12,6 +12,8 @@ describe("loadEnv", () => {
 
     expect(env.FEATURE_WEB_SEARCH).toBe(true);
     expect(env.FEATURE_AUTOINTERJECT).toBe(false);
+    expect(env.OLLAMA_FAST_MODEL).toBe("qwen3.5:9b");
+    expect(env.OLLAMA_SMART_MODEL).toBe("qwen3.5:9b");
     expect(env.LLM_MAX_CONTEXT_MESSAGES).toBe(12);
     expect(env.USER_PROFILE_MIN_MESSAGES).toBe(50);
   });

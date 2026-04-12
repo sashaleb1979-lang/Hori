@@ -19,22 +19,25 @@ export class ContextBuilderService {
 
     if (bundle.recentMessages.length) {
       memoryLayers.push("recent_messages");
+      const cappedMessages = bundle.recentMessages.slice(-10);
       sections.push(
         "Последние сообщения:\n" +
-          bundle.recentMessages.map((message) => `[${message.author}] ${message.content}`).join("\n")
+          cappedMessages.map((message) => `[${message.author}] ${message.content}`).join("\n")
       );
     }
 
     if (bundle.summaries.length) {
       memoryLayers.push("channel_summaries");
-      sections.push("Сводки канала:\n" + bundle.summaries.map((summary) => `- ${summary.summaryShort}`).join("\n"));
+      const cappedSummaries = bundle.summaries.slice(0, 2);
+      sections.push("Сводки канала:\n" + cappedSummaries.map((summary) => `- ${summary.summaryShort}`).join("\n"));
     }
 
     if (bundle.serverMemories.length) {
       memoryLayers.push("server_memory");
+      const cappedMemories = bundle.serverMemories.slice(0, 3);
       sections.push(
         "Долгая память сервера:\n" +
-          bundle.serverMemories.map((memory) => `- ${memory.key}: ${memory.value}`).join("\n")
+          cappedMemories.map((memory) => `- ${memory.key}: ${memory.value}`).join("\n")
       );
     }
 

@@ -28,6 +28,18 @@ export const stylePresets: Record<StylePresetName, StylePresetTuning> = {
     compactness: 0.98,
     emotionalTemperature: "cold"
   },
+  low_pressure_short: {
+    targetLength: "short",
+    tone: "simple, low-pressure, short and unforced",
+    sarcasmBias: 0.08,
+    jokeBias: 0.06,
+    closeness: 0.48,
+    directness: 0.72,
+    acceptablePunctuation: "plain, calm, sparse",
+    acceptableSlang: "minimal to light",
+    compactness: 0.94,
+    emotionalTemperature: "soft-neutral"
+  },
   neutral_short: {
     targetLength: "short",
     tone: "short, even, alive",
@@ -130,6 +142,7 @@ export function resolveStylePreset(options: {
   override?: StylePresetName;
   isSelfInitiated: boolean;
   messageKind: MessageKind;
+  smalltalkContextHook?: boolean;
   mode: PersonaMode;
   channelKind: ChannelKind;
 }) {
@@ -147,6 +160,10 @@ export function resolveStylePreset(options: {
 
   if (options.messageKind === "repeated_question") {
     return "dismissive_short";
+  }
+
+  if (options.messageKind === "smalltalk_hangout" && !options.smalltalkContextHook) {
+    return "low_pressure_short";
   }
 
   if (options.mode === "focused" || options.messageKind === "request_for_explanation" || options.messageKind === "command_like_request") {

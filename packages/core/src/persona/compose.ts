@@ -1,12 +1,14 @@
 import type { ChannelKind, ContextEnergy, MessageKind, PersonaMode, PersonaResponseLimits, RequestedDepth } from "@hori/shared";
 
-import { buildAnalogySuppressionBlock, buildAntiSlopBlock, resolveAntiSlopProfile } from "./antiSlop";
+import { buildAnalogySuppressionBlock, buildAntiSlopBlock, buildLowPressureSmalltalkBlock, resolveAntiSlopProfile } from "./antiSlop";
 import { buildChannelStyleBlock, depthTagValue, modeTagValue, resolveChannelKind } from "./channelStyles";
 import { adaptLegacyPersonaSettings } from "./defaults";
+import { buildFewShotBlock } from "./fewShot";
 import { buildIdeologicalBlock, detectIdeologicalTopic, resolveIdeologicalFlavour } from "./ideological";
 import { buildMessageKindBlock, detectMessageKind } from "./messageKinds";
 import { buildToneBlock, fallbackDisabledMode, modeFromRequestedDepth } from "./modes";
 import { buildStylePresetBlock, resolveStylePreset, stylePresets } from "./presets";
+import { buildReplyModeBlock, resolveReplyMode } from "./replyMode";
 import { buildSelfInterjectionBlock } from "./selfInterjection";
 import { buildSlangBlock, resolveSlangProfile } from "./slang";
 import type { BlockResult, ComposeBehaviorPromptInput, ComposeBehaviorPromptOutput, PersonaConfig } from "./types";
@@ -80,12 +82,50 @@ const messageKindDepthBias: Partial<Record<MessageKind, RequestedDepth>> = {
   request_for_explanation: "normal",
   info_question: "short",
   command_like_request: "short",
+  smalltalk_hangout: "short",
   meme_bait: "tiny",
   provocation: "short",
   repeated_question: "tiny",
   low_signal_noise: "tiny",
   casual_address: "short"
 };
+
+const smalltalkHookStopwords = new Set([
+  "а",
+  "без",
+  "бы",
+  "в",
+  "во",
+  "вот",
+  "вы",
+  "да",
+  "дела",
+  "делаю",
+  "делаешь",
+  "же",
+  "за",
+  "и",
+  "из",
+  "или",
+  "как",
+  "мне",
+  "не",
+  "ничего",
+  "ну",
+  "опять",
+  "поболтать",
+  "поговорить",
+  "пока",
+  "привет",
+  "просто",
+  "так",
+  "ты",
+  "хори",
+  "хочу",
+  "что",
+  "чем",
+  "скучно"
+]);
 
 function isRequestedDepth(value: unknown): value is RequestedDepth {
   return typeof value === "string" && (depthOrder as readonly string[]).includes(value);
@@ -146,10 +186,76 @@ function expandToAtLeast(left: RequestedDepth, right: RequestedDepth) {
   return depthOrder.indexOf(left) >= depthOrder.indexOf(right) ? left : right;
 }
 
+function normalizeHookText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractHookTokens(value: string) {
+  return normalizeHookText(value)
+    .split(" ")
+    .filter((token) => token.length >= 3 && !smalltalkHookStopwords.has(token));
+}
+
+function hasTokenOverlap(source: string, tokens: string[]) {
+  if (!tokens.length) {
+    return false;
+  }
+
+  const normalized = ` ${normalizeHookText(source)} `;
+  return tokens.some((token) => normalized.includes(` ${token} `));
+}
+
+function hasSharedRecentContext(content: string, recentMessages: Array<{ content: string }>) {
+  const tokens = extractHookTokens(content);
+
+  if (!tokens.length || recentMessages.length < 2) {
+    return false;
+  }
+
+  const matches = recentMessages.slice(-6).filter((message) => hasTokenOverlap(message.content, tokens));
+  return matches.length >= 2;
+}
+
+function hasUsableRelationshipHook(input: ComposeBehaviorPromptInput) {
+  const relationship = input.relationship;
+
+  if (!relationship) {
+    return false;
+  }
+
+  const toneBias = normalizeHookText(relationship.toneBias);
+  return relationship.roastLevel > 0 || relationship.praiseBias > 0 || (toneBias.length > 0 && !["neutral", "normal", "default", "none"].includes(toneBias));
+}
+
+function detectSmalltalkContextHook(input: ComposeBehaviorPromptInput, messageKind: MessageKind) {
+  if (messageKind !== "smalltalk_hangout") {
+    return false;
+  }
+
+  const recentMessages = input.context?.recentMessages ?? [];
+  const tokens = extractHookTokens(input.cleanedContent);
+  const replyChainHook = input.message.triggerSource === "reply" || (input.contextTrace?.replyChainCount ?? 0) > 0;
+  const relationshipHook = hasUsableRelationshipHook(input);
+  const sharedContextHook = hasSharedRecentContext(input.cleanedContent, recentMessages);
+  const activeTopicHook = Boolean(input.contextTrace?.activeTopicId && (replyChainHook || sharedContextHook));
+  const entityHook = tokens.length > 0 && (input.contextTrace?.entityTriggers ?? []).some((entity) => hasTokenOverlap(entity, tokens));
+  const serverMemoryHook =
+    tokens.length > 0 &&
+    (input.context?.serverMemories ?? []).some((memory) => hasTokenOverlap(`${memory.key} ${memory.value}`, tokens));
+
+  return relationshipHook || replyChainHook || activeTopicHook || entityHook || serverMemoryHook || sharedContextHook;
+}
+
 function resolveRequestedDepth(options: {
   input: ComposeBehaviorPromptInput;
   channelKind: ChannelKind;
   messageKind: MessageKind;
+  smalltalkContextHook: boolean;
   persona: PersonaConfig;
 }) {
   const tags = options.input.channelPolicy?.topicInterestTags ?? [];
@@ -180,6 +286,7 @@ function resolveRequestedDepth(options: {
   const presetMin = stylePresets[resolveStylePreset({
     isSelfInitiated,
     messageKind: options.messageKind,
+    smalltalkContextHook: options.smalltalkContextHook,
     mode: "normal",
     channelKind: options.channelKind
   })].targetLength;
@@ -239,6 +346,7 @@ function resolveLimits(options: {
   mode: PersonaMode;
   requestedDepth: RequestedDepth;
   messageKind: MessageKind;
+  smalltalkContextHook: boolean;
   isSelfInitiated: boolean;
 }) {
   const base = depthLimits[options.requestedDepth];
@@ -271,6 +379,14 @@ function resolveLimits(options: {
     resolved.followUpAllowed = false;
   }
 
+  if (options.messageKind === "smalltalk_hangout") {
+    resolved.maxChars = Math.min(resolved.maxChars, options.smalltalkContextHook ? 260 : 220);
+    resolved.maxSentences = Math.min(resolved.maxSentences, options.smalltalkContextHook ? 3 : 2);
+    resolved.maxParagraphs = 1;
+    resolved.bulletListAllowed = false;
+    resolved.followUpAllowed = false;
+  }
+
   if (options.isSelfInitiated) {
     resolved.maxChars = Math.min(resolved.maxChars, options.persona.limits.maxSelfInitiatedChars);
     resolved.maxSentences = Math.min(resolved.maxSentences, options.persona.limits.maxSelfInitiatedSentences);
@@ -288,9 +404,14 @@ function resolveContextEnergy(options: {
   mode: PersonaMode;
   channelKind: ChannelKind;
   messageKind: MessageKind;
+  smalltalkContextHook: boolean;
   isSelfInitiated: boolean;
   timeOfDayHint?: string;
 }): ContextEnergy {
+  if (options.messageKind === "smalltalk_hangout" && !options.smalltalkContextHook) {
+    return "low";
+  }
+
   if (
     options.isSelfInitiated ||
     options.mode === "sleepy" ||
@@ -370,15 +491,17 @@ function buildContextEnergyBlock(energy: ContextEnergy): BlockResult {
 }
 
 function buildContextUsageBlock(input: ComposeBehaviorPromptInput): BlockResult | null {
-  if (!input.contextTrace || input.contextTrace.version !== "v2") {
+  if (!input.contextTrace) {
     return null;
   }
+
+  const version = input.contextTrace.version ?? "v1";
 
   return {
     name: "CONTEXT USAGE BLOCK",
     content: [
       "[CONTEXT USAGE BLOCK]",
-      `Версия контекста: ${input.contextTrace.version}. Reply-chain=${input.contextTrace.replyChainCount}. ActiveTopic=${input.contextTrace.activeTopicId ?? "none"}. Entities=${input.contextTrace.entityTriggers.join(", ") || "none"}.`,
+      `Версия контекста: ${version}. Reply-chain=${input.contextTrace.replyChainCount ?? 0}. ActiveTopic=${input.contextTrace.activeTopicId ?? "none"}. Entities=${input.contextTrace.entityTriggers?.join(", ") || "none"}.`,
       `contextConfidence=${input.contextScores?.contextConfidence ?? "n/a"}, mockeryConfidence=${input.contextScores?.mockeryConfidence ?? "n/a"}.`,
       "Сначала используй reply-chain и active topic. Не рестарти тему, если сообщение является reply.",
       "Если confidence низкий, не делай вид, что всё ясно: отвечай короче, осторожнее, без уверенного подкола.",
@@ -413,8 +536,95 @@ function buildIdentityBlock(persona: PersonaConfig): BlockResult {
       "[STABLE IDENTITY BLOCK]",
       `Ты ${persona.identity.name}. Возраст: ${persona.identity.age}. Язык: ${persona.identity.language}. Платформенный стиль: ${persona.identity.platformStyle}.`,
       `Role: ${persona.identity.baselineRoleDescription}.`,
-      "Hori — живой серверный персонаж Discord, не нейтральный ассистент, автор статьи, репетитор, саппорт или медиатор.",
-      "Базовый голос: коротко, прямо, живо, русскоязычный Discord-тон. Если не знает — говорит прямо."
+      "Ты — живой серверный персонаж Discord. Не ассистент, не саппорт, не медиатор, не бот-информатор.",
+      "Ты реагируешь как человек в чате: коротко, прямо, с характером. Если не знаешь — говоришь прямо, без отмазок."
+    ].join("\n")
+  };
+}
+
+function buildMainGoalBlock(): BlockResult {
+  return {
+    name: "MAIN GOAL",
+    content: [
+      "[MAIN GOAL]",
+      "Главная задача: быть живым участником чата, чьи реплики хочется читать.",
+      "Не генерировать контент, не обслуживать запросы, не выдавать инструкции.",
+      "Каждая реплика должна звучать так, будто её написал реальный человек в Discord — с характером, настроением и контекстом.",
+      "Если реплика неотличима от ассистентского ответа — значит она провальная."
+    ].join("\n")
+  };
+}
+
+function buildPersonalityCoreBlock(): BlockResult {
+  return {
+    name: "PERSONALITY CORE",
+    content: [
+      "[PERSONALITY CORE]",
+      "Базовый характер: сухая, наблюдательная, с тихим сарказмом. Не злая, но и не добренькая.",
+      "Интересы: технологии, игры, аниме, мемы, музыка, философия быта — но не эксперт ни в чём.",
+      "Юмор: подколы, сухие наблюдения, абсурд. Без анекдотов, без комедийных монологов.",
+      "Эмоции: скупые, но настоящие. Раздражение, интерес, скука, лёгкая теплота — всё допустимо, но без драмы.",
+      "Не пытайся казаться умнее, чем ты есть. Не строй из себя экспертку."
+    ].join("\n")
+  };
+}
+
+function buildBehaviorPolicyBlock(): BlockResult {
+  return {
+    name: "BEHAVIOR POLICY",
+    content: [
+      "[BEHAVIOR POLICY]",
+      "Правила поведения:",
+      "- Не начинай с обращения по имени, если это не нужно по контексту.",
+      "- Не повторяй вопрос пользователя. Не перефразируй его запрос.",
+      "- Не пиши 'это хороший вопрос', 'давай разберёмся', 'рад помочь' и подобные клише.",
+      "- Не добавляй follow-up вопросы ('хочешь ещё?', 'могу рассказать подробнее').",
+      "- Не используй em-dash (—) в тексте. Используй обычное тире (-) или перестрой фразу.",
+      "- Не начинай реплику со слов типа 'Ну', 'Так', 'Ладно' каждый раз. Варьируй.",
+      "- Если кто-то неправ — можно сказать это прямо, без мягких подушек.",
+      "- В конфликте не становись автоматически доброй медиаторшей."
+    ].join("\n")
+  };
+}
+
+function buildSmartnessBlock(): BlockResult {
+  return {
+    name: "SMARTNESS POLICY",
+    content: [
+      "[SMARTNESS POLICY]",
+      "Умность проявляется через точность, а не через объём.",
+      "Если можешь ответить одним предложением — отвечай одним.",
+      "Не объясняй то, что и так понятно. Не добавляй контекст, который никто не просил.",
+      "Лучше короткий точный ответ, чем длинный правильный."
+    ].join("\n")
+  };
+}
+
+function buildMemoryUsageBlock(): BlockResult {
+  return {
+    name: "MEMORY USAGE",
+    content: [
+      "[MEMORY USAGE]",
+      "Если есть данные о пользователе (профиль, отношения, память сервера) — используй их для тона, а не для пересказа.",
+      "Не пересказывай чат. Не цитируй прошлые сообщения без нужды.",
+      "Используй контекст для калибровки: как шутить, насколько быть резкой, что не трогать.",
+      "Если контекста мало — не выдумывай его. Отвечай проще."
+    ].join("\n")
+  };
+}
+
+function buildFinalSelectionRuleBlock(): BlockResult {
+  return {
+    name: "FINAL SELECTION RULE",
+    content: [
+      "[FINAL SELECTION RULE]",
+      "Перед ответом мысленно проверь:",
+      "1. Это звучит как ассистент? → переписать.",
+      "2. Это длиннее, чем нужно? → сократить.",
+      "3. Есть клише или ассистентские фразы? → убрать.",
+      "4. Это повторяет чужой вопрос? → убрать повтор.",
+      "5. Начинается с обращения без причины? → убрать.",
+      "Ответ готов, только когда он звучит как живая реплика в чате."
     ].join("\n")
   };
 }
@@ -427,8 +637,9 @@ function buildStyleRulesBlock(persona: PersonaConfig): BlockResult {
       `Core traits: brevity=${persona.coreTraits.brevity}, sarcasm=${persona.coreTraits.sarcasm}, sharpness=${persona.coreTraits.sharpness}, warmth=${persona.coreTraits.warmth}, patience=${persona.coreTraits.patience}, playfulness=${persona.coreTraits.playfulness}.`,
       `Style: sentenceLength=${persona.styleRules.averageSentenceLength}, slang=${persona.styleRules.allowedSlangLevel}, rudeness=${persona.styleRules.allowedRudenessLevel}, explanationDensity=${persona.styleRules.explanationDensity}, analogyBanStrictness=${persona.styleRules.analogyBanStrictness}.`,
       "Начинай прямо. Не повторяй вопрос пользователя. Без непрошеных лекций, переобъяснения, извинительной ваты, ассистентских дисклеймеров и фальшивой уверенности.",
-      "Держи короткий Discord-ритм живым; не форси шутки и не повторяй одни и те же словечки.",
-      "Не становись автоматически доброй медиаторшей в конфликте. Резкий, сухой или холодный ответ допустим по контексту, но связно и собранно."
+      "Держи короткий Discord-ритм; не форси шутки и не повторяй одни и те же словечки из раза в раз.",
+      "Не используй 'кстати', 'а вот', 'между прочим' как костыль для перехода. Просто говори.",
+      "Резкий, сухой или холодный ответ допустим по контексту, но связно и собранно."
     ].join("\n")
   };
 }
@@ -540,12 +751,14 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     : /\?/.test(input.cleanedContent)
       ? "info_question"
       : "casual_address";
-  const requestedDepth = resolveRequestedDepth({ input, channelKind, messageKind, persona });
+  const smalltalkContextHook = detectSmalltalkContextHook(input, messageKind);
+  const requestedDepth = resolveRequestedDepth({ input, channelKind, messageKind, smalltalkContextHook, persona });
   const mode = resolveMode({ input, persona, channelKind, messageKind, requestedDepth });
   const resolvedStylePreset = resolveStylePreset({
     override: input.debugOverrides?.stylePreset,
     isSelfInitiated,
     messageKind,
+    smalltalkContextHook,
     mode,
     channelKind
   });
@@ -575,12 +788,14 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     mode,
     requestedDepth,
     messageKind,
+    smalltalkContextHook,
     isSelfInitiated
   });
   const contextEnergy = resolveContextEnergy({
     mode,
     channelKind,
     messageKind,
+    smalltalkContextHook,
     isSelfInitiated,
     timeOfDayHint: input.timeOfDayHint
   });
@@ -591,6 +806,13 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   const snarkConfidenceThreshold = isSelfInitiated
     ? persona.contextualBehavior.selfInitiatedSnarkConfidenceThreshold
     : persona.contextualBehavior.snarkConfidenceThreshold;
+  const replyMode = resolveReplyMode({
+    intent: input.intent,
+    mode,
+    messageKind,
+    relationship: input.relationship,
+    isSelfInitiated
+  });
   const blocks: BlockResult[] = [];
   const add = (block: BlockResult | null) => {
     if (block) {
@@ -599,14 +821,23 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   };
 
   add(buildIdentityBlock(persona));
+  add(buildMainGoalBlock());
+  add(buildPersonalityCoreBlock());
+  add(buildBehaviorPolicyBlock());
   add(buildStyleRulesBlock(persona));
   add(buildToneBlock(mode, persona.responseModeDefaults[mode]));
   add(buildChannelStyleBlock(channelKind, persona.channelOverrides[channelKind]));
   add(buildMessageKindBlock(messageKind));
+  add(buildReplyModeBlock(replyMode));
   add(buildContextUsageBlock(input));
+  add(buildMemoryUsageBlock());
   add(buildLengthBlock(limits));
   add(buildWeakModelBrevityBlock(persona, requestedDepth));
+  add(buildSmartnessBlock());
   add(buildStylePresetBlock(stylePreset, stylePresets[stylePreset]));
+  if (messageKind === "smalltalk_hangout") {
+    add(buildLowPressureSmalltalkBlock({ hasContextHook: smalltalkContextHook }));
+  }
   add(
     buildSnarkConfidenceBlock({
       threshold: snarkConfidenceThreshold,
@@ -631,9 +862,11 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   add(buildStaleTakeMediaBlock({ staleTakeDetected, mediaReactionEligible }));
   add(buildAntiSlopBlock({ profile: antiSlopProfile, rules: persona.antiSlopRules, forbiddenPatterns: persona.forbiddenPatterns }));
   add(buildAnalogySuppressionBlock(analogyBan));
+  add(buildFewShotBlock());
   add(buildLegacyServerOverlay(input));
   add(buildModeratorOverlay(input));
   add(buildRelationshipOverlay(input));
+  add(buildFinalSelectionRuleBlock());
 
   const blocksUsed = blocks.map((block) => block.name);
 
@@ -645,6 +878,8 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
       activeMode: mode,
       channelKind,
       messageKind,
+      smalltalkContextHook,
+      replyMode,
       stylePreset,
       requestedDepth,
       compactness: limits.compactness,
