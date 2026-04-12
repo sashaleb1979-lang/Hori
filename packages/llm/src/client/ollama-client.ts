@@ -156,6 +156,7 @@ function buildChatPayload(options: LlmChatOptions, model: string, maxTokens: num
     format: options.format,
     options: {
       temperature: options.temperature ?? 0.5,
+      ...(options.topP !== undefined ? { top_p: options.topP } : {}),
       num_predict: maxTokens
     },
     messages: options.messages,

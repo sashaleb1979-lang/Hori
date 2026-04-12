@@ -136,8 +136,14 @@ Notes:
 
 ## Prompt Templates And Example Config
 - Base persona, profile and search templates: [examples/prompt-templates.md](./examples/prompt-templates.md)
-- Initial persona config: [examples/persona.initial.json](./examples/persona.initial.json)
-- Moderator relationship example: [examples/moderator.relationship.json](./examples/moderator.relationship.json)
+- Full Cluster 1 persona config: [examples/hori.persona.json](./examples/hori.persona.json)
+- Minimal Cluster 1 persona override: [examples/hori.persona.minimal.json](./examples/hori.persona.minimal.json)
+- Legacy `/bot-style`-compatible persona settings: [examples/persona.initial.json](./examples/persona.initial.json)
+- Relationship overlay example: [examples/moderator.relationship.json](./examples/moderator.relationship.json)
+- ContextBundleV2 example: [examples/cluster1-context-bundle-v2.json](./examples/cluster1-context-bundle-v2.json)
+- Behavior trace example: [examples/cluster1-behavior-trace.json](./examples/cluster1-behavior-trace.json)
+- Channel config tags example: [examples/cluster1-channel-config.json](./examples/cluster1-channel-config.json)
+- Expanded runtime CFG example: [examples/cluster1-cfg-expanded.json](./examples/cluster1-cfg-expanded.json)
 
 ## Deployment With Railway
 Recommended setup: three Railway services from the same repo and Dockerfile.

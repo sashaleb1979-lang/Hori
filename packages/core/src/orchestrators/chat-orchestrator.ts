@@ -67,6 +67,17 @@ export class ChatOrchestrator {
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
+  private getLlmSettings(intent: Parameters<ModelRouter["pickModel"]>[0], maxTokens?: number, overrides: { temperature?: number; topP?: number } = {}) {
+    const profile = this.deps.modelRouter.pickProfile(intent);
+
+    return {
+      model: this.deps.modelRouter.pickModel(intent),
+      temperature: overrides.temperature ?? profile.temperature,
+      topP: overrides.topP ?? profile.topP,
+      maxTokens: maxTokens ? Math.min(maxTokens, profile.maxTokens) : profile.maxTokens
+    };
+  }
+
   async handleMessage(message: MessageEnvelope, prefetchedConfig?: EffectiveRoutingConfig, queueTrace?: BotTrace["queue"]) {
     const startedAt = Date.now();
     const runtimeConfig = prefetchedConfig ?? (await this.deps.runtimeConfig.getRoutingConfig(message.guildId, message.channelId));
@@ -382,11 +393,14 @@ export class ChatOrchestrator {
 
   private async classifyWithLlm(cleanedContent: string, fallback: ReturnType<IntentRouter["route"]>) {
     try {
+      const llm = this.getLlmSettings("chat", 96, { temperature: 0 });
       const response = await this.deps.llmClient.chat({
-        model: this.deps.env.OLLAMA_FAST_MODEL,
+        model: llm.model,
         messages: buildIntentClassifierPrompt(cleanedContent),
         format: "json",
-        temperature: 0
+        temperature: llm.temperature,
+        topP: llm.topP,
+        maxTokens: llm.maxTokens
       });
 
       const parsed = JSON.parse(response.message.content) as { intent?: string; confidence?: number; reason?: string };
@@ -408,6 +422,7 @@ export class ChatOrchestrator {
   }
 
   private async handleChat(content: string, systemPrompt: string, contextText: string, maxTokens?: number) {
+    const llm = this.getLlmSettings("chat", maxTokens);
     const messages: Array<{ role: "system" | "user"; content: string }> = [
       { role: "system", content: systemPrompt }
     ];
@@ -419,42 +434,51 @@ export class ChatOrchestrator {
     messages.push({ role: "user", content });
 
     const response = await this.deps.llmClient.chat({
-      model: this.deps.modelRouter.pickModel("chat"),
+      model: llm.model,
       messages,
-      maxTokens
+      temperature: llm.temperature,
+      topP: llm.topP,
+      maxTokens: llm.maxTokens
     });
 
     return response.message.content;
   }
 
   private async handleSummary(content: string, systemPrompt: string, contextText: string, maxTokens?: number) {
+    const llm = this.getLlmSettings("summary", maxTokens);
     const messages = buildSummaryPrompt(contextText || "Контекста почти нет.", content);
     messages.unshift({ role: "system", content: systemPrompt });
 
     const response = await this.deps.llmClient.chat({
-      model: this.deps.modelRouter.pickModel("summary"),
+      model: llm.model,
       messages,
-      maxTokens
+      temperature: llm.temperature,
+      topP: llm.topP,
+      maxTokens: llm.maxTokens
     });
 
     return response.message.content;
   }
 
   private async handleAnalytics(guildId: string, request: string, systemPrompt: string, maxTokens?: number) {
+    const llm = this.getLlmSettings("analytics", maxTokens);
     const window = /за день|сегодня/i.test(request) ? "day" : /за месяц|месяц/i.test(request) ? "month" : "week";
     const overview = await this.deps.analytics.getOverview(guildId, window);
     const analyticsText = formatAnalyticsOverview(overview);
 
     const response = await this.deps.llmClient.chat({
-      model: this.deps.modelRouter.pickModel("analytics"),
+      model: llm.model,
       messages: [{ role: "system", content: systemPrompt }, ...buildAnalyticsNarrationPrompt(analyticsText, request)],
-      maxTokens
+      temperature: llm.temperature,
+      topP: llm.topP,
+      maxTokens: llm.maxTokens
     });
 
     return response.message.content || analyticsText;
   }
 
   private async handleSearch(message: MessageEnvelope, request: string, systemPrompt: string, maxTokens?: number) {
+    const llm = this.getLlmSettings("search", maxTokens);
     const fetchedPages: Array<{ url: string; title: string; content: string }> = [];
     let searchRequests = 0;
     const tools = [
@@ -498,14 +522,16 @@ export class ChatOrchestrator {
     ];
 
     const run = await this.deps.toolOrchestrator.runChatWithTools({
-      model: this.deps.modelRouter.pickModel("search"),
+      model: llm.model,
       messages: [
         { role: "system", content: `${systemPrompt}\nЕсли нужен интернет, сначала вызывай инструменты.` },
         { role: "user", content: request }
       ],
       tools,
       maxToolCalls: this.deps.env.LLM_MAX_TOOL_CALLS,
-      maxTokens
+      temperature: llm.temperature,
+      topP: llm.topP,
+      maxTokens: llm.maxTokens
     });
 
     if (run.toolCalls.length === 0) {
@@ -518,9 +544,11 @@ export class ChatOrchestrator {
     finalPrompt.unshift({ role: "system", content: systemPrompt });
 
     const response = await this.deps.llmClient.chat({
-      model: this.deps.modelRouter.pickModel("search"),
+      model: llm.model,
       messages: finalPrompt,
-      maxTokens
+      temperature: llm.temperature,
+      topP: llm.topP,
+      maxTokens: llm.maxTokens
     });
 
     return {
@@ -575,6 +603,7 @@ export class ChatOrchestrator {
   }
 
   private async handleRewrite(message: MessageEnvelope, cleanedContent: string, systemPrompt: string, maxTokens?: number) {
+    const llm = this.getLlmSettings("rewrite", maxTokens);
     const source = message.replyToMessageId ? await this.deps.prisma.message.findUnique({ where: { id: message.replyToMessageId } }) : null;
 
     if (!source) {
@@ -585,9 +614,11 @@ export class ChatOrchestrator {
     prompt.unshift({ role: "system", content: systemPrompt });
 
     const response = await this.deps.llmClient.chat({
-      model: this.deps.modelRouter.pickModel("rewrite"),
+      model: llm.model,
       messages: prompt,
-      maxTokens
+      temperature: llm.temperature,
+      topP: llm.topP,
+      maxTokens: llm.maxTokens
     });
 
     return response.message.content;

@@ -9,6 +9,7 @@ Cluster 1 now covers the persona/behavior layer plus the conservative Context In
 - Kept old `PersonaSettings` and `/bot-style` compatible through the `PersonaService` facade.
 - Integrated composer output into `ChatOrchestrator`, including behavior trace and dynamic response caps.
 - Added optional `maxTokens` to LLM chat calls so tiny answers stay cheap and long/deep answers can expand.
+- Default Ollama fast/smart tiers now both target `qwen3.5:9b`; cost/latency separation is kept through profile caps and sampling, not different default model ids.
 - Added feature flags and slash choices for the new behavior layers.
 - Added `ContextBundleV2`: reply-chain anchors, active topic, entity triggers, topic window and entity memory.
 - Replaced linear context formatting with a context sandwich: anchors first, compressed recent context, question anchor last.
@@ -22,6 +23,7 @@ Cluster 1 now covers the persona/behavior layer plus the conservative Context In
 - Add a new message kind by extending `MessageKind`, `messageKinds`, detection heuristics and preset/mode mapping.
 - Add a new fast preset in `presets.ts` and wire it into `resolveStylePreset`.
 - Add future mood engine output by passing `activeMode` or `debugOverrides.activeMode` into `composeBehaviorPrompt`.
+- Tune fast/smart behavior in `packages/llm/src/router/model-profiles.ts`; keep tier routing stable even if both tiers currently point to the same model family.
 - Auto-interject now has a numeric confidence gate. Keep the threshold conservative; weak context should suppress unsolicited replies.
 - Media selection is registry-based only. Add local files with `/bot-media add`; missing files fall back to text.
 - Topic summaries are cheap heuristics for now. If they become too noisy, improve `TopicService` before adding another LLM call.
@@ -39,3 +41,4 @@ Cluster 1 now covers the persona/behavior layer plus the conservative Context In
 - Self-initiated low-confidence messages are suppressed before the expensive LLM call.
 - Topic reset respects replies, TTL and explicit topic switches.
 - Media registry never sends a missing file; it falls back to text.
+- Fast/smart routing can share `qwen3.5:9b`, but fast still stays cheaper through lower profile caps and colder sampling.

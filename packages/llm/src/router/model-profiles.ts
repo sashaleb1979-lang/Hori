@@ -8,14 +8,14 @@ export interface ModelProfile {
 
 const modelProfiles: Record<ModelKind, ModelProfile> = {
   fast: {
-    temperature: 0.4,
-    maxTokens: 400,
-    topP: 0.9
+    temperature: 0.35,
+    maxTokens: 220,
+    topP: 0.88
   },
   smart: {
-    temperature: 0.55,
-    maxTokens: 700,
-    topP: 0.95
+    temperature: 0.5,
+    maxTokens: 360,
+    topP: 0.92
   }
 };
 

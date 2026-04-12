@@ -71,7 +71,7 @@ describe("OllamaClient", () => {
       if (url.endsWith("/api/tags")) {
         return new Response(
           JSON.stringify({
-            models: [{ name: "qwen3.5:4b" }]
+            models: [{ name: "qwen3.5:9b" }]
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
@@ -81,13 +81,14 @@ describe("OllamaClient", () => {
       const payload = JSON.parse(String(init?.body)) as {
         think?: boolean;
         keep_alive?: string;
-        options?: { num_predict?: number; temperature?: number };
+        options?: { num_predict?: number; temperature?: number; top_p?: number };
       };
 
       expect(payload.think).toBe(false);
       expect(payload.keep_alive).toBe("10m");
       expect(payload.options?.num_predict).toBe(96);
       expect(payload.options?.temperature).toBe(0.2);
+      expect(payload.options?.top_p).toBe(0.9);
 
       return new Response(
         ['{"message":{"role":"assistant","content":"Привет"}}', '{"done":true}'].join("\n"),
@@ -101,8 +102,8 @@ describe("OllamaClient", () => {
       {
         OLLAMA_BASE_URL: "http://localhost:11434",
         OLLAMA_TIMEOUT_MS: 5_000,
-        OLLAMA_FAST_MODEL: "qwen3.5:4b",
-        OLLAMA_SMART_MODEL: "qwen3.5:4b",
+        OLLAMA_FAST_MODEL: "qwen3.5:9b",
+        OLLAMA_SMART_MODEL: "qwen3.5:9b",
         OLLAMA_EMBED_MODEL: "nomic-embed-text",
         LLM_REPLY_MAX_TOKENS: 96,
         OLLAMA_KEEP_ALIVE: "10m"
@@ -116,8 +117,9 @@ describe("OllamaClient", () => {
     );
 
     const response = await client.chat({
-      model: "qwen3.5:4b",
+      model: "qwen3.5:9b",
       temperature: 0.2,
+      topP: 0.9,
       messages: [{ role: "user", content: "Привет" }]
     });
 

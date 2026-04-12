@@ -1,12 +1,13 @@
 import type { Job } from "bullmq";
 
-import { buildSummaryPrompt } from "@hori/llm";
+import { buildSummaryPrompt, getModelProfile } from "@hori/llm";
 import { asErrorMessage, type SummaryJobPayload } from "@hori/shared";
 
 import type { WorkerRuntime } from "../index";
 
 export function createSummaryJob(runtime: WorkerRuntime) {
   return async (job: Job<SummaryJobPayload>) => {
+    const profile = getModelProfile("smart");
     const messages = await runtime.summaryService.getMessagesForNextSummary(
       job.data.guildId,
       job.data.channelId,
@@ -27,7 +28,10 @@ export function createSummaryJob(runtime: WorkerRuntime) {
     try {
       response = await runtime.llmClient.chat({
         model: runtime.env.OLLAMA_SMART_MODEL,
-        messages: prompt
+        messages: prompt,
+        temperature: profile.temperature,
+        topP: profile.topP,
+        maxTokens: profile.maxTokens
       });
     } catch (error) {
       runtime.logger.warn({ channelId: job.data.channelId, error: asErrorMessage(error), guildId: job.data.guildId, jobId: job.id }, "summary skipped because ollama is unavailable");

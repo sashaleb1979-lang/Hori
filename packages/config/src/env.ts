@@ -114,8 +114,8 @@ const coreEnvSchema = z.object({
   REDIS_URL: urlish,
 
   OLLAMA_BASE_URL: urlish.optional(),
-  OLLAMA_FAST_MODEL: z.string().default("qwen3.5:4b"),
-  OLLAMA_SMART_MODEL: z.string().default("qwen3.5:4b"),
+  OLLAMA_FAST_MODEL: z.string().default("qwen3.5:9b"),
+  OLLAMA_SMART_MODEL: z.string().default("qwen3.5:9b"),
   OLLAMA_EMBED_MODEL: z.string().default("nomic-embed-text"),
   OLLAMA_TIMEOUT_MS: intish.default(45000),
 
