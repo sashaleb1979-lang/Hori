@@ -2822,6 +2822,9 @@ var import_core = require("@hori/core");
 
 // src/router/background-jobs.ts
 var import_shared4 = require("@hori/shared");
+function buildJobId(...parts) {
+  return parts.map((part) => part.trim()).filter(Boolean).join("-").replace(/[:\s]+/g, "-");
+}
 async function enqueueBackgroundJobs(runtime, envelope) {
   const jobs = [
     {
@@ -2829,7 +2832,7 @@ async function enqueueBackgroundJobs(runtime, envelope) {
       task: runtime.queues.summary.add(
         "summary",
         { guildId: envelope.guildId, channelId: envelope.channelId },
-        { jobId: `summary:${envelope.guildId}:${envelope.channelId}` }
+        { jobId: buildJobId("summary", envelope.guildId, envelope.channelId) }
       )
     },
     {
@@ -2837,7 +2840,7 @@ async function enqueueBackgroundJobs(runtime, envelope) {
       task: runtime.queues.profile.add(
         "profile",
         { guildId: envelope.guildId, userId: envelope.userId },
-        { jobId: `profile:${envelope.guildId}:${envelope.userId}` }
+        { jobId: buildJobId("profile", envelope.guildId, envelope.userId) }
       )
     },
     {
@@ -2845,7 +2848,7 @@ async function enqueueBackgroundJobs(runtime, envelope) {
       task: envelope.content.length >= runtime.env.MESSAGE_EMBED_MIN_CHARS ? runtime.queues.embedding.add(
         "embedding",
         { entityType: "message", entityId: envelope.messageId },
-        { jobId: `embedding:${envelope.messageId}` }
+        { jobId: buildJobId("embedding", envelope.messageId) }
       ) : Promise.resolve()
     },
     {
@@ -2853,7 +2856,7 @@ async function enqueueBackgroundJobs(runtime, envelope) {
       task: runtime.queues.topic.add(
         "topic",
         { guildId: envelope.guildId, channelId: envelope.channelId, messageId: envelope.messageId },
-        { jobId: `topic:${envelope.messageId}` }
+        { jobId: buildJobId("topic", envelope.messageId) }
       )
     }
   ];
@@ -3023,7 +3026,9 @@ async function routeMessage(runtime, message) {
     isBotUser: false
   });
   (0, import_analytics.trackIngestedMessage)();
-  await enqueueBackgroundJobs(runtime, envelope);
+  void enqueueBackgroundJobs(runtime, envelope).catch((error) => {
+    runtime.logger.warn({ messageId: envelope.messageId, error }, "background job scheduling crashed");
+  });
   if (!explicitInvocation && !autoInterject) {
     return;
   }
