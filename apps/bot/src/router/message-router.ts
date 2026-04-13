@@ -3,7 +3,7 @@ import { PermissionFlagsBits } from "discord.js";
 
 import { trackIngestedMessage } from "@hori/analytics";
 import { DEFAULT_DEBOUNCE, IntentRouter, createChannelDebouncer, detectMessageKind, evaluateSelectiveEngagement, implicitMentionKindWhen, planNaturalMessageSplit, resolveActivation, shouldDebounce } from "@hori/core";
-import { type MessageEnvelope, type ReplyQueueTrace, type TriggerSource } from "@hori/shared";
+import { type BotReplyPayload, type MessageEnvelope, type ReplyQueueTrace, type TriggerSource } from "@hori/shared";
 
 import type { BotRuntime } from "../bootstrap";
 import { enqueueBackgroundJobs } from "./background-jobs";
@@ -13,12 +13,35 @@ import { sendReply } from "../responders/message-responder";
 const intentRouter = new IntentRouter();
 const inboundDebouncers = new Map<string, ReturnType<typeof createChannelDebouncer<PendingInvocation>>>();
 const naturalSplitCooldownByChannel = new Map<string, number>();
+export const EMPTY_REPLY_FALLBACK = "Сек, у меня ответ развалился. Повтори ещё раз.";
 
 interface PendingInvocation {
   runtime: BotRuntime;
   message: Message;
   routingConfig: Awaited<ReturnType<BotRuntime["runtimeConfig"]["getRoutingConfig"]>>;
   triggerSource?: TriggerSource;
+}
+
+function isBlankReplyText(value: string | null | undefined) {
+  return !value || !value.trim();
+}
+
+export function prepareReplyForDelivery(reply: string | BotReplyPayload | null | undefined): string | BotReplyPayload {
+  if (typeof reply === "string") {
+    return isBlankReplyText(reply) ? EMPTY_REPLY_FALLBACK : reply;
+  }
+
+  if (!reply) {
+    return EMPTY_REPLY_FALLBACK;
+  }
+
+  if (reply.media) {
+    return reply;
+  }
+
+  return isBlankReplyText(reply.text)
+    ? { ...reply, text: EMPTY_REPLY_FALLBACK }
+    : reply;
 }
 
 async function detectTriggerSource(message: Message, botName: string, botId: string): Promise<{ triggerSource?: TriggerSource; wasMentioned: boolean; implicitMentionKinds: Array<"reply_to_bot" | "name_in_text"> }> {
@@ -305,16 +328,23 @@ async function processInvocation(
 
   const result = await runtime.orchestrator.handleMessage(envelope, routingConfig, queueTrace);
 
-  if (!result.reply) {
-    if (queueItemId) {
-      await runtime.replyQueue.complete(queueItemId);
-      await drainReplyQueue(runtime, message);
-    }
-    return;
+  const replyToSend = prepareReplyForDelivery(result.reply);
+  if (replyToSend !== result.reply) {
+    runtime.logger.warn(
+      {
+        messageId: envelope.messageId,
+        channelId: envelope.channelId,
+        guildId: envelope.guildId,
+        intent: result.trace.intent,
+        hasOriginalReply: Boolean(result.reply),
+        originalReplyType: typeof result.reply
+      },
+      "orchestrator returned empty reply, using fallback"
+    );
   }
 
-  const replyText = typeof result.reply === "string" ? result.reply : result.reply.text;
-  const hasMedia = typeof result.reply !== "string" && Boolean(result.reply.media);
+  const replyText = typeof replyToSend === "string" ? replyToSend : replyToSend.text;
+  const hasMedia = typeof replyToSend !== "string" && Boolean(replyToSend.media);
   const microSplitChunks = result.trace.microReaction?.splitChunks;
   const splitPlan = hasMedia
     ? null
@@ -342,7 +372,7 @@ async function processInvocation(
     naturalSplitCooldownByChannel.set(message.channelId, Date.now());
   }
 
-  await sendReply(message, result.reply, {
+  await sendReply(message, replyToSend, {
     naturalChunks: splitPlan?.chunks,
     naturalDelayMs: splitPlan?.delayMs
   });

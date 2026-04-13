@@ -2905,6 +2905,22 @@ function sleep(ms) {
 var intentRouter = new import_core.IntentRouter();
 var inboundDebouncers = /* @__PURE__ */ new Map();
 var naturalSplitCooldownByChannel = /* @__PURE__ */ new Map();
+var EMPTY_REPLY_FALLBACK = "\u0421\u0435\u043A, \u0443 \u043C\u0435\u043D\u044F \u043E\u0442\u0432\u0435\u0442 \u0440\u0430\u0437\u0432\u0430\u043B\u0438\u043B\u0441\u044F. \u041F\u043E\u0432\u0442\u043E\u0440\u0438 \u0435\u0449\u0451 \u0440\u0430\u0437.";
+function isBlankReplyText(value) {
+  return !value || !value.trim();
+}
+function prepareReplyForDelivery(reply) {
+  if (typeof reply === "string") {
+    return isBlankReplyText(reply) ? EMPTY_REPLY_FALLBACK : reply;
+  }
+  if (!reply) {
+    return EMPTY_REPLY_FALLBACK;
+  }
+  if (reply.media) {
+    return reply;
+  }
+  return isBlankReplyText(reply.text) ? { ...reply, text: EMPTY_REPLY_FALLBACK } : reply;
+}
 async function detectTriggerSource(message, botName, botId) {
   const content = message.content.trim();
   if (message.mentions.has(botId)) {
@@ -3125,15 +3141,22 @@ async function processInvocation(runtime, message, routingConfig, triggerSource,
     queueItemId = queueTrace.itemId ?? null;
   }
   const result = await runtime.orchestrator.handleMessage(envelope, routingConfig, queueTrace);
-  if (!result.reply) {
-    if (queueItemId) {
-      await runtime.replyQueue.complete(queueItemId);
-      await drainReplyQueue(runtime, message);
-    }
-    return;
+  const replyToSend = prepareReplyForDelivery(result.reply);
+  if (replyToSend !== result.reply) {
+    runtime.logger.warn(
+      {
+        messageId: envelope.messageId,
+        channelId: envelope.channelId,
+        guildId: envelope.guildId,
+        intent: result.trace.intent,
+        hasOriginalReply: Boolean(result.reply),
+        originalReplyType: typeof result.reply
+      },
+      "orchestrator returned empty reply, using fallback"
+    );
   }
-  const replyText = typeof result.reply === "string" ? result.reply : result.reply.text;
-  const hasMedia = typeof result.reply !== "string" && Boolean(result.reply.media);
+  const replyText = typeof replyToSend === "string" ? replyToSend : replyToSend.text;
+  const hasMedia = typeof replyToSend !== "string" && Boolean(replyToSend.media);
   const microSplitChunks = result.trace.microReaction?.splitChunks;
   const splitPlan = hasMedia ? null : microSplitChunks?.length ? {
     chunks: microSplitChunks,
@@ -3155,7 +3178,7 @@ async function processInvocation(runtime, message, routingConfig, triggerSource,
   if (splitPlan) {
     naturalSplitCooldownByChannel.set(message.channelId, Date.now());
   }
-  await sendReply(message, result.reply, {
+  await sendReply(message, replyToSend, {
     naturalChunks: splitPlan?.chunks,
     naturalDelayMs: splitPlan?.delayMs
   });
