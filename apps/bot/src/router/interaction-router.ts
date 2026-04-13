@@ -34,6 +34,36 @@ const POWER_PANEL_PREFIX = "power-panel";
 const POWER_PROFILES = ["economy", "balanced", "expanded", "max"] as const;
 const HORI_PANEL_TABS = ["main", "owner", "style", "liveliness", "memory", "people", "channels", "search", "experiments", "diagnostics"] as const;
 type HoriPanelTab = (typeof HORI_PANEL_TABS)[number];
+type HoriPanelAction = {
+  id: string;
+  label: string;
+  style?: ButtonStyle;
+  ownerOnly?: boolean;
+  modOnly?: boolean;
+};
+
+const PANEL_FEATURE_LABELS = {
+  web_search: "Web search",
+  link_understanding_enabled: "Link understanding",
+  auto_interject: "Auto interject",
+  reply_queue_enabled: "Reply queue",
+  media_reactions_enabled: "Media reactions",
+  selective_engagement_enabled: "Selective engage",
+  context_actions: "Context actions",
+  self_reflection_lessons_enabled: "Reflection",
+  playful_mode_enabled: "Playful mode",
+  irritated_mode_enabled: "Irritated mode",
+  roast: "Roast",
+  memory_album_enabled: "Memory album",
+  interaction_requests_enabled: "Interaction requests",
+  topic_engine_enabled: "Topic engine",
+  anti_slop_strict_mode: "Anti-slop",
+  context_confidence_enabled: "Context confidence",
+  channel_aware_mode: "Channel-aware",
+  message_kind_aware_mode: "Kind-aware"
+} as const;
+
+type PanelFeatureKey = keyof typeof PANEL_FEATURE_LABELS;
 
 function ensureModerator(interaction: ChatInputCommandInteraction | ContextMenuCommandInteraction | ModalSubmitInteraction) {
   return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
@@ -1591,6 +1621,25 @@ async function handleHoriPanelAction(
     return;
   }
 
+  const featureToggle = parsePanelFeatureToggleAction(action);
+  if (featureToggle) {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Feature toggles только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.update(
+      buildHoriPanelDetailResponse(
+        inferPanelTabForFeatureKey(featureToggle.key),
+        isOwner,
+        isModerator,
+        horiActionTitle(action),
+        await applyPanelFeatureToggle(runtime, interaction.guildId, featureToggle.key, featureToggle.enabled)
+      )
+    );
+    return;
+  }
+
   if (action === "power_panel") {
     if (!isOwner) {
       await interaction.reply({ content: "Эта панель только для владельца бота.", flags: MessageFlags.Ephemeral });
@@ -1815,14 +1864,14 @@ function buildHoriPanelEmbed(tab: HoriPanelTab, isOwner: boolean, isModerator: b
     owner: isOwner
       ? "Owner panel: power profile, lockdown, relationship редактор, media sync-pack, server memory-build и отдельная state-панель."
       : "Owner panel скрыта. Тут ничего страшного, просто не твоё меню",
-    style: "Стиль: женская персона, короткие ответы, тепло без сахара, умеренная язвительность, живой сленг и без финальных точек в коротких репликах",
-    liveliness: "Живость: чтение чата, редкие аккуратные вмешательства, natural message sprinting максимум в 2 коротких чанка",
-    memory: "Память: Active Memory + Hybrid Recall применяется к каждому ответу; memory-build собирает user/channel/server/event факты из БД",
+    style: "Стиль: женская персона, короткие ответы, тепло без сахара, умеренная язвительность, живой сленг и быстрые тумблеры режимов tone/playful/roast.",
+    liveliness: "Живость: чтение чата, auto-interject, reply queue, natural message sprinting и быстрые quiet/live переключатели.",
+    memory: "Память: Active Memory + Hybrid Recall, memory-build, topic engine, album и interaction requests теперь тоже доступны быстрыми тумблерами.",
     people: "Люди: свой профиль видит каждый; owner/moderator могут смотреть подробнее, owner настраивает relationship цифры",
     channels: "Каналы: можно включить replies/interjections, посмотреть policy и локальную channel memory",
-    search: "Поиск: диагностика Brave/Ollama/cooldown/denylist и усиленный fallback через прямой Brave search + fetch страниц",
-    experiments: "Эксперименты: natural splitting, media reactions, selective engagement, reflection и link understanding",
-    diagnostics: "Диагностика: последние trace, feature flags, search preflight и состояние памяти"
+    search: "Поиск: диагностика Brave/Ollama/cooldown/denylist, быстрый search modal и on/off для web search и link understanding.",
+    experiments: "Эксперименты: media reactions, selective engagement, context actions, reflection и прочие экспериментальные переключатели прямо с панели.",
+    diagnostics: "Диагностика: последние trace, feature flags, search preflight, строгие safety/context тумблеры и состояние памяти."
   };
 
   const actions = getHoriTabActions(tab, isOwner, isModerator).map((action) => action.label).join(" / ") || "нет доступных кнопок";
@@ -1973,7 +2022,7 @@ function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boo
       { id: "media_sync", label: "Media sync", ownerOnly: true },
       { id: "media_list", label: "Media list", ownerOnly: true },
       { id: "memory_build_server", label: "Build сервер", ownerOnly: true }
-    ],
+    ] satisfies HoriPanelAction[],
     style: [
       { id: "style_default", label: "Живой preset", modOnly: true, style: ButtonStyle.Primary },
       { id: "style_edit_modal", label: "Edit style", modOnly: true },
@@ -1981,9 +2030,15 @@ function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boo
       { id: "mood_normal", label: "Mood normal", modOnly: true },
       { id: "natural_split_on", label: "Sprinting on", modOnly: true },
       { id: "natural_split_off", label: "Sprinting off", modOnly: true },
+      featureAction("playful_mode_enabled", true, "Playful on", { modOnly: true }),
+      featureAction("playful_mode_enabled", false, "Playful off", { modOnly: true }),
+      featureAction("irritated_mode_enabled", true, "Irritated on", { modOnly: true }),
+      featureAction("irritated_mode_enabled", false, "Irritated off", { modOnly: true }),
+      featureAction("roast", true, "Roast on", { modOnly: true }),
+      featureAction("roast", false, "Roast off", { modOnly: true }),
       { id: "feature_status", label: "Фичи" },
       { id: "status", label: "Статус" }
-    ],
+    ] satisfies HoriPanelAction[],
     liveliness: [
       { id: "read_chat_on", label: "Читать чат", modOnly: true, style: ButtonStyle.Primary },
       { id: "read_chat_off", label: "Тихий канал", modOnly: true },
@@ -1991,26 +2046,36 @@ function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boo
       { id: "natural_split_off", label: "1 chunk", modOnly: true },
       { id: "mood_status", label: "Mood" },
       { id: "queue_status", label: "Queue" },
+      featureAction("auto_interject", true, "Interject on", { modOnly: true }),
+      featureAction("auto_interject", false, "Interject off", { modOnly: true }),
+      featureAction("reply_queue_enabled", true, "Queue on", { modOnly: true }),
+      featureAction("reply_queue_enabled", false, "Queue off", { modOnly: true }),
       { id: "media_sync", label: "GIF pack", ownerOnly: true },
       { id: "reflection_status", label: "Reflection" },
       { id: "feature_status", label: "Фичи" }
-    ],
+    ] satisfies HoriPanelAction[],
     memory: [
       { id: "memory_status", label: "Memory status", style: ButtonStyle.Primary },
       { id: "memory_build_channel", label: "Build канал", modOnly: true },
       { id: "memory_build_server", label: "Build сервер", ownerOnly: true },
+      featureAction("topic_engine_enabled", true, "Topic on", { modOnly: true }),
+      featureAction("topic_engine_enabled", false, "Topic off", { modOnly: true }),
+      featureAction("memory_album_enabled", true, "Album on", { modOnly: true }),
+      featureAction("memory_album_enabled", false, "Album off", { modOnly: true }),
+      featureAction("interaction_requests_enabled", true, "Requests on", { modOnly: true }),
+      featureAction("interaction_requests_enabled", false, "Requests off", { modOnly: true }),
       { id: "summary_current", label: "Summary" },
       { id: "topic_status", label: "Topic" },
       { id: "reflection_list", label: "Lessons" },
       { id: "memory_self", label: "Моя память" }
-    ],
+    ] satisfies HoriPanelAction[],
     people: [
       { id: "profile_self", label: "Мой профиль", style: ButtonStyle.Primary },
       { id: "relationship_self", label: "Отношение ко мне" },
       { id: "relationship_edit_modal", label: "Edit relation", ownerOnly: true },
       { id: "relationship_hint", label: "Owner edit", ownerOnly: true },
       { id: "memory_self", label: "Моя память" }
-    ],
+    ] satisfies HoriPanelAction[],
     channels: [
       { id: "channel_policy", label: "Policy", style: ButtonStyle.Primary },
       { id: "channel_edit_modal", label: "Edit channel", modOnly: true },
@@ -2022,34 +2087,54 @@ function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boo
       { id: "queue_clear", label: "Clear queue", modOnly: true },
       { id: "summary_current", label: "Summary" },
       { id: "memory_status", label: "Channel memory" }
-    ],
+    ] satisfies HoriPanelAction[],
     search: [
       { id: "search_query_modal", label: "Search", style: ButtonStyle.Primary },
       { id: "search_diagnose", label: "Диагностика", style: ButtonStyle.Primary },
+      featureAction("web_search", true, "Search on", { modOnly: true }),
+      featureAction("web_search", false, "Search off", { modOnly: true }),
+      featureAction("link_understanding_enabled", true, "Links on", { modOnly: true }),
+      featureAction("link_understanding_enabled", false, "Links off", { modOnly: true }),
       { id: "feature_status", label: "Фичи" },
       { id: "state_search", label: "Search state", ownerOnly: true },
       { id: "state_tokens", label: "Tokens", ownerOnly: true }
-    ],
+    ] satisfies HoriPanelAction[],
     experiments: [
       { id: "natural_split_on", label: "Sprinting on", modOnly: true, style: ButtonStyle.Primary },
       { id: "natural_split_off", label: "Sprinting off", modOnly: true },
       { id: "mood_playful", label: "Mood playful", modOnly: true },
+      featureAction("media_reactions_enabled", true, "Media on", { modOnly: true }),
+      featureAction("media_reactions_enabled", false, "Media off", { modOnly: true }),
+      featureAction("selective_engagement_enabled", true, "Selective on", { modOnly: true }),
+      featureAction("selective_engagement_enabled", false, "Selective off", { modOnly: true }),
+      featureAction("context_actions", true, "Ctx actions on", { modOnly: true }),
+      featureAction("context_actions", false, "Ctx actions off", { modOnly: true }),
+      featureAction("self_reflection_lessons_enabled", true, "Reflect on", { modOnly: true }),
+      featureAction("self_reflection_lessons_enabled", false, "Reflect off", { modOnly: true }),
       { id: "feature_status", label: "Фичи" },
       { id: "media_list", label: "Media list" },
       { id: "reflection_status", label: "Reflection" },
       { id: "reflection_list", label: "Lessons" },
       { id: "media_sync", label: "Media sync", ownerOnly: true }
-    ],
+    ] satisfies HoriPanelAction[],
     diagnostics: [
       { id: "debug_latest", label: "Latest trace", style: ButtonStyle.Primary },
       { id: "search_diagnose", label: "Search diag" },
+      featureAction("anti_slop_strict_mode", true, "Strict on", { modOnly: true }),
+      featureAction("anti_slop_strict_mode", false, "Strict off", { modOnly: true }),
+      featureAction("context_confidence_enabled", true, "Ctx conf on", { modOnly: true }),
+      featureAction("context_confidence_enabled", false, "Ctx conf off", { modOnly: true }),
+      featureAction("channel_aware_mode", true, "Channel-aware on", { modOnly: true }),
+      featureAction("channel_aware_mode", false, "Channel-aware off", { modOnly: true }),
+      featureAction("message_kind_aware_mode", true, "Kind-aware on", { modOnly: true }),
+      featureAction("message_kind_aware_mode", false, "Kind-aware off", { modOnly: true }),
       { id: "feature_status", label: "Фичи" },
       { id: "queue_status", label: "Queue" },
       { id: "stats_week", label: "Stats" },
       { id: "state_trace", label: "Trace state", ownerOnly: true },
       { id: "state_tokens", label: "Token state", ownerOnly: true },
       { id: "status", label: "Статус" }
-    ]
+    ] satisfies HoriPanelAction[]
   };
 
   return byTab[tab].filter((action) => {
@@ -2084,6 +2169,11 @@ function horiTabLabel(tab: HoriPanelTab) {
 }
 
 function inferTabForHoriAction(action: string): HoriPanelTab {
+  const featureToggle = parsePanelFeatureToggleAction(action);
+  if (featureToggle) {
+    return inferPanelTabForFeatureKey(featureToggle.key);
+  }
+
   if (action.startsWith("memory")) return "memory";
   if (action.startsWith("search")) return "search";
   if (action.startsWith("lockdown") || action === "power_panel" || action === "state_panel" || action === "ai_url_modal") return "owner";
@@ -2096,6 +2186,11 @@ function inferTabForHoriAction(action: string): HoriPanelTab {
 }
 
 function horiActionTitle(action: string) {
+  const featureToggle = parsePanelFeatureToggleAction(action);
+  if (featureToggle) {
+    return `${PANEL_FEATURE_LABELS[featureToggle.key]}: ${featureToggle.enabled ? "on" : "off"}`;
+  }
+
   const titles: Record<string, string> = {
     status: "Быстрый статус",
     help: "Help",
@@ -2130,6 +2225,69 @@ function horiActionTitle(action: string) {
   };
 
   return titles[action] ?? "Panel action";
+}
+
+function featureAction(key: PanelFeatureKey, enabled: boolean, label: string, options: Omit<HoriPanelAction, "id" | "label"> = {}): HoriPanelAction {
+  return {
+    id: `feature_${key}_${enabled ? "on" : "off"}`,
+    label,
+    ...options
+  };
+}
+
+function parsePanelFeatureToggleAction(action: string): { key: PanelFeatureKey; enabled: boolean } | null {
+  if (!action.startsWith("feature_")) {
+    return null;
+  }
+
+  if (action.endsWith("_on")) {
+    const key = action.slice("feature_".length, -3) as PanelFeatureKey;
+    return key in PANEL_FEATURE_LABELS ? { key, enabled: true } : null;
+  }
+
+  if (action.endsWith("_off")) {
+    const key = action.slice("feature_".length, -4) as PanelFeatureKey;
+    return key in PANEL_FEATURE_LABELS ? { key, enabled: false } : null;
+  }
+
+  return null;
+}
+
+function inferPanelTabForFeatureKey(key: PanelFeatureKey): HoriPanelTab {
+  switch (key) {
+    case "web_search":
+    case "link_understanding_enabled":
+      return "search";
+    case "auto_interject":
+    case "reply_queue_enabled":
+      return "liveliness";
+    case "playful_mode_enabled":
+    case "irritated_mode_enabled":
+    case "roast":
+      return "style";
+    case "topic_engine_enabled":
+    case "memory_album_enabled":
+    case "interaction_requests_enabled":
+      return "memory";
+    case "media_reactions_enabled":
+    case "selective_engagement_enabled":
+    case "context_actions":
+    case "self_reflection_lessons_enabled":
+      return "experiments";
+    case "anti_slop_strict_mode":
+    case "context_confidence_enabled":
+    case "channel_aware_mode":
+    case "message_kind_aware_mode":
+      return "diagnostics";
+  }
+}
+
+async function applyPanelFeatureToggle(runtime: BotRuntime, guildId: string, key: PanelFeatureKey, enabled: boolean) {
+  return [
+    await runtime.slashAdmin.updateFeature(guildId, key, enabled),
+    "",
+    await buildFeatureStatus(runtime, guildId)
+  ].join("\n");
 }
 
 function buildHoriDetailEmbed(title: string, body: string) {

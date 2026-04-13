@@ -599,6 +599,26 @@ var HORI_STATE_PANEL_PREFIX = "hori-state";
 var POWER_PANEL_PREFIX = "power-panel";
 var POWER_PROFILES = ["economy", "balanced", "expanded", "max"];
 var HORI_PANEL_TABS = ["main", "owner", "style", "liveliness", "memory", "people", "channels", "search", "experiments", "diagnostics"];
+var PANEL_FEATURE_LABELS = {
+  web_search: "Web search",
+  link_understanding_enabled: "Link understanding",
+  auto_interject: "Auto interject",
+  reply_queue_enabled: "Reply queue",
+  media_reactions_enabled: "Media reactions",
+  selective_engagement_enabled: "Selective engage",
+  context_actions: "Context actions",
+  self_reflection_lessons_enabled: "Reflection",
+  playful_mode_enabled: "Playful mode",
+  irritated_mode_enabled: "Irritated mode",
+  roast: "Roast",
+  memory_album_enabled: "Memory album",
+  interaction_requests_enabled: "Interaction requests",
+  topic_engine_enabled: "Topic engine",
+  anti_slop_strict_mode: "Anti-slop",
+  context_confidence_enabled: "Context confidence",
+  channel_aware_mode: "Channel-aware",
+  message_kind_aware_mode: "Kind-aware"
+};
 function ensureModerator(interaction) {
   return interaction.memberPermissions?.has(import_discord3.PermissionFlagsBits.ManageGuild) ?? false;
 }
@@ -1838,6 +1858,23 @@ async function handleHoriPanelAction(runtime, interaction, isOwner, isModerator)
     await interaction.showModal(buildChannelModal(interaction.channelId));
     return;
   }
+  const featureToggle = parsePanelFeatureToggleAction(action);
+  if (featureToggle) {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Feature toggles \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u043C\u043E\u0434\u0435\u0440\u043E\u0432.", flags: import_discord3.MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.update(
+      buildHoriPanelDetailResponse(
+        inferPanelTabForFeatureKey(featureToggle.key),
+        isOwner,
+        isModerator,
+        horiActionTitle(action),
+        await applyPanelFeatureToggle(runtime, interaction.guildId, featureToggle.key, featureToggle.enabled)
+      )
+    );
+    return;
+  }
   if (action === "power_panel") {
     if (!isOwner) {
       await interaction.reply({ content: "\u042D\u0442\u0430 \u043F\u0430\u043D\u0435\u043B\u044C \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u0431\u043E\u0442\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
@@ -2036,14 +2073,14 @@ function buildHoriPanelEmbed(tab, isOwner, isModerator) {
   const tabText = {
     main: "\u0413\u043B\u0430\u0432\u043D\u044B\u0439 \u0432\u0445\u043E\u0434: \u043F\u0440\u043E\u0444\u0438\u043B\u044C, \u043F\u0430\u043C\u044F\u0442\u044C, \u043F\u043E\u0438\u0441\u043A, \u043A\u0430\u043D\u0430\u043B, \u0441\u0442\u0438\u043B\u044C \u0438 \u0434\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430 \u0431\u0435\u0437 \u0441\u0442\u0430\u0440\u043E\u0433\u043E \u043A\u043E\u043C\u0430\u043D\u0434\u043D\u043E\u0433\u043E \u0448\u0443\u043C\u0430.",
     owner: isOwner ? "Owner panel: power profile, lockdown, relationship \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440, media sync-pack, server memory-build \u0438 \u043E\u0442\u0434\u0435\u043B\u044C\u043D\u0430\u044F state-\u043F\u0430\u043D\u0435\u043B\u044C." : "Owner panel \u0441\u043A\u0440\u044B\u0442\u0430. \u0422\u0443\u0442 \u043D\u0438\u0447\u0435\u0433\u043E \u0441\u0442\u0440\u0430\u0448\u043D\u043E\u0433\u043E, \u043F\u0440\u043E\u0441\u0442\u043E \u043D\u0435 \u0442\u0432\u043E\u0451 \u043C\u0435\u043D\u044E",
-    style: "\u0421\u0442\u0438\u043B\u044C: \u0436\u0435\u043D\u0441\u043A\u0430\u044F \u043F\u0435\u0440\u0441\u043E\u043D\u0430, \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0435 \u043E\u0442\u0432\u0435\u0442\u044B, \u0442\u0435\u043F\u043B\u043E \u0431\u0435\u0437 \u0441\u0430\u0445\u0430\u0440\u0430, \u0443\u043C\u0435\u0440\u0435\u043D\u043D\u0430\u044F \u044F\u0437\u0432\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C, \u0436\u0438\u0432\u043E\u0439 \u0441\u043B\u0435\u043D\u0433 \u0438 \u0431\u0435\u0437 \u0444\u0438\u043D\u0430\u043B\u044C\u043D\u044B\u0445 \u0442\u043E\u0447\u0435\u043A \u0432 \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0445 \u0440\u0435\u043F\u043B\u0438\u043A\u0430\u0445",
-    liveliness: "\u0416\u0438\u0432\u043E\u0441\u0442\u044C: \u0447\u0442\u0435\u043D\u0438\u0435 \u0447\u0430\u0442\u0430, \u0440\u0435\u0434\u043A\u0438\u0435 \u0430\u043A\u043A\u0443\u0440\u0430\u0442\u043D\u044B\u0435 \u0432\u043C\u0435\u0448\u0430\u0442\u0435\u043B\u044C\u0441\u0442\u0432\u0430, natural message sprinting \u043C\u0430\u043A\u0441\u0438\u043C\u0443\u043C \u0432 2 \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0445 \u0447\u0430\u043D\u043A\u0430",
-    memory: "\u041F\u0430\u043C\u044F\u0442\u044C: Active Memory + Hybrid Recall \u043F\u0440\u0438\u043C\u0435\u043D\u044F\u0435\u0442\u0441\u044F \u043A \u043A\u0430\u0436\u0434\u043E\u043C\u0443 \u043E\u0442\u0432\u0435\u0442\u0443; memory-build \u0441\u043E\u0431\u0438\u0440\u0430\u0435\u0442 user/channel/server/event \u0444\u0430\u043A\u0442\u044B \u0438\u0437 \u0411\u0414",
+    style: "\u0421\u0442\u0438\u043B\u044C: \u0436\u0435\u043D\u0441\u043A\u0430\u044F \u043F\u0435\u0440\u0441\u043E\u043D\u0430, \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0435 \u043E\u0442\u0432\u0435\u0442\u044B, \u0442\u0435\u043F\u043B\u043E \u0431\u0435\u0437 \u0441\u0430\u0445\u0430\u0440\u0430, \u0443\u043C\u0435\u0440\u0435\u043D\u043D\u0430\u044F \u044F\u0437\u0432\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C, \u0436\u0438\u0432\u043E\u0439 \u0441\u043B\u0435\u043D\u0433 \u0438 \u0431\u044B\u0441\u0442\u0440\u044B\u0435 \u0442\u0443\u043C\u0431\u043B\u0435\u0440\u044B \u0440\u0435\u0436\u0438\u043C\u043E\u0432 tone/playful/roast.",
+    liveliness: "\u0416\u0438\u0432\u043E\u0441\u0442\u044C: \u0447\u0442\u0435\u043D\u0438\u0435 \u0447\u0430\u0442\u0430, auto-interject, reply queue, natural message sprinting \u0438 \u0431\u044B\u0441\u0442\u0440\u044B\u0435 quiet/live \u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0430\u0442\u0435\u043B\u0438.",
+    memory: "\u041F\u0430\u043C\u044F\u0442\u044C: Active Memory + Hybrid Recall, memory-build, topic engine, album \u0438 interaction requests \u0442\u0435\u043F\u0435\u0440\u044C \u0442\u043E\u0436\u0435 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B \u0431\u044B\u0441\u0442\u0440\u044B\u043C\u0438 \u0442\u0443\u043C\u0431\u043B\u0435\u0440\u0430\u043C\u0438.",
     people: "\u041B\u044E\u0434\u0438: \u0441\u0432\u043E\u0439 \u043F\u0440\u043E\u0444\u0438\u043B\u044C \u0432\u0438\u0434\u0438\u0442 \u043A\u0430\u0436\u0434\u044B\u0439; owner/moderator \u043C\u043E\u0433\u0443\u0442 \u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u043F\u043E\u0434\u0440\u043E\u0431\u043D\u0435\u0435, owner \u043D\u0430\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0435\u0442 relationship \u0446\u0438\u0444\u0440\u044B",
     channels: "\u041A\u0430\u043D\u0430\u043B\u044B: \u043C\u043E\u0436\u043D\u043E \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u044C replies/interjections, \u043F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C policy \u0438 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u0443\u044E channel memory",
-    search: "\u041F\u043E\u0438\u0441\u043A: \u0434\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430 Brave/Ollama/cooldown/denylist \u0438 \u0443\u0441\u0438\u043B\u0435\u043D\u043D\u044B\u0439 fallback \u0447\u0435\u0440\u0435\u0437 \u043F\u0440\u044F\u043C\u043E\u0439 Brave search + fetch \u0441\u0442\u0440\u0430\u043D\u0438\u0446",
-    experiments: "\u042D\u043A\u0441\u043F\u0435\u0440\u0438\u043C\u0435\u043D\u0442\u044B: natural splitting, media reactions, selective engagement, reflection \u0438 link understanding",
-    diagnostics: "\u0414\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430: \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 trace, feature flags, search preflight \u0438 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u043F\u0430\u043C\u044F\u0442\u0438"
+    search: "\u041F\u043E\u0438\u0441\u043A: \u0434\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430 Brave/Ollama/cooldown/denylist, \u0431\u044B\u0441\u0442\u0440\u044B\u0439 search modal \u0438 on/off \u0434\u043B\u044F web search \u0438 link understanding.",
+    experiments: "\u042D\u043A\u0441\u043F\u0435\u0440\u0438\u043C\u0435\u043D\u0442\u044B: media reactions, selective engagement, context actions, reflection \u0438 \u043F\u0440\u043E\u0447\u0438\u0435 \u044D\u043A\u0441\u043F\u0435\u0440\u0438\u043C\u0435\u043D\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0430\u0442\u0435\u043B\u0438 \u043F\u0440\u044F\u043C\u043E \u0441 \u043F\u0430\u043D\u0435\u043B\u0438.",
+    diagnostics: "\u0414\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430: \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 trace, feature flags, search preflight, \u0441\u0442\u0440\u043E\u0433\u0438\u0435 safety/context \u0442\u0443\u043C\u0431\u043B\u0435\u0440\u044B \u0438 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u043F\u0430\u043C\u044F\u0442\u0438."
   };
   const actions = getHoriTabActions(tab, isOwner, isModerator).map((action) => action.label).join(" / ") || "\u043D\u0435\u0442 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B\u0445 \u043A\u043D\u043E\u043F\u043E\u043A";
   return new import_discord3.EmbedBuilder().setTitle(`Hori Panel: ${horiTabLabel(tab)}`).setDescription(tabText[tab]).addFields(
@@ -2150,6 +2187,12 @@ function getHoriTabActions(tab, isOwner, isModerator) {
       { id: "mood_normal", label: "Mood normal", modOnly: true },
       { id: "natural_split_on", label: "Sprinting on", modOnly: true },
       { id: "natural_split_off", label: "Sprinting off", modOnly: true },
+      featureAction("playful_mode_enabled", true, "Playful on", { modOnly: true }),
+      featureAction("playful_mode_enabled", false, "Playful off", { modOnly: true }),
+      featureAction("irritated_mode_enabled", true, "Irritated on", { modOnly: true }),
+      featureAction("irritated_mode_enabled", false, "Irritated off", { modOnly: true }),
+      featureAction("roast", true, "Roast on", { modOnly: true }),
+      featureAction("roast", false, "Roast off", { modOnly: true }),
       { id: "feature_status", label: "\u0424\u0438\u0447\u0438" },
       { id: "status", label: "\u0421\u0442\u0430\u0442\u0443\u0441" }
     ],
@@ -2160,6 +2203,10 @@ function getHoriTabActions(tab, isOwner, isModerator) {
       { id: "natural_split_off", label: "1 chunk", modOnly: true },
       { id: "mood_status", label: "Mood" },
       { id: "queue_status", label: "Queue" },
+      featureAction("auto_interject", true, "Interject on", { modOnly: true }),
+      featureAction("auto_interject", false, "Interject off", { modOnly: true }),
+      featureAction("reply_queue_enabled", true, "Queue on", { modOnly: true }),
+      featureAction("reply_queue_enabled", false, "Queue off", { modOnly: true }),
       { id: "media_sync", label: "GIF pack", ownerOnly: true },
       { id: "reflection_status", label: "Reflection" },
       { id: "feature_status", label: "\u0424\u0438\u0447\u0438" }
@@ -2168,6 +2215,12 @@ function getHoriTabActions(tab, isOwner, isModerator) {
       { id: "memory_status", label: "Memory status", style: import_discord3.ButtonStyle.Primary },
       { id: "memory_build_channel", label: "Build \u043A\u0430\u043D\u0430\u043B", modOnly: true },
       { id: "memory_build_server", label: "Build \u0441\u0435\u0440\u0432\u0435\u0440", ownerOnly: true },
+      featureAction("topic_engine_enabled", true, "Topic on", { modOnly: true }),
+      featureAction("topic_engine_enabled", false, "Topic off", { modOnly: true }),
+      featureAction("memory_album_enabled", true, "Album on", { modOnly: true }),
+      featureAction("memory_album_enabled", false, "Album off", { modOnly: true }),
+      featureAction("interaction_requests_enabled", true, "Requests on", { modOnly: true }),
+      featureAction("interaction_requests_enabled", false, "Requests off", { modOnly: true }),
       { id: "summary_current", label: "Summary" },
       { id: "topic_status", label: "Topic" },
       { id: "reflection_list", label: "Lessons" },
@@ -2195,6 +2248,10 @@ function getHoriTabActions(tab, isOwner, isModerator) {
     search: [
       { id: "search_query_modal", label: "Search", style: import_discord3.ButtonStyle.Primary },
       { id: "search_diagnose", label: "\u0414\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430", style: import_discord3.ButtonStyle.Primary },
+      featureAction("web_search", true, "Search on", { modOnly: true }),
+      featureAction("web_search", false, "Search off", { modOnly: true }),
+      featureAction("link_understanding_enabled", true, "Links on", { modOnly: true }),
+      featureAction("link_understanding_enabled", false, "Links off", { modOnly: true }),
       { id: "feature_status", label: "\u0424\u0438\u0447\u0438" },
       { id: "state_search", label: "Search state", ownerOnly: true },
       { id: "state_tokens", label: "Tokens", ownerOnly: true }
@@ -2203,6 +2260,14 @@ function getHoriTabActions(tab, isOwner, isModerator) {
       { id: "natural_split_on", label: "Sprinting on", modOnly: true, style: import_discord3.ButtonStyle.Primary },
       { id: "natural_split_off", label: "Sprinting off", modOnly: true },
       { id: "mood_playful", label: "Mood playful", modOnly: true },
+      featureAction("media_reactions_enabled", true, "Media on", { modOnly: true }),
+      featureAction("media_reactions_enabled", false, "Media off", { modOnly: true }),
+      featureAction("selective_engagement_enabled", true, "Selective on", { modOnly: true }),
+      featureAction("selective_engagement_enabled", false, "Selective off", { modOnly: true }),
+      featureAction("context_actions", true, "Ctx actions on", { modOnly: true }),
+      featureAction("context_actions", false, "Ctx actions off", { modOnly: true }),
+      featureAction("self_reflection_lessons_enabled", true, "Reflect on", { modOnly: true }),
+      featureAction("self_reflection_lessons_enabled", false, "Reflect off", { modOnly: true }),
       { id: "feature_status", label: "\u0424\u0438\u0447\u0438" },
       { id: "media_list", label: "Media list" },
       { id: "reflection_status", label: "Reflection" },
@@ -2212,6 +2277,14 @@ function getHoriTabActions(tab, isOwner, isModerator) {
     diagnostics: [
       { id: "debug_latest", label: "Latest trace", style: import_discord3.ButtonStyle.Primary },
       { id: "search_diagnose", label: "Search diag" },
+      featureAction("anti_slop_strict_mode", true, "Strict on", { modOnly: true }),
+      featureAction("anti_slop_strict_mode", false, "Strict off", { modOnly: true }),
+      featureAction("context_confidence_enabled", true, "Ctx conf on", { modOnly: true }),
+      featureAction("context_confidence_enabled", false, "Ctx conf off", { modOnly: true }),
+      featureAction("channel_aware_mode", true, "Channel-aware on", { modOnly: true }),
+      featureAction("channel_aware_mode", false, "Channel-aware off", { modOnly: true }),
+      featureAction("message_kind_aware_mode", true, "Kind-aware on", { modOnly: true }),
+      featureAction("message_kind_aware_mode", false, "Kind-aware off", { modOnly: true }),
       { id: "feature_status", label: "\u0424\u0438\u0447\u0438" },
       { id: "queue_status", label: "Queue" },
       { id: "stats_week", label: "Stats" },
@@ -2249,6 +2322,10 @@ function horiTabLabel(tab) {
   return labels[tab];
 }
 function inferTabForHoriAction(action) {
+  const featureToggle = parsePanelFeatureToggleAction(action);
+  if (featureToggle) {
+    return inferPanelTabForFeatureKey(featureToggle.key);
+  }
   if (action.startsWith("memory")) return "memory";
   if (action.startsWith("search")) return "search";
   if (action.startsWith("lockdown") || action === "power_panel" || action === "state_panel" || action === "ai_url_modal") return "owner";
@@ -2260,6 +2337,10 @@ function inferTabForHoriAction(action) {
   return "main";
 }
 function horiActionTitle(action) {
+  const featureToggle = parsePanelFeatureToggleAction(action);
+  if (featureToggle) {
+    return `${PANEL_FEATURE_LABELS[featureToggle.key]}: ${featureToggle.enabled ? "on" : "off"}`;
+  }
   const titles = {
     status: "\u0411\u044B\u0441\u0442\u0440\u044B\u0439 \u0441\u0442\u0430\u0442\u0443\u0441",
     help: "Help",
@@ -2293,6 +2374,62 @@ function horiActionTitle(action) {
     debug_latest: "Latest trace"
   };
   return titles[action] ?? "Panel action";
+}
+function featureAction(key, enabled, label, options = {}) {
+  return {
+    id: `feature_${key}_${enabled ? "on" : "off"}`,
+    label,
+    ...options
+  };
+}
+function parsePanelFeatureToggleAction(action) {
+  if (!action.startsWith("feature_")) {
+    return null;
+  }
+  if (action.endsWith("_on")) {
+    const key = action.slice("feature_".length, -3);
+    return key in PANEL_FEATURE_LABELS ? { key, enabled: true } : null;
+  }
+  if (action.endsWith("_off")) {
+    const key = action.slice("feature_".length, -4);
+    return key in PANEL_FEATURE_LABELS ? { key, enabled: false } : null;
+  }
+  return null;
+}
+function inferPanelTabForFeatureKey(key) {
+  switch (key) {
+    case "web_search":
+    case "link_understanding_enabled":
+      return "search";
+    case "auto_interject":
+    case "reply_queue_enabled":
+      return "liveliness";
+    case "playful_mode_enabled":
+    case "irritated_mode_enabled":
+    case "roast":
+      return "style";
+    case "topic_engine_enabled":
+    case "memory_album_enabled":
+    case "interaction_requests_enabled":
+      return "memory";
+    case "media_reactions_enabled":
+    case "selective_engagement_enabled":
+    case "context_actions":
+    case "self_reflection_lessons_enabled":
+      return "experiments";
+    case "anti_slop_strict_mode":
+    case "context_confidence_enabled":
+    case "channel_aware_mode":
+    case "message_kind_aware_mode":
+      return "diagnostics";
+  }
+}
+async function applyPanelFeatureToggle(runtime, guildId, key, enabled) {
+  return [
+    await runtime.slashAdmin.updateFeature(guildId, key, enabled),
+    "",
+    await buildFeatureStatus(runtime, guildId)
+  ].join("\n");
 }
 function buildHoriDetailEmbed(title, body) {
   return new import_discord3.EmbedBuilder().setTitle(title).setDescription(clipPanelText(body));
