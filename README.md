@@ -115,11 +115,13 @@ Notes:
 - The app still accepts legacy long names like `DISCORD_TOKEN` and `DATABASE_URL`.
 - Discord commands are registered globally, so there is no per-server guild id to update when moving the bot.
 - Put your Discord user ID in `BOT_OWNERS` to use owner-only commands like `/bot-lockdown on|off|status`.
+- For verbose Ollama tunnel logging, set `OLLAMA_LOG_TRAFFIC=true`, `OLLAMA_LOG_PROMPTS=true`, and `OLLAMA_LOG_RESPONSES=true`. Short aliases also work: `AI_LOG_TRAFFIC`, `AI_LOG_PROMPTS`, `AI_LOG_RESPONSES`.
 - Prisma-based scripts use the alias bridge automatically, so `DB_URL` is enough if you run the provided `pnpm prisma:*` and `pnpm seed` scripts.
 - API-only deployments can skip `AI_URL`; bot and worker still require it.
 - In Railway, prefer using the built-in managed database variable names directly for service references: `DATABASE_URL=${{Postgres.DATABASE_URL}}` and `REDIS_URL=${{Redis.REDIS_URL}}`.
 
 ## Slash Commands
+- Main command surface now lives under `/hori`. Detailed panel guides: [docs/hori-panel-guide.md](./docs/hori-panel-guide.md) and [docs/hori-panel-step-by-step-ru.md](./docs/hori-panel-step-by-step-ru.md)
 - `/bot-help`
 - `/bot-style`
 - `/bot-memory remember|forget`

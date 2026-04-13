@@ -145,4 +145,75 @@ describe("OllamaClient", () => {
 
     expect(response.message.content).toBe("Привет");
   });
+
+  it("logs tunnel traffic, prompts and raw responses when enabled", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/tags")) {
+        return new Response(
+          JSON.stringify({ models: [{ name: "qwen3.5:9b" }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        ['{"message":{"role":"assistant","content":"ready"}}', '{"done":true}'].join("\n"),
+        { status: 200, headers: { "Content-Type": "application/x-ndjson" } }
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const info = vi.fn();
+    const client = new OllamaClient(
+      {
+        OLLAMA_BASE_URL: "https://desktop-2kc8pml.tail4148fa.ts.net",
+        OLLAMA_TIMEOUT_MS: 5_000,
+        OLLAMA_FAST_MODEL: "qwen3.5:9b",
+        OLLAMA_SMART_MODEL: "qwen3.5:9b",
+        OLLAMA_EMBED_MODEL: "nomic-embed-text",
+        LLM_REPLY_MAX_TOKENS: 96,
+        OLLAMA_KEEP_ALIVE: "10m",
+        OLLAMA_LOG_TRAFFIC: true,
+        OLLAMA_LOG_PROMPTS: true,
+        OLLAMA_LOG_RESPONSES: true,
+        OLLAMA_LOG_MAX_CHARS: 4000
+      } as never,
+      {
+        error: vi.fn(),
+        warn: vi.fn(),
+        info,
+        debug: vi.fn()
+      } as never
+    );
+
+    await client.chat({
+      model: "qwen3.5:9b",
+      messages: [
+        { role: "system", content: "system prompt" },
+        { role: "user", content: "prompt-text" }
+      ]
+    });
+
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "chat",
+        path: "/api/chat",
+        tunnelLikeHost: true,
+        requestBodyPreview: expect.stringContaining("prompt-text")
+      }),
+      "ollama outbound request"
+    );
+
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "chat",
+        path: "/api/chat",
+        status: 200,
+        responseBodyPreview: expect.stringContaining("ready")
+      }),
+      "ollama inbound response"
+    );
+  });
 });

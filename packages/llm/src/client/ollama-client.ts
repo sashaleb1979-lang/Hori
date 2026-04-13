@@ -35,6 +35,39 @@ interface OllamaChatChunk {
 
 const MIN_OLLAMA_CHAT_TIMEOUT_MS = 240_000;
 const MIN_OLLAMA_EMBED_TIMEOUT_MS = 180_000;
+const DEFAULT_OLLAMA_LOG_MAX_CHARS = 12_000;
+
+interface OllamaRequestLogMeta {
+  operation: "chat" | "embed" | "tags";
+  requestedModel?: string;
+  resolvedModel?: string;
+}
+
+function truncateForLog(value: string, maxChars: number) {
+  if (value.length <= maxChars) {
+    return value;
+  }
+
+  return `${value.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
+function serializeForLog(value: unknown, maxChars: number) {
+  try {
+    return truncateForLog(typeof value === "string" ? value : JSON.stringify(value), maxChars);
+  } catch {
+    return truncateForLog(String(value), maxChars);
+  }
+}
+
+function isTunnelLikeHost(hostname: string) {
+  const normalized = hostname.toLowerCase();
+  return normalized.endsWith(".ts.net")
+    || normalized.includes("ngrok")
+    || normalized.includes("trycloudflare")
+    || normalized.includes("localtunnel")
+    || normalized.includes("localhost.run")
+    || normalized.includes("serveo");
+}
 
 function normalizeModelPart(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -359,6 +392,91 @@ export class OllamaClient implements LlmClient {
     return this.withRequestSlot(() => this.chatUnqueued(options));
   }
 
+  private shouldLogTraffic() {
+    return Boolean(this.env.OLLAMA_LOG_TRAFFIC);
+  }
+
+  private shouldLogPrompts() {
+    return Boolean(this.env.OLLAMA_LOG_PROMPTS);
+  }
+
+  private shouldLogResponses() {
+    return Boolean(this.env.OLLAMA_LOG_RESPONSES);
+  }
+
+  private getLogMaxChars() {
+    return Math.max(256, this.env.OLLAMA_LOG_MAX_CHARS ?? DEFAULT_OLLAMA_LOG_MAX_CHARS);
+  }
+
+  private buildLogContext(url: URL, meta: OllamaRequestLogMeta) {
+    return {
+      operation: meta.operation,
+      requestedModel: meta.requestedModel,
+      resolvedModel: meta.resolvedModel,
+      url: url.toString(),
+      host: url.host,
+      path: url.pathname,
+      tunnelLikeHost: isTunnelLikeHost(url.hostname)
+    };
+  }
+
+  private async fetchWithLogging(url: URL, init: RequestInit, timeoutMs: number, meta: OllamaRequestLogMeta) {
+    const logContext = this.buildLogContext(url, meta);
+    const shouldLogTraffic = this.shouldLogTraffic();
+    const shouldLogPrompts = this.shouldLogPrompts();
+    const shouldLogResponses = this.shouldLogResponses();
+
+    if (shouldLogTraffic || shouldLogPrompts) {
+      const bodyPreview = init.body && shouldLogPrompts
+        ? serializeForLog(init.body, this.getLogMaxChars())
+        : undefined;
+
+      this.logger.info(
+        {
+          ...logContext,
+          method: init.method ?? "GET",
+          timeoutMs,
+          requestBodyPreview: bodyPreview
+        },
+        "ollama outbound request"
+      );
+    }
+
+    try {
+      const response = await fetch(url, init);
+
+      if (shouldLogTraffic || shouldLogResponses) {
+        const responseBodyPreview = shouldLogResponses
+          ? truncateForLog(await response.clone().text(), this.getLogMaxChars())
+          : undefined;
+
+        this.logger.info(
+          {
+            ...logContext,
+            status: response.status,
+            ok: response.ok,
+            responseBodyPreview
+          },
+          "ollama inbound response"
+        );
+      }
+
+      return response;
+    } catch (error) {
+      if (shouldLogTraffic || shouldLogResponses) {
+        this.logger.warn(
+          {
+            ...logContext,
+            error: asErrorMessage(error)
+          },
+          "ollama transport request failed"
+        );
+      }
+
+      throw error;
+    }
+  }
+
   private async chatUnqueued(options: LlmChatOptions): Promise<LlmChatResponse> {
     const baseUrl = this.env.OLLAMA_BASE_URL;
     if (!baseUrl) {
@@ -415,7 +533,11 @@ export class OllamaClient implements LlmClient {
         model: resolvedModel,
         keep_alive: this.env.OLLAMA_KEEP_ALIVE,
         input
-      }, Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_EMBED_TIMEOUT_MS));
+      }, Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_EMBED_TIMEOUT_MS), {
+        operation: "embed",
+        requestedModel,
+        resolvedModel
+      });
 
       if (!response.ok) {
         const fallbackModel = await this.tryResolveMissingModel(baseUrl, requestedModel, response, "embed");
@@ -424,7 +546,11 @@ export class OllamaClient implements LlmClient {
             model: fallbackModel,
             keep_alive: this.env.OLLAMA_KEEP_ALIVE,
             input
-          }, Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_EMBED_TIMEOUT_MS));
+          }, Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_EMBED_TIMEOUT_MS), {
+            operation: "embed",
+            requestedModel,
+            resolvedModel: fallbackModel
+          });
         }
       }
 
@@ -462,7 +588,12 @@ export class OllamaClient implements LlmClient {
         numCtx: this.env.OLLAMA_NUM_CTX,
         numBatch: this.env.OLLAMA_NUM_BATCH
       }),
-      Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS)
+      Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS),
+      {
+        operation: "chat",
+        requestedModel,
+        resolvedModel: model
+      }
     );
 
     if (response.ok) {
@@ -478,7 +609,12 @@ export class OllamaClient implements LlmClient {
           numCtx: this.env.OLLAMA_NUM_CTX,
           numBatch: this.env.OLLAMA_NUM_BATCH
         }),
-        Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS)
+        Math.max(this.env.OLLAMA_TIMEOUT_MS, MIN_OLLAMA_CHAT_TIMEOUT_MS),
+        {
+          operation: "chat",
+          requestedModel,
+          resolvedModel: fallbackModel
+        }
       );
 
       if (response.ok) {
@@ -506,17 +642,22 @@ export class OllamaClient implements LlmClient {
     }
   }
 
-  private async postJson(url: URL, payload: unknown, timeoutMs = this.env.OLLAMA_TIMEOUT_MS) {
+  private async postJson(
+    url: URL,
+    payload: unknown,
+    timeoutMs = this.env.OLLAMA_TIMEOUT_MS,
+    meta: OllamaRequestLogMeta
+  ) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      return await fetch(url, {
+      return await this.fetchWithLogging(url, {
         method: "POST",
         signal: controller.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
-      });
+      }, timeoutMs, meta);
     } finally {
       clearTimeout(timeout);
     }
@@ -527,8 +668,10 @@ export class OllamaClient implements LlmClient {
     const timeout = setTimeout(() => controller.abort(), Math.min(this.env.OLLAMA_TIMEOUT_MS, 10000));
 
     try {
-      const response = await fetch(new URL("/api/tags", baseUrl), {
+      const response = await this.fetchWithLogging(new URL("/api/tags", baseUrl), {
         signal: controller.signal
+      }, Math.min(this.env.OLLAMA_TIMEOUT_MS, 10000), {
+        operation: "tags"
       });
 
       if (!response.ok) {
