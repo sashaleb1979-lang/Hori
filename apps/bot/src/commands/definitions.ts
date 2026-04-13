@@ -40,6 +40,13 @@ const powerProfileChoices = [
   { name: "max", value: "max" }
 ] as const;
 
+const replyLengthChoices = [
+  { name: "short", value: "short" },
+  { name: "medium", value: "medium" },
+  { name: "long", value: "long" },
+  { name: "inherit/default", value: "inherit" }
+] as const;
+
 const moodChoices = [
   { name: "normal", value: "normal" },
   { name: "playful", value: "playful" },
@@ -63,7 +70,7 @@ const horiCommandDefinition = new SlashCommandBuilder()
   .addSubcommand((subcommand) =>
     subcommand
       .setName("panel")
-      .setDescription("Открыть подробную панель настроек")
+      .setDescription("Owner: открыть master panel Хори")
       .addStringOption((option) =>
         option
           .setName("tab")
@@ -120,6 +127,12 @@ const horiCommandDefinition = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand
+      .setName("dossier")
+      .setDescription("Owner: собрать развёрнутое досье по человеку")
+      .addUserOption((option) => option.setName("user").setDescription("Пользователь").setRequired(true))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
       .setName("relationship")
       .setDescription("Owner: посмотреть или изменить отношение к человеку")
       .addUserOption((option) => option.setName("user").setDescription("Пользователь").setRequired(true))
@@ -165,6 +178,7 @@ const horiCommandDefinition = new SlashCommandBuilder()
       .addBooleanOption((option) => option.setName("allow-bot-replies").setDescription("Разрешить ответы"))
       .addBooleanOption((option) => option.setName("allow-interjections").setDescription("Разрешить автовмешательства"))
       .addBooleanOption((option) => option.setName("is-muted").setDescription("Хори должна молчать"))
+        .addStringOption((option) => option.setName("response-length").setDescription("Локальная длина ответа").addChoices(...replyLengthChoices))
       .addStringOption((option) => option.setName("topic-interest-tags").setDescription("CSV tags"))
   )
   .addSubcommand((subcommand) =>
@@ -347,9 +361,11 @@ const legacySlashCommandBuilders = [
     .setName("bot-style")
     .setDescription("Настроить стиль Хори")
     .addStringOption((option) => option.setName("bot-name").setDescription("Имя бота"))
+    .addStringOption((option) => option.setName("preferred-language").setDescription("Язык по умолчанию, например ru/en"))
     .addIntegerOption((option) => option.setName("roughness").setDescription("Грубость 0-5").setMinValue(0).setMaxValue(5))
     .addIntegerOption((option) => option.setName("sarcasm").setDescription("Сарказм 0-5").setMinValue(0).setMaxValue(5))
     .addIntegerOption((option) => option.setName("roast").setDescription("Стёб 0-5").setMinValue(0).setMaxValue(5))
+    .addIntegerOption((option) => option.setName("interject-tendency").setDescription("Склонность встревать 0-5").setMinValue(0).setMaxValue(5))
     .addStringOption((option) =>
       option
         .setName("reply-length")
@@ -435,6 +451,7 @@ const legacySlashCommandBuilders = [
     .addBooleanOption((option) => option.setName("allow-bot-replies").setDescription("Разрешить ответы"))
     .addBooleanOption((option) => option.setName("allow-interjections").setDescription("Разрешить автовмешательства"))
     .addBooleanOption((option) => option.setName("is-muted").setDescription("Хори должна молчать"))
+    .addStringOption((option) => option.setName("response-length").setDescription("Локальная длина ответа").addChoices(...replyLengthChoices))
     .addStringOption((option) => option.setName("topic-interest-tags").setDescription("CSV tags")),
   new SlashCommandBuilder()
     .setName("bot-summary")

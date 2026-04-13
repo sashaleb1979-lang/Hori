@@ -59,6 +59,12 @@ var powerProfileChoices = [
   { name: "expanded", value: "expanded" },
   { name: "max", value: "max" }
 ];
+var replyLengthChoices = [
+  { name: "short", value: "short" },
+  { name: "medium", value: "medium" },
+  { name: "long", value: "long" },
+  { name: "inherit/default", value: "inherit" }
+];
 var moodChoices = [
   { name: "normal", value: "normal" },
   { name: "playful", value: "playful" },
@@ -75,7 +81,7 @@ var mediaTypeChoices = [
   { name: "audio", value: "audio" }
 ];
 var horiCommandDefinition = new import_discord2.SlashCommandBuilder().setName("hori").setDescription("\u0413\u043B\u0430\u0432\u043D\u044B\u0439 \u0446\u0435\u043D\u0442\u0440 \u0443\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u044F \u0425\u043E\u0440\u0438").addSubcommand(
-  (subcommand) => subcommand.setName("panel").setDescription("\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043F\u043E\u0434\u0440\u043E\u0431\u043D\u0443\u044E \u043F\u0430\u043D\u0435\u043B\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A").addStringOption(
+  (subcommand) => subcommand.setName("panel").setDescription("Owner: \u043E\u0442\u043A\u0440\u044B\u0442\u044C master panel \u0425\u043E\u0440\u0438").addStringOption(
     (option) => option.setName("tab").setDescription("\u0412\u043A\u043B\u0430\u0434\u043A\u0430").addChoices(...panelTabChoices)
   )
 ).addSubcommand(
@@ -99,6 +105,8 @@ var horiCommandDefinition = new import_discord2.SlashCommandBuilder().setName("h
 ).addSubcommand(
   (subcommand) => subcommand.setName("profile").setDescription("\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u043A\u0440\u0430\u0442\u043A\u0438\u0439 \u043F\u0440\u043E\u0444\u0438\u043B\u044C/\u043F\u0430\u043C\u044F\u0442\u044C").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C"))
 ).addSubcommand(
+  (subcommand) => subcommand.setName("dossier").setDescription("Owner: \u0441\u043E\u0431\u0440\u0430\u0442\u044C \u0440\u0430\u0437\u0432\u0451\u0440\u043D\u0443\u0442\u043E\u0435 \u0434\u043E\u0441\u044C\u0435 \u043F\u043E \u0447\u0435\u043B\u043E\u0432\u0435\u043A\u0443").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true))
+).addSubcommand(
   (subcommand) => subcommand.setName("relationship").setDescription("Owner: \u043F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u0438\u043B\u0438 \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435 \u043A \u0447\u0435\u043B\u043E\u0432\u0435\u043A\u0443").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true)).addStringOption((option) => option.setName("tone-bias").setDescription("neutral, friendly, sharp, playful")).addIntegerOption((option) => option.setName("roast-level").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("praise-bias").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("interrupt-priority").setDescription("0-5").setMinValue(0).setMaxValue(5)).addBooleanOption((option) => option.setName("do-not-mock").setDescription("\u041D\u0435 \u043F\u043E\u0434\u043A\u0430\u043B\u044B\u0432\u0430\u0442\u044C")).addBooleanOption((option) => option.setName("do-not-initiate").setDescription("\u041D\u0435 \u0438\u043D\u0438\u0446\u0438\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u0435")).addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics")).addNumberOption((option) => option.setName("closeness").setDescription("\u0411\u043B\u0438\u0437\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("trust").setDescription("\u0414\u043E\u0432\u0435\u0440\u0438\u0435 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("familiarity").setDescription("\u0417\u043D\u0430\u043A\u043E\u043C\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("proactivity").setDescription("\u0416\u0435\u043B\u0430\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u0438\u043D\u0438\u0446\u0438\u0430\u0442\u0438\u0432\u044B 0-1").setMinValue(0).setMaxValue(1))
 ).addSubcommand(
   (subcommand) => subcommand.setName("memory").setDescription("\u0423\u043F\u0440\u0430\u0432\u043B\u044F\u0442\u044C \u0434\u043E\u043B\u0433\u043E\u0439 \u043F\u0430\u043C\u044F\u0442\u044C\u044E").addStringOption(
@@ -110,7 +118,7 @@ var horiCommandDefinition = new import_discord2.SlashCommandBuilder().setName("h
 ).addSubcommand(
   (subcommand) => subcommand.setName("channel").setDescription("\u041D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u043A\u0430\u043D\u0430\u043B").addChannelOption(
     (option) => option.setName("channel").setDescription("\u041A\u0430\u043D\u0430\u043B").addChannelTypes(import_discord2.ChannelType.GuildText, import_discord2.ChannelType.PublicThread, import_discord2.ChannelType.PrivateThread)
-  ).addBooleanOption((option) => option.setName("allow-bot-replies").setDescription("\u0420\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044C \u043E\u0442\u0432\u0435\u0442\u044B")).addBooleanOption((option) => option.setName("allow-interjections").setDescription("\u0420\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044C \u0430\u0432\u0442\u043E\u0432\u043C\u0435\u0448\u0430\u0442\u0435\u043B\u044C\u0441\u0442\u0432\u0430")).addBooleanOption((option) => option.setName("is-muted").setDescription("\u0425\u043E\u0440\u0438 \u0434\u043E\u043B\u0436\u043D\u0430 \u043C\u043E\u043B\u0447\u0430\u0442\u044C")).addStringOption((option) => option.setName("topic-interest-tags").setDescription("CSV tags"))
+  ).addBooleanOption((option) => option.setName("allow-bot-replies").setDescription("\u0420\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044C \u043E\u0442\u0432\u0435\u0442\u044B")).addBooleanOption((option) => option.setName("allow-interjections").setDescription("\u0420\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044C \u0430\u0432\u0442\u043E\u0432\u043C\u0435\u0448\u0430\u0442\u0435\u043B\u044C\u0441\u0442\u0432\u0430")).addBooleanOption((option) => option.setName("is-muted").setDescription("\u0425\u043E\u0440\u0438 \u0434\u043E\u043B\u0436\u043D\u0430 \u043C\u043E\u043B\u0447\u0430\u0442\u044C")).addStringOption((option) => option.setName("response-length").setDescription("\u041B\u043E\u043A\u0430\u043B\u044C\u043D\u0430\u044F \u0434\u043B\u0438\u043D\u0430 \u043E\u0442\u0432\u0435\u0442\u0430").addChoices(...replyLengthChoices)).addStringOption((option) => option.setName("topic-interest-tags").setDescription("CSV tags"))
 ).addSubcommand(
   (subcommand) => subcommand.setName("summary").setDescription("\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 channel summaries").addChannelOption(
     (option) => option.setName("channel").setDescription("\u041A\u0430\u043D\u0430\u043B").addChannelTypes(import_discord2.ChannelType.GuildText, import_discord2.ChannelType.PublicThread, import_discord2.ChannelType.PrivateThread)
@@ -184,7 +192,7 @@ var horiCommandDefinition = new import_discord2.SlashCommandBuilder().setName("h
 );
 var legacySlashCommandBuilders = [
   new import_discord2.SlashCommandBuilder().setName("bot-help").setDescription("\u041A\u043E\u0440\u043E\u0442\u043A\u0430\u044F \u0441\u043F\u0440\u0430\u0432\u043A\u0430 \u043F\u043E legacy-\u043A\u043E\u043C\u0430\u043D\u0434\u0430\u043C"),
-  new import_discord2.SlashCommandBuilder().setName("bot-style").setDescription("\u041D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0441\u0442\u0438\u043B\u044C \u0425\u043E\u0440\u0438").addStringOption((option) => option.setName("bot-name").setDescription("\u0418\u043C\u044F \u0431\u043E\u0442\u0430")).addIntegerOption((option) => option.setName("roughness").setDescription("\u0413\u0440\u0443\u0431\u043E\u0441\u0442\u044C 0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("sarcasm").setDescription("\u0421\u0430\u0440\u043A\u0430\u0437\u043C 0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("roast").setDescription("\u0421\u0442\u0451\u0431 0-5").setMinValue(0).setMaxValue(5)).addStringOption(
+  new import_discord2.SlashCommandBuilder().setName("bot-style").setDescription("\u041D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0441\u0442\u0438\u043B\u044C \u0425\u043E\u0440\u0438").addStringOption((option) => option.setName("bot-name").setDescription("\u0418\u043C\u044F \u0431\u043E\u0442\u0430")).addStringOption((option) => option.setName("preferred-language").setDescription("\u042F\u0437\u044B\u043A \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E, \u043D\u0430\u043F\u0440\u0438\u043C\u0435\u0440 ru/en")).addIntegerOption((option) => option.setName("roughness").setDescription("\u0413\u0440\u0443\u0431\u043E\u0441\u0442\u044C 0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("sarcasm").setDescription("\u0421\u0430\u0440\u043A\u0430\u0437\u043C 0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("roast").setDescription("\u0421\u0442\u0451\u0431 0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("interject-tendency").setDescription("\u0421\u043A\u043B\u043E\u043D\u043D\u043E\u0441\u0442\u044C \u0432\u0441\u0442\u0440\u0435\u0432\u0430\u0442\u044C 0-5").setMinValue(0).setMaxValue(5)).addStringOption(
     (option) => option.setName("reply-length").setDescription("\u041F\u0440\u0435\u0434\u043F\u043E\u0447\u0442\u0438\u0442\u0435\u043B\u044C\u043D\u0430\u044F \u0434\u043B\u0438\u043D\u0430").addChoices(
       { name: "short", value: "short" },
       { name: "medium", value: "medium" },
@@ -207,7 +215,7 @@ var legacySlashCommandBuilders = [
   new import_discord2.SlashCommandBuilder().setName("bot-profile").setDescription("\u041F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u043F\u0440\u043E\u0444\u0438\u043B\u044C \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true)),
   new import_discord2.SlashCommandBuilder().setName("bot-channel").setDescription("\u041D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u043A\u0430\u043D\u0430\u043B").addChannelOption(
     (option) => option.setName("channel").setDescription("\u041A\u0430\u043D\u0430\u043B").addChannelTypes(import_discord2.ChannelType.GuildText, import_discord2.ChannelType.PublicThread, import_discord2.ChannelType.PrivateThread).setRequired(true)
-  ).addBooleanOption((option) => option.setName("allow-bot-replies").setDescription("\u0420\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044C \u043E\u0442\u0432\u0435\u0442\u044B")).addBooleanOption((option) => option.setName("allow-interjections").setDescription("\u0420\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044C \u0430\u0432\u0442\u043E\u0432\u043C\u0435\u0448\u0430\u0442\u0435\u043B\u044C\u0441\u0442\u0432\u0430")).addBooleanOption((option) => option.setName("is-muted").setDescription("\u0425\u043E\u0440\u0438 \u0434\u043E\u043B\u0436\u043D\u0430 \u043C\u043E\u043B\u0447\u0430\u0442\u044C")).addStringOption((option) => option.setName("topic-interest-tags").setDescription("CSV tags")),
+  ).addBooleanOption((option) => option.setName("allow-bot-replies").setDescription("\u0420\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044C \u043E\u0442\u0432\u0435\u0442\u044B")).addBooleanOption((option) => option.setName("allow-interjections").setDescription("\u0420\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044C \u0430\u0432\u0442\u043E\u0432\u043C\u0435\u0448\u0430\u0442\u0435\u043B\u044C\u0441\u0442\u0432\u0430")).addBooleanOption((option) => option.setName("is-muted").setDescription("\u0425\u043E\u0440\u0438 \u0434\u043E\u043B\u0436\u043D\u0430 \u043C\u043E\u043B\u0447\u0430\u0442\u044C")).addStringOption((option) => option.setName("response-length").setDescription("\u041B\u043E\u043A\u0430\u043B\u044C\u043D\u0430\u044F \u0434\u043B\u0438\u043D\u0430 \u043E\u0442\u0432\u0435\u0442\u0430").addChoices(...replyLengthChoices)).addStringOption((option) => option.setName("topic-interest-tags").setDescription("CSV tags")),
   new import_discord2.SlashCommandBuilder().setName("bot-summary").setDescription("\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 channel summaries").addChannelOption(
     (option) => option.setName("channel").setDescription("\u041A\u0430\u043D\u0430\u043B").addChannelTypes(import_discord2.ChannelType.GuildText, import_discord2.ChannelType.PublicThread, import_discord2.ChannelType.PrivateThread).setRequired(true)
   ),
@@ -619,6 +627,7 @@ var PANEL_FEATURE_LABELS = {
   channel_aware_mode: "Channel-aware",
   message_kind_aware_mode: "Kind-aware"
 };
+var HORI_PANEL_OWNER_ONLY_MESSAGE = "Hori master panel \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0430 \u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0443. \u0414\u043B\u044F \u043E\u0431\u044B\u0447\u043D\u043E\u0439 \u0440\u0430\u0431\u043E\u0442\u044B \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439 \u043F\u0440\u044F\u043C\u044B\u0435 \u0432\u0435\u0442\u043A\u0438 /hori.";
 function ensureModerator(interaction) {
   return interaction.memberPermissions?.has(import_discord3.PermissionFlagsBits.ManageGuild) ?? false;
 }
@@ -711,9 +720,11 @@ ${status}`
         await interaction.reply({
           content: await runtime.slashAdmin.updateStyle(interaction.guildId, {
             botName: interaction.options.getString("bot-name"),
+            preferredLanguage: interaction.options.getString("preferred-language"),
             roughnessLevel: interaction.options.getInteger("roughness"),
             sarcasmLevel: interaction.options.getInteger("sarcasm"),
             roastLevel: interaction.options.getInteger("roast"),
+            interjectTendency: interaction.options.getInteger("interject-tendency"),
             replyLength: interaction.options.getString("reply-length"),
             preferredStyle: interaction.options.getString("preferred-style"),
             forbiddenWords: interaction.options.getString("forbidden-words"),
@@ -827,6 +838,7 @@ ${status}`
               allowBotReplies: interaction.options.getBoolean("allow-bot-replies"),
               allowInterjections: interaction.options.getBoolean("allow-interjections"),
               isMuted: interaction.options.getBoolean("is-muted"),
+              responseLengthOverride: parseReplyLengthSelection(interaction.options.getString("response-length")),
               topicInterestTags: interaction.options.getString("topic-interest-tags")
             }
           ),
@@ -1031,6 +1043,10 @@ async function handleHoriCommand(runtime, interaction, isOwner, isModerator) {
   }
   const subcommand = interaction.options.getSubcommand();
   if (subcommand === "panel") {
+    if (!isOwner) {
+      await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: import_discord3.MessageFlags.Ephemeral });
+      return;
+    }
     const tab = parseHoriPanelTab(interaction.options.getString("tab")) ?? "main";
     await interaction.reply({
       ...buildHoriPanelResponse(tab, isOwner, isModerator),
@@ -1078,6 +1094,17 @@ async function handleHoriCommand(runtime, interaction, isOwner, isModerator) {
     }
     await interaction.reply({
       content: await runtime.slashAdmin.personalMemory(interaction.guildId, target, isOwner || isModerator),
+      flags: import_discord3.MessageFlags.Ephemeral
+    });
+    return;
+  }
+  if (subcommand === "dossier") {
+    if (!isOwner) {
+      await interaction.reply({ content: "\u0414\u043E\u0441\u044C\u0435 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E \u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0443.", flags: import_discord3.MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.reply({
+      content: await runtime.slashAdmin.personDossier(interaction.guildId, interaction.options.getUser("user", true).id),
       flags: import_discord3.MessageFlags.Ephemeral
     });
     return;
@@ -1136,6 +1163,7 @@ async function handleHoriCommand(runtime, interaction, isOwner, isModerator) {
           allowBotReplies: interaction.options.getBoolean("allow-bot-replies"),
           allowInterjections: interaction.options.getBoolean("allow-interjections"),
           isMuted: interaction.options.getBoolean("is-muted"),
+          responseLengthOverride: parseReplyLengthSelection(interaction.options.getString("response-length")),
           topicInterestTags: interaction.options.getString("topic-interest-tags")
         }
       ),
@@ -1530,6 +1558,10 @@ async function routeStringSelectInteraction(runtime, interaction, isOwner) {
     return;
   }
   if (interaction.customId === `${HORI_PANEL_PREFIX}:tab`) {
+    if (!isOwner) {
+      await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: import_discord3.MessageFlags.Ephemeral });
+      return;
+    }
     const tab = parseHoriPanelTab(interaction.values[0]) ?? "main";
     await interaction.update(buildHoriPanelResponse(tab, isOwner, hasManageGuild(interaction)));
   }
@@ -1661,11 +1693,11 @@ async function handleHoriModalSubmit(runtime, interaction) {
   const isOwner = isBotOwner(runtime, interaction.user.id);
   const isModerator = ensureModerator(interaction);
   const [, modalKind, channelIdFromModal] = interaction.customId.split(":");
+  if (!isOwner) {
+    await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
   if (modalKind === "ai-url") {
-    if (!isOwner) {
-      await interaction.reply({ content: "AI URL \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
-      return;
-    }
     const url = interaction.fields.getTextInputValue("url").trim();
     try {
       new URL(url);
@@ -1681,13 +1713,18 @@ async function handleHoriModalSubmit(runtime, interaction) {
   if (modalKind === "search") {
     await interaction.deferReply({ flags: import_discord3.MessageFlags.Ephemeral });
     const query = interaction.fields.getTextInputValue("query").trim();
+    const searchChannelId = interaction.channelId ?? interaction.channel?.id;
     if (!query) {
       await interaction.editReply({ content: "\u0417\u0430\u043F\u0440\u043E\u0441 \u043F\u0443\u0441\u0442\u043E\u0439." });
       return;
     }
+    if (!searchChannelId) {
+      await interaction.editReply({ content: "\u041D\u0435 \u0441\u043C\u043E\u0433\u043B\u0430 \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0438\u0442\u044C \u043A\u0430\u043D\u0430\u043B \u0434\u043B\u044F \u043F\u043E\u0438\u0441\u043A\u0430." });
+      return;
+    }
     const reply = await executeHoriSearch(runtime, {
       guildId: interaction.guildId,
-      channelId: interaction.channelId,
+      channelId: searchChannelId,
       interactionId: interaction.id,
       userId: interaction.user.id,
       username: interaction.user.username,
@@ -1701,11 +1738,19 @@ async function handleHoriModalSubmit(runtime, interaction) {
     });
     return;
   }
-  if (modalKind === "relationship") {
-    if (!isOwner) {
-      await interaction.reply({ content: "Relationship-\u0446\u0438\u0444\u0440\u044B \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+  if (modalKind === "dossier") {
+    const userId = interaction.fields.getTextInputValue("userId").trim();
+    if (!userId) {
+      await interaction.reply({ content: "\u041D\u0443\u0436\u0435\u043D Discord user ID.", flags: import_discord3.MessageFlags.Ephemeral });
       return;
     }
+    await interaction.reply({
+      content: await runtime.slashAdmin.personDossier(interaction.guildId, userId),
+      flags: import_discord3.MessageFlags.Ephemeral
+    });
+    return;
+  }
+  if (modalKind === "relationship") {
     const [roastLevel, praiseBias, interruptPriority] = readNumberList(interaction.fields.getTextInputValue("levels"));
     const [closeness, trustLevel, familiarity, proactivityPreference] = readNumberList(interaction.fields.getTextInputValue("signals"));
     const [doNotMock, doNotInitiate, ...topics] = interaction.fields.getTextInputValue("switches").split(",").map((part) => part.trim()).filter(Boolean);
@@ -1732,12 +1777,8 @@ async function handleHoriModalSubmit(runtime, interaction) {
     return;
   }
   if (modalKind === "style") {
-    if (!isOwner && !isModerator) {
-      await interaction.reply({ content: "\u0421\u0442\u0438\u043B\u044C \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u043C\u043E\u0434\u0435\u0440\u043E\u0432.", flags: import_discord3.MessageFlags.Ephemeral });
-      return;
-    }
     const [roughness, sarcasm, roast] = readNumberList(interaction.fields.getTextInputValue("levels"));
-    const replyLength = interaction.fields.getTextInputValue("replyLength").trim();
+    const [replyLength, preferredLanguage, interjectTendency] = readTextList(interaction.fields.getTextInputValue("replyLength"));
     const [forbiddenWords, forbiddenTopics] = interaction.fields.getTextInputValue("forbidden").split("|").map((part) => part.trim());
     await interaction.reply({
       content: await runtime.slashAdmin.updateStyle(interaction.guildId, {
@@ -1745,7 +1786,9 @@ async function handleHoriModalSubmit(runtime, interaction) {
         roughnessLevel: readIntInRange(roughness, 0, 5) ?? null,
         sarcasmLevel: readIntInRange(sarcasm, 0, 5) ?? null,
         roastLevel: readIntInRange(roast, 0, 5) ?? null,
-        replyLength: replyLength === "short" || replyLength === "medium" || replyLength === "long" ? replyLength : null,
+        preferredLanguage: blankToNull(preferredLanguage ?? ""),
+        interjectTendency: readIntegerText(interjectTendency, 0, 5) ?? null,
+        replyLength: parseReplyLengthSelection(replyLength),
         preferredStyle: blankToNull(interaction.fields.getTextInputValue("preferredStyle")),
         forbiddenWords: blankToNull(forbiddenWords ?? ""),
         forbiddenTopics: blankToNull(forbiddenTopics ?? "")
@@ -1755,15 +1798,12 @@ async function handleHoriModalSubmit(runtime, interaction) {
     return;
   }
   if (modalKind === "channel") {
-    if (!isOwner && !isModerator) {
-      await interaction.reply({ content: "\u041A\u0430\u043D\u0430\u043B \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u043C\u043E\u0434\u0435\u0440\u043E\u0432.", flags: import_discord3.MessageFlags.Ephemeral });
-      return;
-    }
     await interaction.reply({
       content: await runtime.slashAdmin.channelConfig(interaction.guildId, channelIdFromModal ?? interaction.channelId, {
         allowBotReplies: readOptionalBoolean(interaction.fields.getTextInputValue("allowBotReplies")),
         allowInterjections: readOptionalBoolean(interaction.fields.getTextInputValue("allowInterjections")),
         isMuted: readOptionalBoolean(interaction.fields.getTextInputValue("isMuted")),
+        responseLengthOverride: parseReplyLengthSelection(interaction.fields.getTextInputValue("responseLengthOverride")),
         topicInterestTags: blankToNull(interaction.fields.getTextInputValue("topicInterestTags"))
       }),
       flags: import_discord3.MessageFlags.Ephemeral
@@ -1794,6 +1834,10 @@ async function routeButtonInteraction(runtime, interaction, isOwner) {
 async function handleHoriPanelAction(runtime, interaction, isOwner, isModerator) {
   if (!interaction.guildId) {
     await interaction.reply({ content: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043D\u0443\u0442\u0440\u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  if (!isOwner) {
+    await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: import_discord3.MessageFlags.Ephemeral });
     return;
   }
   const action = interaction.customId.slice(`${HORI_ACTION_PREFIX}:`.length);
@@ -1842,20 +1886,16 @@ async function handleHoriPanelAction(runtime, interaction, isOwner, isModerator)
     await interaction.showModal(buildRelationshipModal());
     return;
   }
+  if (action === "dossier_modal") {
+    await interaction.showModal(buildDossierModal());
+    return;
+  }
   if (action === "style_edit_modal") {
-    if (!isOwner && !isModerator) {
-      await interaction.reply({ content: "\u0421\u0442\u0438\u043B\u044C \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u043C\u043E\u0434\u0435\u0440\u043E\u0432.", flags: import_discord3.MessageFlags.Ephemeral });
-      return;
-    }
-    await interaction.showModal(buildStyleModal());
+    await interaction.showModal(buildStyleModal(await runtime.runtimeConfig.getGuildSettings(interaction.guildId)));
     return;
   }
   if (action === "channel_edit_modal") {
-    if (!isOwner && !isModerator) {
-      await interaction.reply({ content: "\u041A\u0430\u043D\u0430\u043B \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u043C\u043E\u0434\u0435\u0440\u043E\u0432.", flags: import_discord3.MessageFlags.Ephemeral });
-      return;
-    }
-    await interaction.showModal(buildChannelModal(interaction.channelId));
+    await interaction.showModal(buildChannelModal(interaction.channelId, await runtime.runtimeConfig.getChannelPolicy(interaction.guildId, interaction.channelId)));
     return;
   }
   const featureToggle = parsePanelFeatureToggleAction(action);
@@ -1958,12 +1998,16 @@ async function resolveHoriActionContent(runtime, interaction, action, isOwner, i
       return runtime.slashAdmin.relationshipDetails(guildId, interaction.user.id);
     case "relationship_hint":
       return "\u0414\u043B\u044F \u0442\u043E\u0447\u043D\u043E\u0439 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438: `/hori relationship user:@\u0447\u0435\u043B\u043E\u0432\u0435\u043A ...` \u0438\u043B\u0438 \u043A\u043D\u043E\u043F\u043A\u0430 Edit relation \u0432 owner panel. Owner \u043C\u043E\u0436\u0435\u0442 \u043C\u0435\u043D\u044F\u0442\u044C toneBias, roast/praise/interrupt \u0438 \u0446\u0438\u0444\u0440\u044B closeness/trust/familiarity/proactivity.";
+    case "style_status":
+      return buildStyleStatus(runtime, guildId);
     case "style_default":
       return runtime.slashAdmin.updateStyle(guildId, {
         botName: "\u0425\u043E\u0440\u0438",
+        preferredLanguage: "ru",
         roughnessLevel: 2,
         sarcasmLevel: 3,
         roastLevel: 2,
+        interjectTendency: 1,
         replyLength: "short",
         preferredStyle: "\u0436\u0435\u043D\u0441\u043A\u0430\u044F \u043F\u0435\u0440\u0441\u043E\u043D\u0430; \u043A\u043E\u0440\u043E\u0442\u043A\u043E; \u0442\u0435\u043F\u043B\u043E, \u043D\u043E \u043D\u0435 \u0441\u0430\u0445\u0430\u0440\u043D\u043E; \u0443\u043C\u0435\u0440\u0435\u043D\u043D\u043E \u044F\u0437\u0432\u0438\u0442\u0435\u043B\u044C\u043D\u043E; \u043D\u043E\u0440\u043C\u0430\u043B\u044C\u043D\u044B\u0439 \u0436\u0438\u0432\u043E\u0439 \u0441\u043B\u0435\u043D\u0433 \u0431\u0435\u0437 \u043A\u0440\u0438\u043D\u0436\u0430; \u043D\u0435 \u0441\u0442\u0430\u0432\u044C \u0444\u0438\u043D\u0430\u043B\u044C\u043D\u044B\u0435 \u0442\u043E\u0447\u043A\u0438 \u0432 \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0445 \u0440\u0435\u043F\u043B\u0438\u043A\u0430\u0445",
         forbiddenWords: null,
@@ -2069,15 +2113,15 @@ function buildHoriPanelDetailResponse(tab, isOwner, isModerator, title, body) {
   };
 }
 function buildHoriPanelEmbed(tab, isOwner, isModerator) {
-  const ownerLine = isOwner ? "owner-\u0434\u043E\u0441\u0442\u0443\u043F \u0430\u043A\u0442\u0438\u0432\u0435\u043D" : isModerator ? "moderator-\u0434\u043E\u0441\u0442\u0443\u043F \u0430\u043A\u0442\u0438\u0432\u0435\u043D" : "\u043E\u0431\u044B\u0447\u043D\u044B\u0439 \u0434\u043E\u0441\u0442\u0443\u043F: \u0432\u0438\u0434\u0438\u0448\u044C \u0442\u043E\u043B\u044C\u043A\u043E \u0441\u0432\u043E\u0451";
+  const ownerLine = isOwner ? "owner master panel \u0430\u043A\u0442\u0438\u0432\u043D\u0430" : isModerator ? "moderator-\u0434\u043E\u0441\u0442\u0443\u043F \u0430\u043A\u0442\u0438\u0432\u0435\u043D \u0432\u043D\u0435 \u043F\u0430\u043D\u0435\u043B\u0438" : "\u043E\u0431\u044B\u0447\u043D\u044B\u0439 \u0434\u043E\u0441\u0442\u0443\u043F \u0438\u0434\u0451\u0442 \u0447\u0435\u0440\u0435\u0437 \u043F\u0440\u044F\u043C\u044B\u0435 /hori \u043A\u043E\u043C\u0430\u043D\u0434\u044B";
   const tabText = {
-    main: "\u0413\u043B\u0430\u0432\u043D\u044B\u0439 \u0432\u0445\u043E\u0434: \u043F\u0440\u043E\u0444\u0438\u043B\u044C, \u043F\u0430\u043C\u044F\u0442\u044C, \u043F\u043E\u0438\u0441\u043A, \u043A\u0430\u043D\u0430\u043B, \u0441\u0442\u0438\u043B\u044C \u0438 \u0434\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430 \u0431\u0435\u0437 \u0441\u0442\u0430\u0440\u043E\u0433\u043E \u043A\u043E\u043C\u0430\u043D\u0434\u043D\u043E\u0433\u043E \u0448\u0443\u043C\u0430.",
+    main: "Owner master panel: \u0431\u044B\u0441\u0442\u0440\u044B\u0439 \u0432\u0445\u043E\u0434 \u0432 persona, runtime, memory, channel, search \u0438 \u0434\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0443 \u0431\u0435\u0437 \u0441\u0442\u0430\u0440\u043E\u0433\u043E \u043A\u043E\u043C\u0430\u043D\u0434\u043D\u043E\u0433\u043E \u0448\u0443\u043C\u0430.",
     owner: isOwner ? "Owner panel: power profile, lockdown, relationship \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440, media sync-pack, server memory-build \u0438 \u043E\u0442\u0434\u0435\u043B\u044C\u043D\u0430\u044F state-\u043F\u0430\u043D\u0435\u043B\u044C." : "Owner panel \u0441\u043A\u0440\u044B\u0442\u0430. \u0422\u0443\u0442 \u043D\u0438\u0447\u0435\u0433\u043E \u0441\u0442\u0440\u0430\u0448\u043D\u043E\u0433\u043E, \u043F\u0440\u043E\u0441\u0442\u043E \u043D\u0435 \u0442\u0432\u043E\u0451 \u043C\u0435\u043D\u044E",
-    style: "\u0421\u0442\u0438\u043B\u044C: \u0436\u0435\u043D\u0441\u043A\u0430\u044F \u043F\u0435\u0440\u0441\u043E\u043D\u0430, \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0435 \u043E\u0442\u0432\u0435\u0442\u044B, \u0442\u0435\u043F\u043B\u043E \u0431\u0435\u0437 \u0441\u0430\u0445\u0430\u0440\u0430, \u0443\u043C\u0435\u0440\u0435\u043D\u043D\u0430\u044F \u044F\u0437\u0432\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C, \u0436\u0438\u0432\u043E\u0439 \u0441\u043B\u0435\u043D\u0433 \u0438 \u0431\u044B\u0441\u0442\u0440\u044B\u0435 \u0442\u0443\u043C\u0431\u043B\u0435\u0440\u044B \u0440\u0435\u0436\u0438\u043C\u043E\u0432 tone/playful/roast.",
+    style: "\u0421\u0442\u0438\u043B\u044C: \u0436\u0435\u043D\u0441\u043A\u0430\u044F \u043F\u0435\u0440\u0441\u043E\u043D\u0430, \u044F\u0437\u044B\u043A, \u0434\u043B\u0438\u043D\u0430, interject tendency, \u0437\u0430\u043F\u0440\u0435\u0442\u044B \u0438 \u0431\u044B\u0441\u0442\u0440\u044B\u0435 \u0442\u0443\u043C\u0431\u043B\u0435\u0440\u044B tone/playful/roast.",
     liveliness: "\u0416\u0438\u0432\u043E\u0441\u0442\u044C: \u0447\u0442\u0435\u043D\u0438\u0435 \u0447\u0430\u0442\u0430, auto-interject, reply queue, natural message sprinting \u0438 \u0431\u044B\u0441\u0442\u0440\u044B\u0435 quiet/live \u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0430\u0442\u0435\u043B\u0438.",
     memory: "\u041F\u0430\u043C\u044F\u0442\u044C: Active Memory + Hybrid Recall, memory-build, topic engine, album \u0438 interaction requests \u0442\u0435\u043F\u0435\u0440\u044C \u0442\u043E\u0436\u0435 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B \u0431\u044B\u0441\u0442\u0440\u044B\u043C\u0438 \u0442\u0443\u043C\u0431\u043B\u0435\u0440\u0430\u043C\u0438.",
     people: "\u041B\u044E\u0434\u0438: \u0441\u0432\u043E\u0439 \u043F\u0440\u043E\u0444\u0438\u043B\u044C \u0432\u0438\u0434\u0438\u0442 \u043A\u0430\u0436\u0434\u044B\u0439; owner/moderator \u043C\u043E\u0433\u0443\u0442 \u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u043F\u043E\u0434\u0440\u043E\u0431\u043D\u0435\u0435, owner \u043D\u0430\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0435\u0442 relationship \u0446\u0438\u0444\u0440\u044B",
-    channels: "\u041A\u0430\u043D\u0430\u043B\u044B: \u043C\u043E\u0436\u043D\u043E \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u044C replies/interjections, \u043F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C policy \u0438 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u0443\u044E channel memory",
+    channels: "\u041A\u0430\u043D\u0430\u043B\u044B: replies/interjections, mute, local reply length override, topic tags, policy \u0438 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u0430\u044F channel memory",
     search: "\u041F\u043E\u0438\u0441\u043A: \u0434\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430 Brave/Ollama/cooldown/denylist, \u0431\u044B\u0441\u0442\u0440\u044B\u0439 search modal \u0438 on/off \u0434\u043B\u044F web search \u0438 link understanding.",
     experiments: "\u042D\u043A\u0441\u043F\u0435\u0440\u0438\u043C\u0435\u043D\u0442\u044B: media reactions, selective engagement, context actions, reflection \u0438 \u043F\u0440\u043E\u0447\u0438\u0435 \u044D\u043A\u0441\u043F\u0435\u0440\u0438\u043C\u0435\u043D\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0430\u0442\u0435\u043B\u0438 \u043F\u0440\u044F\u043C\u043E \u0441 \u043F\u0430\u043D\u0435\u043B\u0438.",
     diagnostics: "\u0414\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430: \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 trace, feature flags, search preflight, \u0441\u0442\u0440\u043E\u0433\u0438\u0435 safety/context \u0442\u0443\u043C\u0431\u043B\u0435\u0440\u044B \u0438 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u043F\u0430\u043C\u044F\u0442\u0438."
@@ -2181,6 +2225,7 @@ function getHoriTabActions(tab, isOwner, isModerator) {
       { id: "memory_build_server", label: "Build \u0441\u0435\u0440\u0432\u0435\u0440", ownerOnly: true }
     ],
     style: [
+      { id: "style_status", label: "Snapshot", style: import_discord3.ButtonStyle.Primary },
       { id: "style_default", label: "\u0416\u0438\u0432\u043E\u0439 preset", modOnly: true, style: import_discord3.ButtonStyle.Primary },
       { id: "style_edit_modal", label: "Edit style", modOnly: true },
       { id: "mood_playful", label: "Mood playful", modOnly: true },
@@ -2228,6 +2273,7 @@ function getHoriTabActions(tab, isOwner, isModerator) {
     ],
     people: [
       { id: "profile_self", label: "\u041C\u043E\u0439 \u043F\u0440\u043E\u0444\u0438\u043B\u044C", style: import_discord3.ButtonStyle.Primary },
+      { id: "dossier_modal", label: "Open dossier", ownerOnly: true, style: import_discord3.ButtonStyle.Primary },
       { id: "relationship_self", label: "\u041E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435 \u043A\u043E \u043C\u043D\u0435" },
       { id: "relationship_edit_modal", label: "Edit relation", ownerOnly: true },
       { id: "relationship_hint", label: "Owner edit", ownerOnly: true },
@@ -2345,6 +2391,7 @@ function horiActionTitle(action) {
     status: "\u0411\u044B\u0441\u0442\u0440\u044B\u0439 \u0441\u0442\u0430\u0442\u0443\u0441",
     help: "Help",
     search_query_modal: "\u041F\u043E\u0438\u0441\u043A",
+    style_status: "Persona snapshot",
     profile_self: "\u041C\u043E\u0439 \u043F\u0440\u043E\u0444\u0438\u043B\u044C",
     memory_self: "\u041C\u043E\u044F \u043F\u0430\u043C\u044F\u0442\u044C",
     relationship_self: "\u041E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435 \u043A\u043E \u043C\u043D\u0435",
@@ -2475,7 +2522,21 @@ async function buildChannelPolicyStatus(runtime, guildId, channelId) {
     `allowBotReplies=${policy.allowBotReplies}`,
     `allowInterjections=${policy.allowInterjections}`,
     `isMuted=${policy.isMuted}`,
+    `responseLengthOverride=${policy.responseLengthOverride ?? "inherit"}`,
     `topicInterestTags=${policy.topicInterestTags.join(", ") || "none"}`
+  ].join("\n");
+}
+async function buildStyleStatus(runtime, guildId) {
+  const settings = await runtime.runtimeConfig.getGuildSettings(guildId);
+  return [
+    "Guild persona settings",
+    `botName=${settings.botName}`,
+    `preferredLanguage=${settings.preferredLanguage}`,
+    `roughness=${settings.roughnessLevel}, sarcasm=${settings.sarcasmLevel}, roast=${settings.roastLevel}`,
+    `interjectTendency=${settings.interjectTendency}, replyLength=${settings.replyLength}`,
+    `preferredStyle=${settings.preferredStyle}`,
+    `forbiddenWords=${settings.forbiddenWords.join(", ") || "none"}`,
+    `forbiddenTopics=${settings.forbiddenTopics.join(", ") || "none"}`
   ].join("\n");
 }
 async function buildLatestDebugTrace(runtime, guildId) {
@@ -2625,41 +2686,53 @@ function buildRelationshipModal() {
   );
   return modal;
 }
-function buildStyleModal() {
-  const modal = new import_discord3.ModalBuilder().setCustomId(`${HORI_MODAL_PREFIX}:style`).setTitle("Style editor");
+function buildDossierModal() {
+  const modal = new import_discord3.ModalBuilder().setCustomId(`${HORI_MODAL_PREFIX}:dossier`).setTitle("Owner dossier");
   modal.addComponents(
     new import_discord3.ActionRowBuilder().addComponents(
-      new import_discord3.TextInputBuilder().setCustomId("botName").setLabel("\u0418\u043C\u044F").setPlaceholder("\u0425\u043E\u0440\u0438").setRequired(false).setMaxLength(40).setStyle(import_discord3.TextInputStyle.Short)
-    ),
-    new import_discord3.ActionRowBuilder().addComponents(
-      new import_discord3.TextInputBuilder().setCustomId("levels").setLabel("roughness,sarcasm,roast").setPlaceholder("2,3,2").setRequired(false).setMaxLength(30).setStyle(import_discord3.TextInputStyle.Short)
-    ),
-    new import_discord3.ActionRowBuilder().addComponents(
-      new import_discord3.TextInputBuilder().setCustomId("replyLength").setLabel("replyLength").setPlaceholder("short / medium / long").setRequired(false).setMaxLength(20).setStyle(import_discord3.TextInputStyle.Short)
-    ),
-    new import_discord3.ActionRowBuilder().addComponents(
-      new import_discord3.TextInputBuilder().setCustomId("preferredStyle").setLabel("\u0421\u0442\u0438\u043B\u044C").setRequired(false).setMaxLength(900).setStyle(import_discord3.TextInputStyle.Paragraph)
-    ),
-    new import_discord3.ActionRowBuilder().addComponents(
-      new import_discord3.TextInputBuilder().setCustomId("forbidden").setLabel("forbiddenWords | forbiddenTopics").setPlaceholder("\u0441\u043B\u043E\u0432\u043E1,\u0441\u043B\u043E\u0432\u043E2 | \u0442\u0435\u043C\u04301,\u0442\u0435\u043C\u04302").setRequired(false).setMaxLength(400).setStyle(import_discord3.TextInputStyle.Paragraph)
+      new import_discord3.TextInputBuilder().setCustomId("userId").setLabel("Discord user ID").setPlaceholder("123456789012345678").setRequired(true).setMaxLength(40).setStyle(import_discord3.TextInputStyle.Short)
     )
   );
   return modal;
 }
-function buildChannelModal(channelId) {
+function buildStyleModal(current) {
+  const modal = new import_discord3.ModalBuilder().setCustomId(`${HORI_MODAL_PREFIX}:style`).setTitle("Style editor");
+  modal.addComponents(
+    new import_discord3.ActionRowBuilder().addComponents(
+      new import_discord3.TextInputBuilder().setCustomId("botName").setLabel("\u0418\u043C\u044F").setPlaceholder("\u0425\u043E\u0440\u0438").setRequired(false).setValue(current?.botName ?? "").setMaxLength(40).setStyle(import_discord3.TextInputStyle.Short)
+    ),
+    new import_discord3.ActionRowBuilder().addComponents(
+      new import_discord3.TextInputBuilder().setCustomId("levels").setLabel("roughness,sarcasm,roast").setPlaceholder("2,3,2").setRequired(false).setValue(current ? `${current.roughnessLevel},${current.sarcasmLevel},${current.roastLevel}` : "").setMaxLength(30).setStyle(import_discord3.TextInputStyle.Short)
+    ),
+    new import_discord3.ActionRowBuilder().addComponents(
+      new import_discord3.TextInputBuilder().setCustomId("replyLength").setLabel("replyLength,language,interject").setPlaceholder("short,ru,1").setRequired(false).setValue(current ? `${current.replyLength},${current.preferredLanguage},${current.interjectTendency}` : "").setMaxLength(20).setStyle(import_discord3.TextInputStyle.Short)
+    ),
+    new import_discord3.ActionRowBuilder().addComponents(
+      new import_discord3.TextInputBuilder().setCustomId("preferredStyle").setLabel("\u0421\u0442\u0438\u043B\u044C").setRequired(false).setValue(current?.preferredStyle ?? "").setMaxLength(900).setStyle(import_discord3.TextInputStyle.Paragraph)
+    ),
+    new import_discord3.ActionRowBuilder().addComponents(
+      new import_discord3.TextInputBuilder().setCustomId("forbidden").setLabel("forbiddenWords | forbiddenTopics").setPlaceholder("\u0441\u043B\u043E\u0432\u043E1,\u0441\u043B\u043E\u0432\u043E2 | \u0442\u0435\u043C\u04301,\u0442\u0435\u043C\u04302").setRequired(false).setValue(current ? `${current.forbiddenWords.join(", ")} | ${current.forbiddenTopics.join(", ")}` : "").setMaxLength(400).setStyle(import_discord3.TextInputStyle.Paragraph)
+    )
+  );
+  return modal;
+}
+function buildChannelModal(channelId, current) {
   const modal = new import_discord3.ModalBuilder().setCustomId(`${HORI_MODAL_PREFIX}:channel:${channelId}`).setTitle("Channel policy");
   modal.addComponents(
     new import_discord3.ActionRowBuilder().addComponents(
-      new import_discord3.TextInputBuilder().setCustomId("allowBotReplies").setLabel("allowBotReplies").setPlaceholder("true / false / \u043F\u0443\u0441\u0442\u043E").setRequired(false).setMaxLength(10).setStyle(import_discord3.TextInputStyle.Short)
+      new import_discord3.TextInputBuilder().setCustomId("allowBotReplies").setLabel("allowBotReplies").setPlaceholder("true / false / \u043F\u0443\u0441\u0442\u043E").setRequired(false).setValue(booleanToFieldValue(current?.allowBotReplies)).setMaxLength(10).setStyle(import_discord3.TextInputStyle.Short)
     ),
     new import_discord3.ActionRowBuilder().addComponents(
-      new import_discord3.TextInputBuilder().setCustomId("allowInterjections").setLabel("allowInterjections").setPlaceholder("true / false / \u043F\u0443\u0441\u0442\u043E").setRequired(false).setMaxLength(10).setStyle(import_discord3.TextInputStyle.Short)
+      new import_discord3.TextInputBuilder().setCustomId("allowInterjections").setLabel("allowInterjections").setPlaceholder("true / false / \u043F\u0443\u0441\u0442\u043E").setRequired(false).setValue(booleanToFieldValue(current?.allowInterjections)).setMaxLength(10).setStyle(import_discord3.TextInputStyle.Short)
     ),
     new import_discord3.ActionRowBuilder().addComponents(
-      new import_discord3.TextInputBuilder().setCustomId("isMuted").setLabel("isMuted").setPlaceholder("true / false / \u043F\u0443\u0441\u0442\u043E").setRequired(false).setMaxLength(10).setStyle(import_discord3.TextInputStyle.Short)
+      new import_discord3.TextInputBuilder().setCustomId("isMuted").setLabel("isMuted").setPlaceholder("true / false / \u043F\u0443\u0441\u0442\u043E").setRequired(false).setValue(booleanToFieldValue(current?.isMuted)).setMaxLength(10).setStyle(import_discord3.TextInputStyle.Short)
     ),
     new import_discord3.ActionRowBuilder().addComponents(
-      new import_discord3.TextInputBuilder().setCustomId("topicInterestTags").setLabel("topicInterestTags").setPlaceholder("\u043C\u0435\u043C\u044B,\u0442\u0435\u0445,\u0438\u0433\u0440\u044B").setRequired(false).setMaxLength(200).setStyle(import_discord3.TextInputStyle.Paragraph)
+      new import_discord3.TextInputBuilder().setCustomId("responseLengthOverride").setLabel("responseLengthOverride").setPlaceholder("short / medium / long / inherit").setRequired(false).setValue(current?.responseLengthOverride ?? "").setMaxLength(20).setStyle(import_discord3.TextInputStyle.Short)
+    ),
+    new import_discord3.ActionRowBuilder().addComponents(
+      new import_discord3.TextInputBuilder().setCustomId("topicInterestTags").setLabel("topicInterestTags").setPlaceholder("\u043C\u0435\u043C\u044B,\u0442\u0435\u0445,\u0438\u0433\u0440\u044B").setRequired(false).setValue(current?.topicInterestTags.join(", ") ?? "").setMaxLength(200).setStyle(import_discord3.TextInputStyle.Paragraph)
     )
   );
   return modal;
@@ -2693,6 +2766,16 @@ function readNumberList(value) {
     return Number.isFinite(parsed) ? parsed : void 0;
   });
 }
+function readTextList(value) {
+  return value.split(",").map((part) => part.trim());
+}
+function readIntegerText(value, min, max) {
+  if (!value?.trim()) {
+    return void 0;
+  }
+  const parsed = Number(value.trim());
+  return Number.isInteger(parsed) ? Math.max(min, Math.min(max, parsed)) : void 0;
+}
 function readIntInRange(value, min, max) {
   if (value === void 0 || !Number.isInteger(value)) {
     return void 0;
@@ -2717,6 +2800,19 @@ function readOptionalBoolean(value) {
     return false;
   }
   return void 0;
+}
+function parseReplyLengthSelection(value) {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return void 0;
+  }
+  if (["inherit", "default", "none", "reset", "clear"].includes(normalized)) {
+    return null;
+  }
+  return normalized === "short" || normalized === "medium" || normalized === "long" ? normalized : void 0;
+}
+function booleanToFieldValue(value) {
+  return value === void 0 ? "" : value ? "true" : "false";
 }
 
 // src/router/message-router.ts

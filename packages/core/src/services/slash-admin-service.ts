@@ -27,7 +27,7 @@ export class SlashAdminService {
 
   async handleHelp() {
     return [
-      "Главный вход: `/hori panel`.",
+      "Owner master panel: `/hori panel`.",
       "Частые ветки: `/hori profile`, `/hori search`, `/hori memory`, `/hori channel`, `/hori mood`, `/hori queue`, `/hori album`.",
       "Owner: `/hori state`, `/hori relationship`, `/hori power`, `/hori lockdown`, `/hori ai-url`, `/hori import`.",
       "Legacy `/bot-*` команды скрыты из регистрации по умолчанию; их можно вернуть флагом `DISCORD_REGISTER_LEGACY_COMMANDS=true`."
@@ -40,6 +40,8 @@ export class SlashAdminService {
       roughnessLevel?: number | null;
       sarcasmLevel?: number | null;
       roastLevel?: number | null;
+      preferredLanguage?: string | null;
+      interjectTendency?: number | null;
       replyLength?: "short" | "medium" | "long" | null;
       preferredStyle?: string | null;
       forbiddenWords?: string | null;
@@ -50,23 +52,25 @@ export class SlashAdminService {
     const guild = await this.prisma.guild.upsert({
       where: { id: guildId },
       update: {
-        botName: input.botName ?? undefined,
+        botName: resettableString(input.botName, defaultPersonaSettings.botName),
+        preferredLanguage: resettableString(input.preferredLanguage, defaultPersonaSettings.preferredLanguage),
         roughnessLevel: input.roughnessLevel ?? undefined,
         sarcasmLevel: input.sarcasmLevel ?? undefined,
         roastLevel: input.roastLevel ?? undefined,
+        interjectTendency: input.interjectTendency ?? undefined,
         replyLength: input.replyLength ?? undefined,
-        preferredStyle: input.preferredStyle ?? undefined,
-        forbiddenWords: input.forbiddenWords ? parseCsv(input.forbiddenWords) : undefined,
-        forbiddenTopics: input.forbiddenTopics ? parseCsv(input.forbiddenTopics) : undefined
+        preferredStyle: resettableString(input.preferredStyle, defaultPersonaSettings.preferredStyle),
+        forbiddenWords: resettableStringArray(input.forbiddenWords),
+        forbiddenTopics: resettableStringArray(input.forbiddenTopics)
       },
       create: {
         id: guildId,
         botName: input.botName ?? defaultPersonaSettings.botName,
-        preferredLanguage: defaultPersonaSettings.preferredLanguage,
+        preferredLanguage: input.preferredLanguage ?? defaultPersonaSettings.preferredLanguage,
         roughnessLevel: input.roughnessLevel ?? defaultPersonaSettings.roughnessLevel,
         sarcasmLevel: input.sarcasmLevel ?? defaultPersonaSettings.sarcasmLevel,
         roastLevel: input.roastLevel ?? defaultPersonaSettings.roastLevel,
-        interjectTendency: defaultPersonaSettings.interjectTendency,
+        interjectTendency: input.interjectTendency ?? defaultPersonaSettings.interjectTendency,
         replyLength: input.replyLength ?? defaultPersonaSettings.replyLength,
         preferredStyle: input.preferredStyle ?? defaultPersonaSettings.preferredStyle,
         forbiddenWords: input.forbiddenWords ? parseCsv(input.forbiddenWords) : defaultPersonaSettings.forbiddenWords,
@@ -74,7 +78,14 @@ export class SlashAdminService {
       }
     });
 
-    return `Стиль обновлён. Имя=${guild.botName}, rough=${guild.roughnessLevel}, sarcasm=${guild.sarcasmLevel}, roast=${guild.roastLevel}, length=${guild.replyLength}.`;
+    return [
+      "Стиль обновлён.",
+      `Имя=${guild.botName}, lang=${guild.preferredLanguage}, rough=${guild.roughnessLevel}, sarcasm=${guild.sarcasmLevel}, roast=${guild.roastLevel}`,
+      `interject=${guild.interjectTendency}, length=${guild.replyLength}`,
+      `style=${guild.preferredStyle}`,
+      `forbiddenWords=${guild.forbiddenWords.join(", ") || "none"}`,
+      `forbiddenTopics=${guild.forbiddenTopics.join(", ") || "none"}`
+    ].join("\n");
   }
 
   async updateFeature(guildId: string, key: string, enabled: boolean) {
@@ -231,8 +242,11 @@ export class SlashAdminService {
       allowInterjections?: boolean | null;
       isMuted?: boolean | null;
       topicInterestTags?: string | null;
+      responseLengthOverride?: string | null;
     }
   ) {
+    const responseLengthOverride = normalizeResponseLengthOverride(input.responseLengthOverride);
+
     await this.prisma.channelConfig.upsert({
       where: {
         guildId_channelId: { guildId, channelId }
@@ -241,7 +255,8 @@ export class SlashAdminService {
         allowBotReplies: input.allowBotReplies ?? undefined,
         allowInterjections: input.allowInterjections ?? undefined,
         isMuted: input.isMuted ?? undefined,
-        topicInterestTags: input.topicInterestTags ? parseCsv(input.topicInterestTags) : undefined
+        topicInterestTags: input.topicInterestTags ? parseCsv(input.topicInterestTags) : undefined,
+        responseLengthOverride: input.responseLengthOverride === undefined ? undefined : responseLengthOverride
       },
       create: {
         guildId,
@@ -249,12 +264,20 @@ export class SlashAdminService {
         allowBotReplies: input.allowBotReplies ?? true,
         allowInterjections: input.allowInterjections ?? false,
         isMuted: input.isMuted ?? false,
-        topicInterestTags: input.topicInterestTags ? parseCsv(input.topicInterestTags) : []
+        topicInterestTags: input.topicInterestTags ? parseCsv(input.topicInterestTags) : [],
+        responseLengthOverride
       }
     });
 
     this.runtimeConfig?.invalidate(guildId, channelId);
-    return `Настройки канала ${channelId} обновлены.`;
+    return [
+      `Настройки канала ${channelId} обновлены.`,
+      `allowBotReplies=${formatOptionalBoolean(input.allowBotReplies)}`,
+      `allowInterjections=${formatOptionalBoolean(input.allowInterjections)}`,
+      `isMuted=${formatOptionalBoolean(input.isMuted)}`,
+      `topicInterestTags=${input.topicInterestTags ? parseCsv(input.topicInterestTags).join(", ") : "unchanged"}`,
+      `responseLengthOverride=${responseLengthOverride ?? (input.responseLengthOverride === undefined ? "unchanged" : "inherit")}`
+    ].join("\n");
   }
 
   async topicStatus(guildId: string, channelId: string) {
@@ -565,6 +588,90 @@ export class SlashAdminService {
     return lines.join("\n\n");
   }
 
+  async personDossier(guildId: string, userId: string) {
+    const [user, profile, vector, notes, stats, albumEntries] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: userId }
+      }),
+      this.prisma.userProfile.findUnique({
+        where: { guildId_userId: { guildId, userId } }
+      }),
+      this.relationships.getVector(guildId, userId),
+      this.prisma.userMemoryNote.findMany({
+        where: {
+          guildId,
+          userId,
+          active: true,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }]
+        },
+        orderBy: { createdAt: "desc" },
+        take: 12
+      }),
+      this.prisma.userStats.findUnique({
+        where: { guildId_userId: { guildId, userId } }
+      }),
+      this.memoryAlbum?.listMoments(guildId, userId, 4) ?? []
+    ]);
+
+    const displayName = user?.globalName ?? user?.username ?? userId;
+    const profileLine = profile
+      ? [
+          profile.summaryShort,
+          `styleTags=${profile.styleTags.join(", ") || "none"}`,
+          `topicTags=${profile.topicTags.join(", ") || "none"}`,
+          `confidence=${profile.confidenceScore.toFixed(2)}, sourceWindow=${profile.sourceWindowSize}`,
+          `lastProfiledAt=${profile.lastProfiledAt?.toISOString() ?? "never"}`
+        ].join("\n")
+      : "Профиль пока не готов.";
+
+    const statsLine = stats
+      ? [
+          `messages=${stats.totalMessages}, replies=${stats.totalReplies}, mentions=${stats.totalMentions}`,
+          `avgMessageLength=${stats.avgMessageLength.toFixed(1)}, conversationStarts=${stats.conversationStarterCount}`,
+          `topChannels=${formatJsonSummary(stats.topChannelsSnapshot)}`,
+          `activeHours=${formatJsonSummary(stats.activeHoursHistogram)}`
+        ].join("\n")
+      : "Статистика ещё не собрана.";
+
+    const notesLine = notes.length
+      ? notes.map((note) => `- ${note.key}: ${note.value}`).join("\n")
+      : "Нет активных user memory notes.";
+
+    const albumLine = albumEntries.length
+      ? albumEntries.map((entry) => {
+          const excerpt = entry.content.length > 120 ? `${entry.content.slice(0, 117)}...` : entry.content;
+          return `- ${entry.id}: ${excerpt}${entry.tags.length ? ` [${entry.tags.join(", ")}]` : ""}`;
+        }).join("\n")
+      : "В memory album пока пусто.";
+
+    return [
+      `Owner dossier: ${displayName}`,
+      `userId=${userId}`,
+      "",
+      "Профиль",
+      profileLine,
+      "",
+      "Отношение",
+      [
+        `toneBias=${vector.toneBias}`,
+        `roast=${vector.roastLevel}, praise=${vector.praiseBias}, interrupt=${vector.interruptPriority}`,
+        `closeness=${formatSignal(vector.closeness)}, trust=${formatSignal(vector.trustLevel)}, familiarity=${formatSignal(vector.familiarity)}, proactivity=${formatSignal(vector.proactivityPreference)}`,
+        `doNotMock=${vector.doNotMock}, doNotInitiate=${vector.doNotInitiate}`,
+        `protectedTopics=${vector.protectedTopics.join(", ") || "none"}`,
+        `interactionCount=${vector.interactionCount}`
+      ].join("\n"),
+      "",
+      "Статистика",
+      statsLine,
+      "",
+      "Память",
+      notesLine,
+      "",
+      "Альбом",
+      albumLine
+    ].join("\n");
+  }
+
   async channelMemoryStatus(guildId: string, channelId: string) {
     const [channelCount, eventCount, recentBuild] = await Promise.all([
       this.prisma.channelMemoryNote.count({ where: { guildId, channelId, active: true } }),
@@ -622,6 +729,51 @@ export class SlashAdminService {
 
 function formatSignal(value: number) {
   return value.toFixed(2);
+}
+
+function formatJsonSummary(value: unknown) {
+  if (!value) {
+    return "none";
+  }
+
+  const serialized = typeof value === "string" ? value : JSON.stringify(value);
+  return serialized.length > 180 ? `${serialized.slice(0, 177)}...` : serialized;
+}
+
+function resettableString(value: string | null | undefined, fallback: string) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return value === null ? fallback : value;
+}
+
+function resettableStringArray(value: string | null | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return value === null ? [] : parseCsv(value);
+}
+
+function normalizeResponseLengthOverride(value: string | null | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  return value === "short" || value === "medium" || value === "long" ? value : null;
+}
+
+function formatOptionalBoolean(value: boolean | null | undefined) {
+  if (value === undefined || value === null) {
+    return "unchanged";
+  }
+
+  return value ? "true" : "false";
 }
 
 function formatPowerProfileStatus(status: PowerProfileStatus) {

@@ -19,4 +19,24 @@ describe("hori command registration", () => {
     expect(names).toContain("bot-power");
     expect(names.length).toBeGreaterThan(1);
   });
+
+  it("marks /hori panel as owner-only and exposes channel response-length override", () => {
+    const definitions = getSlashCommandDefinitions();
+    const horiCommand = definitions[0];
+    const dossier = horiCommand?.options?.find((option) => option.name === "dossier");
+    const panel = horiCommand?.options?.find((option) => option.name === "panel");
+    const channel = horiCommand?.options?.find((option) => option.name === "channel");
+    const responseLength = channel && "options" in channel
+      ? channel.options?.find((option) => option.name === "response-length")
+      : null;
+
+    expect(panel?.description).toContain("Owner");
+    expect(dossier?.description).toContain("Owner");
+    expect(responseLength && "choices" in responseLength ? responseLength.choices?.map((choice) => choice.value) : []).toEqual([
+      "short",
+      "medium",
+      "long",
+      "inherit"
+    ]);
+  });
 });
