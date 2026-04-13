@@ -176,7 +176,9 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
   });
   trackIngestedMessage();
 
-  await enqueueBackgroundJobs(runtime, envelope);
+  void enqueueBackgroundJobs(runtime, envelope).catch((error) => {
+    runtime.logger.warn({ messageId: envelope.messageId, error }, "background job scheduling crashed");
+  });
 
   if (!explicitInvocation && !autoInterject) {
     return;

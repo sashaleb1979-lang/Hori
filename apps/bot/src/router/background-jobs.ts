@@ -19,6 +19,14 @@ interface QueueRuntime {
   };
 }
 
+function buildJobId(...parts: string[]) {
+  return parts
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("-")
+    .replace(/[:\s]+/g, "-");
+}
+
 export async function enqueueBackgroundJobs(runtime: QueueRuntime, envelope: {
   guildId: string;
   channelId: string;
@@ -32,7 +40,7 @@ export async function enqueueBackgroundJobs(runtime: QueueRuntime, envelope: {
       task: runtime.queues.summary.add(
         "summary",
         { guildId: envelope.guildId, channelId: envelope.channelId },
-        { jobId: `summary:${envelope.guildId}:${envelope.channelId}` }
+        { jobId: buildJobId("summary", envelope.guildId, envelope.channelId) }
       )
     },
     {
@@ -40,7 +48,7 @@ export async function enqueueBackgroundJobs(runtime: QueueRuntime, envelope: {
       task: runtime.queues.profile.add(
         "profile",
         { guildId: envelope.guildId, userId: envelope.userId },
-        { jobId: `profile:${envelope.guildId}:${envelope.userId}` }
+        { jobId: buildJobId("profile", envelope.guildId, envelope.userId) }
       )
     },
     {
@@ -50,7 +58,7 @@ export async function enqueueBackgroundJobs(runtime: QueueRuntime, envelope: {
           ? runtime.queues.embedding.add(
               "embedding",
               { entityType: "message", entityId: envelope.messageId },
-              { jobId: `embedding:${envelope.messageId}` }
+              { jobId: buildJobId("embedding", envelope.messageId) }
             )
           : Promise.resolve()
     },
@@ -59,7 +67,7 @@ export async function enqueueBackgroundJobs(runtime: QueueRuntime, envelope: {
       task: runtime.queues.topic.add(
         "topic",
         { guildId: envelope.guildId, channelId: envelope.channelId, messageId: envelope.messageId },
-        { jobId: `topic:${envelope.messageId}` }
+        { jobId: buildJobId("topic", envelope.messageId) }
       )
     }
   ];
