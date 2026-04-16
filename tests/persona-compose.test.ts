@@ -108,14 +108,9 @@ describe("composeBehaviorPrompt", () => {
     expect(result.prompt).toContain("[LOW-PRESSURE SMALLTALK BLOCK]");
     expect(result.prompt.length).toBeLessThanOrEqual(8500);
     expect(result.trace.blocksUsed[0]).toBe("STABLE IDENTITY BLOCK");
-    expect(result.trace.blocksUsed).toContain("MAIN GOAL");
-    expect(result.trace.blocksUsed).toContain("PERSONALITY CORE");
-    expect(result.trace.blocksUsed).toContain("BEHAVIOR POLICY");
-    expect(result.trace.blocksUsed).toContain("SMARTNESS POLICY");
-    expect(result.trace.blocksUsed).toContain("MEMORY USAGE");
+    expect(result.trace.blocksUsed).toContain("IDENTITY & CORE");
     expect(result.trace.blocksUsed).toContain("REPLY MODE");
     expect(result.trace.blocksUsed).toContain("FEW-SHOT TONE ANCHORS");
-    expect(result.trace.blocksUsed).toContain("FINAL SELECTION RULE");
     expect(result.trace.replyMode).toBeDefined();
     expect(uniqueBlocks.size).toBe(result.trace.blocksUsed.length);
   });

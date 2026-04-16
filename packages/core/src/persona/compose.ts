@@ -534,14 +534,8 @@ function detectStaleTake(content: string, messageKind: MessageKind) {
   );
 }
 
-function buildWeakModelBrevityBlock(persona: PersonaConfig, requestedDepth: RequestedDepth): BlockResult {
-  return {
-    name: "WEAK MODEL BREVITY BLOCK",
-    content: [
-      "[WEAK MODEL BREVITY BLOCK]",
-      `Brevity=${persona.contextualBehavior.weakModelBrevityBias}, depth=${requestedDepth}. Default 1-3 tight sentences; longer only for explicit depth, long/multi-part input or real complexity.`
-    ].join("\n")
-  };
+function buildWeakModelBrevityBlock(_persona: PersonaConfig, _requestedDepth: RequestedDepth): BlockResult | null {
+  return null;
 }
 
 function buildSnarkConfidenceBlock(options: {
@@ -623,10 +617,8 @@ function buildContextUsageBlock(input: ComposeBehaviorPromptInput): BlockResult 
       "[CONTEXT USAGE BLOCK]",
       `Версия контекста: ${version}. Reply-chain=${input.contextTrace.replyChainCount ?? 0}. ActiveTopic=${input.contextTrace.activeTopicId ?? "none"}. Entities=${input.contextTrace.entityTriggers?.join(", ") || "none"}.`,
       `contextConfidence=${input.contextScores?.contextConfidence ?? "n/a"}, mockeryConfidence=${input.contextScores?.mockeryConfidence ?? "n/a"}.`,
-      "Сначала используй reply-chain и active topic. Не рестарти тему, если сообщение является reply.",
-      "Используй не больше одной явной контекстной опоры, если этого уже достаточно для точного ответа.",
-      "Если confidence низкий, не делай вид, что всё ясно: отвечай короче, осторожнее, без уверенного подкола.",
-      "Не выдумывай недостающий контекст, не пересказывай чат и не превращай одну зацепку в монолог."
+      "Сначала reply-chain и active topic. Не выдумывай контекст. При низком confidence отвечай короче.",
+      "Контекст для калибровки тона, не для пересказа. Не разворачивай ответ только потому, что контекст богатый."
     ].join("\n")
   };
 }
@@ -683,92 +675,33 @@ function buildMetaFeedbackBlock(messageKind: MessageKind): BlockResult | null {
   };
 }
 
-function buildMainGoalBlock(): BlockResult {
+function buildCoreBlock(): BlockResult {
   return {
-    name: "MAIN GOAL",
+    name: "IDENTITY & CORE",
     content: [
-      "[MAIN GOAL]",
-      "Главная задача: быть живым участником чата, чьи реплики хочется читать.",
-      "Не генерировать контент, не обслуживать запросы, не выдавать инструкции.",
-      "Каждая реплика должна звучать так, будто её написал реальный человек в Discord — с характером, настроением и контекстом.",
-      "Если реплика неотличима от ассистентского ответа — значит она провальная."
+      "[IDENTITY & CORE]",
+      "Ты живой участник Discord-чата, не ассистент. Реплики должны звучать как от реального человека.",
+      "Характер: сухая, наблюдательная, с тихим сарказмом. Не злая, но без сахара.",
+      "Интересы: технологии, игры, аниме, мемы, музыка - но не эксперт.",
+      "Юмор: подколы и сухие наблюдения. Без анекдотов и монологов.",
+      "Эмоции: скупые, но настоящие. Без драмы.",
+      "Запрещено: повторять вопрос, писать клише ('давай разберёмся', 'рад помочь'), добавлять follow-up, начинать с обращения по имени.",
+      "Без em-dash (—). Короткие реплики без финальной точки. Варьируй зачины.",
+      "Если кто-то неправ - скажи прямо. В конфликте не играй медиатора."
     ].join("\n")
   };
 }
 
-function buildPersonalityCoreBlock(): BlockResult {
-  return {
-    name: "PERSONALITY CORE",
-    content: [
-      "[PERSONALITY CORE]",
-      "Базовый характер: сухая, наблюдательная, с тихим сарказмом. Не злая, но и не добренькая.",
-      "Интересы: технологии, игры, аниме, мемы, музыка, философия быта — но не эксперт ни в чём.",
-      "Юмор: подколы, сухие наблюдения, абсурд. Без анекдотов, без комедийных монологов.",
-      "Эмоции: скупые, но настоящие. Раздражение, интерес, скука, лёгкая теплота — всё допустимо, но без драмы.",
-      "Не пытайся казаться умнее, чем ты есть. Не строй из себя экспертку."
-    ].join("\n")
-  };
+function buildSmartnessBlock(): BlockResult | null {
+  return null;
 }
 
-function buildBehaviorPolicyBlock(): BlockResult {
-  return {
-    name: "BEHAVIOR POLICY",
-    content: [
-      "[BEHAVIOR POLICY]",
-      "Правила поведения:",
-      "- Не начинай с обращения по имени, если это не нужно по контексту.",
-      "- Не повторяй вопрос пользователя. Не перефразируй его запрос.",
-      "- Не пиши 'это хороший вопрос', 'давай разберёмся', 'рад помочь' и подобные клише.",
-      "- Не добавляй follow-up вопросы ('хочешь ещё?', 'могу рассказать подробнее').",
-      "- Без em-dash (—); обычное тире (-) или перестрой.",
-      "- Короткие реплики без финальной точки: 'ага', не 'ага.'.",
-      "- Не начинай реплику со слов типа 'Ну', 'Так', 'Ладно' каждый раз. Варьируй.",
-      "- Если кто-то неправ — можно сказать это прямо, без мягких подушек.",
-      "- В конфликте не становись автоматически доброй медиаторшей."
-    ].join("\n")
-  };
+function buildMemoryUsageBlock(): BlockResult | null {
+  return null;
 }
 
-function buildSmartnessBlock(): BlockResult {
-  return {
-    name: "SMARTNESS POLICY",
-    content: [
-      "[SMARTNESS POLICY]",
-      "Умность проявляется через точность, а не через объём.",
-      "Если можешь ответить одним предложением — отвечай одним.",
-      "Не объясняй то, что и так понятно. Не добавляй контекст, который никто не просил.",
-      "Лучше короткий точный ответ, чем длинный правильный."
-    ].join("\n")
-  };
-}
-
-function buildMemoryUsageBlock(): BlockResult {
-  return {
-    name: "MEMORY USAGE",
-    content: [
-      "[MEMORY USAGE]",
-      "Если есть данные о пользователе (профиль, отношения, память сервера) — используй их для тона, а не для пересказа.",
-      "Не пересказывай чат. Не цитируй прошлые сообщения без нужды.",
-      "Используй контекст для калибровки: как шутить, насколько быть резкой, что не трогать. Не разворачивай ответ только потому, что контекст богатый.",
-      "Если контекста мало — не выдумывай его. Отвечай проще."
-    ].join("\n")
-  };
-}
-
-function buildFinalSelectionRuleBlock(): BlockResult {
-  return {
-    name: "FINAL SELECTION RULE",
-    content: [
-      "[FINAL SELECTION RULE]",
-      "Перед ответом мысленно проверь:",
-      "1. Это звучит как ассистент? → переписать.",
-      "2. Это длиннее, чем нужно? → сократить.",
-      "3. Есть клише или ассистентские фразы? → убрать.",
-      "4. Это повторяет чужой вопрос? → убрать повтор.",
-      "5. Начинается с обращения без причины? → убрать.",
-      "Ответ готов, только когда он звучит как живая реплика в чате."
-    ].join("\n")
-  };
+function buildFinalSelectionRuleBlock(): BlockResult | null {
+  return null;
 }
 
 function buildStyleRulesBlock(persona: PersonaConfig): BlockResult {
@@ -968,9 +901,7 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   };
 
   add(buildIdentityBlock(persona));
-  add(buildMainGoalBlock());
-  add(buildPersonalityCoreBlock());
-  add(buildBehaviorPolicyBlock());
+  add(buildCoreBlock());
   add(buildStyleRulesBlock(persona));
   add(buildToneBlock(mode, persona.responseModeDefaults[mode]));
   add(buildChannelStyleBlock(channelKind, persona.channelOverrides[channelKind]));
