@@ -5,6 +5,37 @@ import { RuntimeConfigService } from "@hori/core";
 import type { AppPrismaClient } from "@hori/shared";
 
 describe("power profiles", () => {
+  it("keeps balanced defaults aligned with runtime env tuning", async () => {
+    const env = loadEnv({
+      NODE_ENV: "development",
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379"
+    });
+
+    const prisma = {
+      runtimeSetting: {
+        findMany: async () => []
+      },
+      featureFlag: {
+        findMany: async () => []
+      },
+      guild: {
+        findUnique: async () => null
+      },
+      channelConfig: {
+        findUnique: async () => null
+      }
+    } as unknown as AppPrismaClient;
+
+    const service = new RuntimeConfigService(prisma, env);
+    const status = await service.getPowerProfileStatus();
+
+    expect(status.activeProfile).toBe("balanced");
+    expect(status.source).toBe("default");
+    expect(status.effective.contextMaxChars).toBe(env.CONTEXT_V2_MAX_CHARS);
+    expect(status.effective.contextMaxChars).toBe(4000);
+  });
+
   it("applies the selected power profile and runtime overrides", async () => {
     const env = loadEnv({
       NODE_ENV: "development",

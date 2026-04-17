@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { defaultRuntimeTuning } from "@hori/config";
 import { ContextBuilderService } from "../packages/core/src/services/context-builder";
 import { ContextScoringService } from "../packages/core/src/services/context-scoring-service";
 import { MediaReactionService } from "../packages/core/src/services/media-reaction-service";
@@ -116,6 +117,18 @@ describe("context intelligence", () => {
     expect(result.trace.replyChainCount).toBe(1);
     expect(result.memoryLayers).toContain("reply_chain");
     expect(result.memoryLayers).toContain("active_topic");
+  });
+
+  it("uses the runtime default context budget when maxChars is omitted", () => {
+    const service = new ContextBuilderService();
+    const result = service.buildPromptContext(bundle, {
+      message,
+      intent: "chat",
+      contextV2Enabled: true
+    });
+
+    expect(result.trace.version).toBe("v2");
+    expect(result.trace.truncation?.maxChars).toBe(defaultRuntimeTuning.CONTEXT_V2_MAX_CHARS);
   });
 
   it("scores context and mockery confidence from reply-chain and low-signal penalties", () => {

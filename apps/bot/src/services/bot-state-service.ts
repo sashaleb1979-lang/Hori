@@ -69,7 +69,11 @@ export class BotStateService {
       title: "Состояние: мозги",
       description: "Модели, лимиты и режимы выполнения",
       fields: [
-        { name: "Ollama", value: clip(`url=${this.runtime.env.OLLAMA_BASE_URL ?? "missing"}\nfast=${this.runtime.env.OLLAMA_FAST_MODEL}\nsmart=${this.runtime.env.OLLAMA_SMART_MODEL}`) },
+        { name: "LLM", value: clip(
+          (this.runtime.env as Record<string, unknown>).LLM_PROVIDER === "openai"
+            ? `provider=openai\nchat=${(this.runtime.env as Record<string, unknown>).OPENAI_CHAT_MODEL ?? "gpt-4o-mini"}\nsmart=${(this.runtime.env as Record<string, unknown>).OPENAI_SMART_MODEL ?? "gpt-4o-mini"}`
+            : `provider=ollama\nurl=${this.runtime.env.OLLAMA_BASE_URL ?? "missing"}\nfast=${this.runtime.env.OLLAMA_FAST_MODEL}\nsmart=${this.runtime.env.OLLAMA_SMART_MODEL}`
+        ) },
         { name: "Power", value: clip(power) },
         { name: "Runtime", value: clip(`ctx=${routing.runtimeSettings.ollamaNumCtx}, batch=${routing.runtimeSettings.ollamaNumBatch}, replyTokens=${routing.runtimeSettings.llmReplyMaxTokens}`), inline: true },
         { name: "Lockdown", value: lockdown.enabled ? `on, updatedBy=${lockdown.updatedBy ?? "unknown"}` : "off", inline: true }

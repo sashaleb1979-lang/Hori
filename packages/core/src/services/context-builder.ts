@@ -1,3 +1,4 @@
+import { defaultRuntimeTuning } from "@hori/config";
 import type { BotIntent, ContextBundle, ContextBundleV2, ContextTrace, MemoryLayer, MessageEnvelope } from "@hori/shared";
 
 export class ContextBuilderService {
@@ -75,7 +76,7 @@ export class ContextBuilderService {
       maxChars?: number;
     }
   ) {
-    const maxChars = options.maxChars ?? 2600;
+    const maxChars = options.maxChars ?? defaultRuntimeTuning.CONTEXT_V2_MAX_CHARS;
     const memoryLayers: MemoryLayer[] = [];
     const sectionsUsed: string[] = [];
     const anchorSections: string[] = [];

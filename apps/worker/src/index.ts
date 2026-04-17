@@ -1,6 +1,6 @@
 import { AnalyticsQueryService } from "@hori/analytics";
 import { assertEnvForRole, loadEnv } from "@hori/config";
-import { EmbeddingAdapter, OllamaClient } from "@hori/llm";
+import { EmbeddingAdapter, ModelRouter, OllamaClient, OpenAIClient } from "@hori/llm";
 import type { LlmClient } from "@hori/llm";
 import { ProfileService, RetrievalService, SummaryService, TopicService } from "@hori/memory";
 import { SearchCacheService } from "@hori/search";
@@ -38,6 +38,7 @@ export interface WorkerRuntime {
   topicService: TopicService;
   searchCache: SearchCacheService;
   llmClient: LlmClient;
+  modelRouter: ModelRouter;
   embeddingAdapter: EmbeddingAdapter;
 }
 
@@ -80,8 +81,20 @@ async function main() {
     similarityThreshold: env.TOPIC_SIM_THRESHOLD
   });
   const searchCache = new SearchCacheService(prisma, redis);
-  const llmClient = new OllamaClient(env, logger);
-  const embeddingAdapter = new EmbeddingAdapter(llmClient, env);
+
+  const llmProvider = (env as Record<string, unknown>).LLM_PROVIDER as string;
+  let llmClient: LlmClient;
+
+  if (llmProvider === "openai") {
+    llmClient = new OpenAIClient(env, logger);
+    logger.info("worker LLM provider: OpenAI");
+  } else {
+    llmClient = new OllamaClient(env, logger);
+    logger.info("worker LLM provider: Ollama");
+  }
+
+  const modelRouter = new ModelRouter(env);
+  const embeddingAdapter = new EmbeddingAdapter(llmClient, modelRouter);
 
   const runtime: WorkerRuntime = {
     env,
@@ -96,6 +109,7 @@ async function main() {
     topicService,
     searchCache,
     llmClient,
+    modelRouter,
     embeddingAdapter
   };
 

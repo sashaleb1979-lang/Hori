@@ -1,13 +1,13 @@
 # Hori Discord Bot
 
-Production-ready TypeScript monorepo for a Discord bot with persona layers, analytics, memory, web search, admin controls and an external Ollama backend.
+Production-ready TypeScript monorepo for a Discord bot with persona layers, analytics, memory, web search, admin controls and a provider-aware LLM backend.
 
 ## Architecture
 - `apps/bot`: Discord gateway, message ingestion, slash commands, context actions, reply routing.
 - `apps/api`: internal Fastify API for health, readiness, metrics, admin read endpoints and debug traces.
 - `apps/worker`: BullMQ workers for summaries, profiling, embeddings and cleanup jobs.
 - `packages/core`: intent router, persona assembly, safety, orchestration, admin services.
-- `packages/llm`: Ollama client, model router, tool-calling, prompt helpers.
+- `packages/llm`: Ollama/OpenAI clients, model router, tool-calling, prompt helpers.
 - `packages/memory`: recent context, summaries, profile lifecycle, relationship profiles, semantic retrieval.
 - `packages/analytics`: message ingestion, counters, aggregates, analytics queries.
 - `packages/search`: Brave Search integration, page fetch, sanitization, cache.
@@ -36,7 +36,7 @@ tests/
 ## Core Features In V1
 - Reply by bot name, mention, reply to bot and message context actions.
 - Natural language intents: `help`, `summary`, `analytics`, `search`, `memory_write`, `memory_forget`, `rewrite`, `profile`.
-- Fast vs smart model routing through Ollama.
+- Fast vs smart model routing through a provider-aware model router.
 - Brave Search tools with cache, cooldown and fetch sanitization.
 - Message ingestion and analytics counters stored in PostgreSQL.
 - Three-layer memory: recent messages, channel summaries, server memory.
@@ -49,7 +49,7 @@ tests/
 - pnpm
 - PostgreSQL 15+ with `pgvector`
 - Redis
-- Ollama reachable over HTTP
+- Either Ollama reachable over HTTP or an OpenAI API key
 - Brave Search API key
 
 ## Bootstrap
@@ -92,9 +92,12 @@ pnpm build
 
 ## Environment Variables
 See [.env.example](./.env.example). Short aliases are the preferred setup for Railway:
-- Required in most setups: `BOT_TOKEN`, `BOT_ID`, `DB_URL`, `KV_URL`, `AI_URL`
+- Required in most setups: `BOT_TOKEN`, `BOT_ID`, `DB_URL`, `KV_URL`
+- Choose one LLM path:
+- Ollama: `AI_PROVIDER=ollama` (default) plus `AI_URL`, with optional `AI_FAST`, `AI_SMART`, `AI_EMBED`, `AI_TIMEOUT`
+- OpenAI: `AI_PROVIDER=openai` plus `OAI_KEY`, with optional `OAI_CHAT`, `OAI_SMART`, `OAI_EMBED`
 - Usually set too: `BOT_OWNERS`, `BOT_NAME`, `BRAVE_KEY`
-- Optional top-level overrides: `BOT_LANG`, `HOST`, `PORT`, `ADMIN_KEY`, `AI_FAST`, `AI_SMART`, `AI_EMBED`, `AI_TIMEOUT`
+- Optional top-level overrides: `BOT_LANG`, `HOST`, `PORT`, `ADMIN_KEY`
 - Advanced tuning is compressed into one optional `CFG` JSON instead of dozens of separate vars
 
 Examples:
@@ -108,16 +111,30 @@ BRAVE_KEY=...
 ```
 
 ```env
+BOT_TOKEN=...
+BOT_ID=...
+DB_URL=postgresql://...
+KV_URL=redis://...
+AI_PROVIDER=openai
+OAI_KEY=...
+OAI_CHAT=gpt-4o-mini
+OAI_SMART=gpt-4o-mini
+OAI_EMBED=text-embedding-3-small
+BRAVE_KEY=...
+```
+
+```env
 CFG={"features":{"webSearch":true,"autoInterject":false},"profiles":{"minMessages":80},"search":{"maxRequests":2,"maxPages":3}}
 ```
 
 Notes:
 - The app still accepts legacy long names like `DISCORD_TOKEN` and `DATABASE_URL`.
+- OpenAI short aliases also work: `AI_PROVIDER`, `OAI_KEY`, `OAI_CHAT`, `OAI_SMART`, `OAI_EMBED`.
 - Discord commands are registered globally, so there is no per-server guild id to update when moving the bot.
 - Put your Discord user ID in `BOT_OWNERS` to use owner-only commands like `/bot-lockdown on|off|status`.
 - For verbose Ollama tunnel logging, set `OLLAMA_LOG_TRAFFIC=true`, `OLLAMA_LOG_PROMPTS=true`, and `OLLAMA_LOG_RESPONSES=true`. Short aliases also work: `AI_LOG_TRAFFIC`, `AI_LOG_PROMPTS`, `AI_LOG_RESPONSES`.
 - Prisma-based scripts use the alias bridge automatically, so `DB_URL` is enough if you run the provided `pnpm prisma:*` and `pnpm seed` scripts.
-- API-only deployments can skip `AI_URL`; bot and worker still require it.
+- API-only deployments can skip LLM vars entirely; bot and worker need either `AI_URL`/`OLLAMA_BASE_URL` for Ollama or `AI_PROVIDER=openai` with `OAI_KEY`/`OPENAI_API_KEY`.
 - In Railway, prefer using the built-in managed database variable names directly for service references: `DATABASE_URL=${{Postgres.DATABASE_URL}}` and `REDIS_URL=${{Redis.REDIS_URL}}`.
 
 ## Slash Commands
@@ -167,7 +184,9 @@ Do not use `pnpm dev`, `tsx watch`, or workspace-local dev commands in Railway.
 ### Infra
 - Attach a managed PostgreSQL instance.
 - Attach a managed Redis instance.
-- Keep Ollama outside Railway and provide `AI_URL` in short mode or `OLLAMA_BASE_URL` in legacy mode.
+- Choose one LLM provider mode:
+- Ollama: keep it outside Railway and provide `AI_URL` in short mode or `OLLAMA_BASE_URL` in legacy mode.
+- OpenAI: set `AI_PROVIDER=openai` and provide `OAI_KEY`, optionally `OAI_CHAT`, `OAI_SMART`, `OAI_EMBED`.
 - Link database and Redis variables with Railway references, for example:
 ```env
 DB_URL=${{Postgres.DATABASE_URL}}

@@ -126,12 +126,17 @@ export interface MemoryFormationRetrieval {
 }
 
 export class MemoryFormationService {
+  private readonly embedModel: string;
+
   constructor(
     private readonly prisma: AppPrismaClient,
     private readonly retrieval: MemoryFormationRetrieval,
     private readonly llm: MemoryFormationLlm,
     private readonly env: AppEnv,
-  ) {}
+    embedModel?: string,
+  ) {
+    this.embedModel = embedModel ?? env.OLLAMA_EMBED_MODEL;
+  }
 
   async runFormation(request: MemoryFormationRequest): Promise<MemoryFormationResult> {
     const compactedSummary = await this.compactConversationSegment(
@@ -248,7 +253,7 @@ export class MemoryFormationService {
     let embeddings: number[][] = [];
     if (facts.length > 0) {
       try {
-        embeddings = await this.llm.embed(this.env.OLLAMA_EMBED_MODEL, facts);
+        embeddings = await this.llm.embed(this.embedModel, facts);
       } catch {
         embeddings = [];
       }
@@ -678,7 +683,7 @@ export class MemoryFormationService {
 
   private async updateEmbedding(entityType: "server_memory" | "user_memory" | "channel_memory" | "event_memory", entityId: string, text: string) {
     try {
-      const [embedding] = await this.llm.embed(this.env.OLLAMA_EMBED_MODEL, text);
+      const [embedding] = await this.llm.embed(this.embedModel, text);
       if (!embedding?.length) {
         return;
       }

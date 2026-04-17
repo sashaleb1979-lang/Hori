@@ -9,7 +9,7 @@ Cluster 1 now covers the persona/behavior layer plus the conservative Context In
 - Kept old `PersonaSettings` and `/bot-style` compatible through the `PersonaService` facade.
 - Integrated composer output into `ChatOrchestrator`, including behavior trace and dynamic response caps.
 - Added optional `maxTokens` to LLM chat calls so tiny answers stay cheap and long/deep answers can expand.
-- Default Ollama fast/smart tiers now both target `qwen3.5:9b`; cost/latency separation is kept through profile caps and sampling, not different default model ids.
+- Default Ollama fast/smart tiers now both target `qwen3.5:9b` when `LLM_PROVIDER=ollama`; cost/latency separation is kept through profile caps and sampling, not different default model ids.
 - Added feature flags and slash choices for the new behavior layers.
 - Added `ContextBundleV2`: reply-chain anchors, active topic, entity triggers, topic window and entity memory.
 - Replaced linear context formatting with a context sandwich: anchors first, compressed recent context, question anchor last.
@@ -41,4 +41,4 @@ Cluster 1 now covers the persona/behavior layer plus the conservative Context In
 - Self-initiated low-confidence messages are suppressed before the expensive LLM call.
 - Topic reset respects replies, TTL and explicit topic switches.
 - Media registry never sends a missing file; it falls back to text.
-- Fast/smart routing can share `qwen3.5:9b`, but fast still stays cheaper through lower profile caps and colder sampling.
+- Fast/smart routing can share `qwen3.5:9b` under Ollama, but fast still stays cheaper through lower profile caps and colder sampling.

@@ -1,6 +1,6 @@
 import type { Job } from "bullmq";
 
-import { resolveBestInstalledChatModel } from "@hori/llm";
+import { resolveBestInstalledChatModel, ModelRouter } from "@hori/llm";
 import { MemoryFormationService, type FormationMessage, type MemoryFormationResult } from "@hori/memory";
 import { asErrorMessage, type MemoryFormationJobPayload } from "@hori/shared";
 
@@ -53,21 +53,41 @@ export function createMemoryFormationJob(runtime: WorkerRuntime) {
       return { skipped: true, reason: "channelId required" };
     }
 
-    const bestModel = await resolveBestInstalledChatModel(
-      runtime.env.OLLAMA_BASE_URL,
-      runtime.env.OLLAMA_SMART_MODEL,
-      runtime.logger
-    );
-    const formationEnv = {
-      ...runtime.env,
-      OLLAMA_FAST_MODEL: bestModel.model,
-      OLLAMA_SMART_MODEL: bestModel.model
-    };
+    const isOpenAI = (runtime.env as Record<string, unknown>).LLM_PROVIDER === "openai";
+    let formationEnv: typeof runtime.env;
+    let bestModelName: string;
+    let bestModelReason: string;
+
+    if (isOpenAI) {
+      const oaiEnv = runtime.env as Record<string, unknown>;
+      bestModelName = (oaiEnv.OPENAI_SMART_MODEL as string) ?? "gpt-4o-mini";
+      bestModelReason = "openai provider";
+      formationEnv = {
+        ...runtime.env,
+        OLLAMA_FAST_MODEL: bestModelName,
+        OLLAMA_SMART_MODEL: bestModelName
+      };
+    } else {
+      const bestModel = await resolveBestInstalledChatModel(
+        runtime.env.OLLAMA_BASE_URL,
+        runtime.env.OLLAMA_SMART_MODEL,
+        runtime.logger
+      );
+      bestModelName = bestModel.model;
+      bestModelReason = bestModel.reason;
+      formationEnv = {
+        ...runtime.env,
+        OLLAMA_FAST_MODEL: bestModel.model,
+        OLLAMA_SMART_MODEL: bestModel.model
+      };
+    }
+
     const formationService = new MemoryFormationService(
       runtime.prisma,
       runtime.retrievalService,
       runtime.llmClient,
-      formationEnv
+      formationEnv,
+      runtime.modelRouter.pickEmbedModel()
     );
 
     await runtime.prisma.memoryBuildRun.update({
@@ -75,13 +95,13 @@ export function createMemoryFormationJob(runtime: WorkerRuntime) {
       data: {
         status: "running",
         startedAt: new Date(),
-        bestModel: bestModel.model,
+        bestModel: bestModelName,
         progressJson: {
           phase: "loading_messages",
           processedChunks: 0,
           totalChunks: 0,
-          model: bestModel.model,
-          modelReason: bestModel.reason
+          model: bestModelName,
+          modelReason: bestModelReason
         }
       }
     });
@@ -98,7 +118,7 @@ export function createMemoryFormationJob(runtime: WorkerRuntime) {
             resultJson: {
               skipped: true,
               reason: "no messages in database for selected scope",
-              model: bestModel.model
+              model: bestModelName
             }
           }
         });
@@ -152,8 +172,8 @@ export function createMemoryFormationJob(runtime: WorkerRuntime) {
           totals,
           latestChannelId: channelId,
           latestUserId: dominant.userId,
-          model: bestModel.model,
-          modelReason: bestModel.reason
+          model: bestModelName,
+          modelReason: bestModelReason
         };
         await job.updateProgress(progress);
         await runtime.prisma.memoryBuildRun.update({
@@ -169,8 +189,8 @@ export function createMemoryFormationJob(runtime: WorkerRuntime) {
         chunkCount: chunks.length,
         totals,
         sampleFacts,
-        model: bestModel.model,
-        modelReason: bestModel.reason
+        model: bestModelName,
+        modelReason: bestModelReason
       };
 
       await runtime.prisma.memoryBuildRun.update({

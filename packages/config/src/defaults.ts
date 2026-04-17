@@ -12,7 +12,7 @@ export const POWER_PROFILE_PRESETS = {
   },
   balanced: {
     llmMaxContextMessages: 12,
-    contextMaxChars: 2600,
+    contextMaxChars: 4000,
     llmReplyMaxTokens: 220,
     defaultReplyMaxChars: 1600,
     ollamaKeepAlive: "10m",

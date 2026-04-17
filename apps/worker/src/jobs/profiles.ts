@@ -46,7 +46,7 @@ export function createProfileJob(runtime: WorkerRuntime) {
 
     try {
       const response = await runtime.llmClient.chat({
-        model: runtime.env.OLLAMA_SMART_MODEL,
+        model: runtime.modelRouter.pickModel("profile"),
         messages: prompt,
         format: "json",
         temperature: Math.min(profile.temperature, 0.2),
@@ -85,7 +85,7 @@ export function createProfileJob(runtime: WorkerRuntime) {
     const latestChannelId = messages[0]?.channelId;
     if (latestChannelId && messages.length) {
       try {
-        const formationService = new MemoryFormationService(runtime.prisma, runtime.retrievalService, runtime.llmClient, runtime.env);
+        const formationService = new MemoryFormationService(runtime.prisma, runtime.retrievalService, runtime.llmClient, runtime.env, runtime.modelRouter.pickEmbedModel());
         const priorSummaries = await runtime.summaryService.getRecentSummaries(job.data.guildId, latestChannelId, 2);
 
         await formationService.runFormation({

@@ -1064,7 +1064,7 @@ export class ChatOrchestrator {
     if (contour === "C") {
       const profile = getModelProfile("smart");
       return {
-        model: this.deps.env.OLLAMA_SMART_MODEL,
+        model: this.deps.modelRouter.pickModel("summary"),
         temperature: profile.temperature,
         topP: profile.topP,
         maxTokens: Math.min(maxTokens ?? profile.maxTokens, profile.maxTokens, runtimeSettings.llmReplyMaxTokens),
@@ -1078,7 +1078,7 @@ export class ChatOrchestrator {
     const contourCap = contour === "B" ? 120 : 48;
 
     return {
-      model: this.deps.env.OLLAMA_FAST_MODEL,
+      model: this.deps.modelRouter.pickModel("chat"),
       temperature: profile.temperature,
       topP: profile.topP,
       maxTokens: Math.min(maxTokens ?? profile.maxTokens, contourCap, runtimeSettings.llmReplyMaxTokens),

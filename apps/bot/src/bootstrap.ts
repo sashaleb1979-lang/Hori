@@ -3,7 +3,8 @@ import type { Client } from "discord.js";
 import { AnalyticsQueryService, MessageIngestService } from "@hori/analytics";
 import { assertEnvForRole, loadEnv } from "@hori/config";
 import { AffinityService, createChatOrchestrator, MediaReactionService, MoodService, ReplyQueueService, RuntimeConfigService, SlashAdminService } from "@hori/core";
-import { EmbeddingAdapter, ModelRouter, OllamaClient, ToolOrchestrator } from "@hori/llm";
+import { EmbeddingAdapter, ModelRouter, OllamaClient, OpenAIClient, ToolOrchestrator } from "@hori/llm";
+import type { LlmClient } from "@hori/llm";
 import { ActiveMemoryService, ContextService, InteractionRequestService, MemoryAlbumService, ProfileService, ReflectionService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
 import { BraveSearchClient, SearchCacheService } from "@hori/search";
 import { createLogger, createPrismaClient, createRedisClient, createAppQueues, ensureInfrastructureReady, loadPersistedOllamaBaseUrl } from "@hori/shared";
@@ -119,31 +120,41 @@ export async function bootstrapBot() {
   const mediaReactionService = new MediaReactionService(prisma);
   const replyQueueService = new ReplyQueueService(prisma, env.REPLY_QUEUE_BUSY_TTL_SEC);
   const contextService = new ContextService(prisma, summaryService, profileService, relationshipService, retrievalService, activeMemoryService);
-  const llmClient = new OllamaClient(env, logger);
 
-  // --- Ollama health check: сразу видно в логах, жива ли нейронка ---
-  if (env.OLLAMA_BASE_URL) {
-    try {
-      const probe = await fetch(new URL("/api/tags", env.OLLAMA_BASE_URL), {
-        signal: AbortSignal.timeout(5000)
-      });
-      if (probe.ok) {
-        const data = (await probe.json()) as { models?: { name: string }[] };
-        const models = data.models?.map((m) => m.name) ?? [];
-        logger.info({ url: env.OLLAMA_BASE_URL, models }, `ollama reachable: url=${env.OLLAMA_BASE_URL} models=${models.join(",")}`);
-      } else {
-        logger.warn({ url: env.OLLAMA_BASE_URL, status: probe.status }, `ollama responded with error: url=${env.OLLAMA_BASE_URL} status=${probe.status} — fallback replies until fixed`);
-      }
-    } catch (error) {
-      const errorText = error instanceof Error ? error.message : String(error);
-      logger.warn({ url: env.OLLAMA_BASE_URL, error: errorText }, `ollama unreachable: url=${env.OLLAMA_BASE_URL} error=${errorText} — bot will use fallback replies. Run start-tunnel.ps1 and /bot-ai-url`);
-    }
+  // --- LLM client: выбор провайдера ---
+  const llmProvider = (env as Record<string, unknown>).LLM_PROVIDER as string;
+  let llmClient: LlmClient;
+
+  if (llmProvider === "openai") {
+    llmClient = new OpenAIClient(env, logger);
+    logger.info("LLM provider: OpenAI");
   } else {
-    logger.warn("OLLAMA_BASE_URL not set — bot will use fallback replies for all LLM calls");
+    llmClient = new OllamaClient(env, logger);
+
+    // --- Ollama health check: сразу видно в логах, жива ли нейронка ---
+    if (env.OLLAMA_BASE_URL) {
+      try {
+        const probe = await fetch(new URL("/api/tags", env.OLLAMA_BASE_URL), {
+          signal: AbortSignal.timeout(5000)
+        });
+        if (probe.ok) {
+          const data = (await probe.json()) as { models?: { name: string }[] };
+          const models = data.models?.map((m) => m.name) ?? [];
+          logger.info({ url: env.OLLAMA_BASE_URL, models }, `ollama reachable: url=${env.OLLAMA_BASE_URL} models=${models.join(",")}`);
+        } else {
+          logger.warn({ url: env.OLLAMA_BASE_URL, status: probe.status }, `ollama responded with error: url=${env.OLLAMA_BASE_URL} status=${probe.status} — fallback replies until fixed`);
+        }
+      } catch (error) {
+        const errorText = error instanceof Error ? error.message : String(error);
+        logger.warn({ url: env.OLLAMA_BASE_URL, error: errorText }, `ollama unreachable: url=${env.OLLAMA_BASE_URL} error=${errorText} — bot will use fallback replies. Run start-tunnel.ps1 and /bot-ai-url`);
+      }
+    } else {
+      logger.warn("OLLAMA_BASE_URL not set — bot will use fallback replies for all LLM calls");
+    }
   }
 
   const modelRouter = new ModelRouter(env);
-  const embeddingAdapter = new EmbeddingAdapter(llmClient, env);
+  const embeddingAdapter = new EmbeddingAdapter(llmClient, modelRouter);
   const searchCache = new SearchCacheService(prisma, redisReady ? redis : null, logger);
   const searchClient = new BraveSearchClient(env, logger, searchCache);
   const toolOrchestrator = new ToolOrchestrator(llmClient, logger);

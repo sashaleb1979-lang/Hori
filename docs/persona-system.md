@@ -31,7 +31,11 @@ The old `PersonaSettings` from guild DB settings still works. `PersonaService` a
 
 ## Model Tiers
 
-`OLLAMA_FAST_MODEL` and `OLLAMA_SMART_MODEL` now both default to `qwen3.5:9b` unless overridden by env.
+`ModelRouter` is provider-aware.
+
+When `LLM_PROVIDER=ollama`, `OLLAMA_FAST_MODEL` and `OLLAMA_SMART_MODEL` both default to `qwen3.5:9b` unless overridden by env.
+
+When `LLM_PROVIDER=openai`, chat and smart paths default to `gpt-4o-mini`, and embeddings default to `text-embedding-3-small`.
 
 The routing split still matters:
 

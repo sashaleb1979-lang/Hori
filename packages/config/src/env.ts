@@ -112,6 +112,8 @@ const coreEnvSchema = z.object({
   DATABASE_URL: urlish,
   REDIS_URL: urlish,
 
+  LLM_PROVIDER: z.enum(["ollama", "openai"]).default("ollama"),
+
   OLLAMA_BASE_URL: urlish.optional(),
   OLLAMA_FAST_MODEL: z.string().default("qwen3.5:9b"),
   OLLAMA_SMART_MODEL: z.string().default("qwen3.5:9b"),
@@ -121,6 +123,11 @@ const coreEnvSchema = z.object({
   OLLAMA_LOG_PROMPTS: boolish.default(false),
   OLLAMA_LOG_RESPONSES: boolish.default(false),
   OLLAMA_LOG_MAX_CHARS: intish.default(12000),
+
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_CHAT_MODEL: z.string().default("gpt-4o-mini"),
+  OPENAI_SMART_MODEL: z.string().default("gpt-4o-mini"),
+  OPENAI_EMBED_MODEL: z.string().default("text-embedding-3-small"),
 
   BRAVE_SEARCH_API_KEY: z.string().optional(),
 
@@ -368,7 +375,12 @@ const envAliasMap = {
   AI_LOG_MAX_CHARS: "OLLAMA_LOG_MAX_CHARS",
   BRAVE_KEY: "BRAVE_SEARCH_API_KEY",
   HORI_CFG: "CFG",
-  HORI_CONFIG_JSON: "CFG"
+  HORI_CONFIG_JSON: "CFG",
+  AI_PROVIDER: "LLM_PROVIDER",
+  OAI_KEY: "OPENAI_API_KEY",
+  OAI_CHAT: "OPENAI_CHAT_MODEL",
+  OAI_SMART: "OPENAI_SMART_MODEL",
+  OAI_EMBED: "OPENAI_EMBED_MODEL"
 } as const satisfies Record<string, string>;
 
 const canonicalEnvHints = {
@@ -413,7 +425,12 @@ function mapCoreAliases(raw: NodeJS.ProcessEnv) {
     OLLAMA_LOG_RESPONSES: raw.AI_LOG_RESPONSES ?? raw.OLLAMA_LOG_RESPONSES,
     OLLAMA_LOG_MAX_CHARS: raw.AI_LOG_MAX_CHARS ?? raw.OLLAMA_LOG_MAX_CHARS,
     BRAVE_SEARCH_API_KEY: raw.BRAVE_KEY ?? raw.BRAVE_SEARCH_API_KEY,
-    CFG: raw.CFG ?? raw.HORI_CFG ?? raw.HORI_CONFIG_JSON
+    CFG: raw.CFG ?? raw.HORI_CFG ?? raw.HORI_CONFIG_JSON,
+    LLM_PROVIDER: raw.AI_PROVIDER ?? raw.LLM_PROVIDER,
+    OPENAI_API_KEY: raw.OAI_KEY ?? raw.OPENAI_API_KEY,
+    OPENAI_CHAT_MODEL: raw.OAI_CHAT ?? raw.OPENAI_CHAT_MODEL,
+    OPENAI_SMART_MODEL: raw.OAI_SMART ?? raw.OPENAI_SMART_MODEL,
+    OPENAI_EMBED_MODEL: raw.OAI_EMBED ?? raw.OPENAI_EMBED_MODEL
   };
 }
 
@@ -588,7 +605,11 @@ export function assertEnvForRole(env: AppEnv, role: AppRole) {
     }
   }
 
-  if ((role === "bot" || role === "worker") && !env.OLLAMA_BASE_URL) {
+  if ((role === "bot" || role === "worker") && env.LLM_PROVIDER === "ollama" && !env.OLLAMA_BASE_URL) {
     console.warn("[config] OLLAMA_BASE_URL not set \u2014 LLM features will use fallback replies until configured via /bot-ai-url or env");
+  }
+
+  if ((role === "bot" || role === "worker") && env.LLM_PROVIDER === "openai" && !env.OPENAI_API_KEY) {
+    throw new Error("Missing OPENAI_API_KEY — required when LLM_PROVIDER=openai. Set OAI_KEY or OPENAI_API_KEY.");
   }
 }
