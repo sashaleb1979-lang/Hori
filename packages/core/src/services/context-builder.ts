@@ -1,6 +1,8 @@
 import { defaultRuntimeTuning } from "@hori/config";
 import type { BotIntent, ContextBundle, ContextBundleV2, ContextTrace, MemoryLayer, MessageEnvelope } from "@hori/shared";
 
+import { defaultRuntimeTuning } from "@hori/config";
+
 export class ContextBuilderService {
   buildPromptContext(
     bundle: ContextBundle,
