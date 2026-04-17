@@ -59,6 +59,10 @@ interface OpenAIEmbeddingResponse {
   };
 }
 
+type OpenAIClientEnv = AppEnv & {
+  OPENAI_API_KEY?: string;
+};
+
 export class OpenAIClient implements LlmClient {
   private readonly apiKey: string;
   private readonly timeoutMs: number;
@@ -69,7 +73,7 @@ export class OpenAIClient implements LlmClient {
   private readonly logMaxChars: number;
 
   constructor(env: AppEnv, logger: AppLogger) {
-    const key = (env as Record<string, unknown>).OPENAI_API_KEY as string | undefined;
+    const key = (env as OpenAIClientEnv).OPENAI_API_KEY;
 
     if (!key) {
       throw new Error("OPENAI_API_KEY is required when LLM_PROVIDER=openai");
