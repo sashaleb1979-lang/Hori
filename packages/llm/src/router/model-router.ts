@@ -12,6 +12,12 @@ import {
   summaryModelProfile,
   utilityFastModelProfile
 } from "./model-profiles";
+import {
+  resolveModelRouting,
+  slotForIntent,
+  type ModelRoutingSlot,
+  type ResolvedModelRouting
+} from "./model-routing";
 
 type ProviderAwareEnv = AppEnv & {
   LLM_PROVIDER?: string;
@@ -46,15 +52,22 @@ export class ModelRouter {
     }
   }
 
-  pickModel(intent: BotIntent) {
+  pickSlot(intent: BotIntent) {
+    return slotForIntent(intent);
+  }
+
+  pickModel(intent: BotIntent, routing?: ResolvedModelRouting) {
+    return this.pickModelForSlot(slotForIntent(intent), routing);
+  }
+
+  pickModelForSlot(slot: ModelRoutingSlot, routing?: ResolvedModelRouting) {
+    const resolved = routing ?? resolveModelRouting(this.env);
+
     if (this.isOpenAI) {
-      const env = this.providerEnv;
-      return this.pickKind(intent) === "smart"
-        ? env.OPENAI_SMART_MODEL ?? "gpt-4o-mini"
-        : env.OPENAI_CHAT_MODEL ?? "gpt-4o-mini";
+      return resolved.slots[slot];
     }
 
-    return this.pickKind(intent) === "smart" ? this.env.OLLAMA_SMART_MODEL : this.env.OLLAMA_FAST_MODEL;
+    return resolved.slots[slot] ?? (this.isSmartSlot(slot) ? this.env.OLLAMA_SMART_MODEL : this.env.OLLAMA_FAST_MODEL);
   }
 
   pickEmbedModel(): string {
@@ -84,6 +97,10 @@ export class ModelRouter {
       default:
         return getModelProfile(this.pickKind(intent));
     }
+  }
+
+  private isSmartSlot(slot: ModelRoutingSlot) {
+    return slot !== "classifier" && slot !== "chat";
   }
 }
 

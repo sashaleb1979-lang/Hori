@@ -9,6 +9,7 @@ import type { WorkerRuntime } from "../index";
 export function createProfileJob(runtime: WorkerRuntime) {
   return async (job: Job<ProfileJobPayload>) => {
     const profile = getModelProfile("smart");
+    const runtimeSettings = await runtime.runtimeConfig.getRuntimeSettings();
     const stats = await runtime.analytics.getUserStats(job.data.guildId, job.data.userId);
 
     if (!stats || !runtime.profileService.isEligible(stats.totalMessages)) {
@@ -46,7 +47,7 @@ export function createProfileJob(runtime: WorkerRuntime) {
 
     try {
       const response = await runtime.llmClient.chat({
-        model: runtime.modelRouter.pickModel("profile"),
+        model: runtime.modelRouter.pickModel("profile", runtimeSettings.modelRouting),
         messages: prompt,
         format: "json",
         temperature: Math.min(profile.temperature, 0.2),
@@ -85,7 +86,13 @@ export function createProfileJob(runtime: WorkerRuntime) {
     const latestChannelId = messages[0]?.channelId;
     if (latestChannelId && messages.length) {
       try {
-        const formationService = new MemoryFormationService(runtime.prisma, runtime.retrievalService, runtime.llmClient, runtime.env, runtime.modelRouter.pickEmbedModel());
+        const memoryModel = runtime.modelRouter.pickModelForSlot("memory", runtimeSettings.modelRouting);
+        const formationEnv = {
+          ...runtime.env,
+          OLLAMA_FAST_MODEL: memoryModel,
+          OLLAMA_SMART_MODEL: memoryModel
+        };
+        const formationService = new MemoryFormationService(runtime.prisma, runtime.retrievalService, runtime.llmClient, formationEnv, runtime.modelRouter.pickEmbedModel());
         const priorSummaries = await runtime.summaryService.getRecentSummaries(job.data.guildId, latestChannelId, 2);
 
         await formationService.runFormation({

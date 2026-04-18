@@ -18,6 +18,15 @@ import {
 
 import { CONTEXT_ACTIONS, asErrorMessage, parseCsv, persistOllamaBaseUrl, type MemoryFormationJobPayload, type MessageEnvelope, type PersonaMode } from "@hori/shared";
 import { RelationshipService } from "@hori/memory";
+import {
+  isModelRoutingModelId,
+  isModelRoutingPresetName,
+  isModelRoutingSlot,
+  MODEL_ROUTING_MODEL_IDS,
+  MODEL_ROUTING_PRESETS,
+  MODEL_ROUTING_SLOTS,
+  type ModelRoutingSlot
+} from "@hori/llm";
 
 import type { BotRuntime } from "../bootstrap";
 import { getOwnerLockdownState, isBotOwner, setOwnerLockdownState, shouldIgnoreForOwnerLockdown } from "./owner-lockdown";
@@ -31,8 +40,9 @@ const HORI_PANEL_PREFIX = "hori-panel";
 const HORI_ACTION_PREFIX = "hori-action";
 const HORI_STATE_PANEL_PREFIX = "hori-state";
 const POWER_PANEL_PREFIX = "power-panel";
+const LLM_PANEL_PREFIX = "llm-panel";
 const POWER_PROFILES = ["economy", "balanced", "expanded", "max"] as const;
-const HORI_PANEL_TABS = ["main", "persona", "behavior", "memory", "channels", "system"] as const;
+const HORI_PANEL_TABS = ["main", "persona", "behavior", "memory", "channels", "llm", "system"] as const;
 type HoriPanelTab = (typeof HORI_PANEL_TABS)[number];
 type HoriPanelAction = {
   id: string;
@@ -49,6 +59,7 @@ const TAB_EMOJI: Record<HoriPanelTab, string> = {
   behavior: "⚡",
   memory: "🧠",
   channels: "📡",
+  llm: "🤖",
   system: "⚙️"
 };
 
@@ -58,6 +69,7 @@ const TAB_COLOR: Record<HoriPanelTab, number> = {
   behavior: 0xFEE75C,
   memory: 0x57F287,
   channels: 0x5865F2,
+  llm: 0x57F287,
   system: 0xEB459E
 };
 
@@ -1223,6 +1235,11 @@ async function routeStringSelectInteraction(
   interaction: StringSelectMenuInteraction,
   isOwner: boolean
 ) {
+  if (interaction.customId.startsWith(`${LLM_PANEL_PREFIX}:`)) {
+    await handleLlmPanelSelect(runtime, interaction, isOwner);
+    return;
+  }
+
   if (interaction.customId === `${HORI_STATE_PANEL_PREFIX}:tab`) {
     if (!interaction.guildId) {
       await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
@@ -1247,6 +1264,54 @@ async function routeStringSelectInteraction(
 
     const tab = parseHoriPanelTab(interaction.values[0]) ?? "main";
     await interaction.update(buildHoriPanelResponse(tab, isOwner, hasManageGuild(interaction)));
+  }
+}
+
+async function handleLlmPanelSelect(
+  runtime: BotRuntime,
+  interaction: StringSelectMenuInteraction,
+  isOwner: boolean
+) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (!isOwner) {
+    await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const [, action, selectedSlot] = interaction.customId.split(":");
+  const value = interaction.values[0];
+
+  if (action === "preset") {
+    if (!isModelRoutingPresetName(value)) {
+      await interaction.reply({ content: "Неизвестный LLM preset.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await runtime.runtimeConfig.setModelPreset(value, interaction.user.id);
+    await interaction.update(await buildLlmPanelResponse(runtime, "chat", interaction.guildId));
+    return;
+  }
+
+  if (action === "slot") {
+    const slot = isModelRoutingSlot(value) ? value : "chat";
+    await interaction.update(await buildLlmPanelResponse(runtime, slot, interaction.guildId));
+    return;
+  }
+
+  if (action === "model") {
+    const slot = isModelRoutingSlot(selectedSlot ?? "") ? selectedSlot as ModelRoutingSlot : null;
+
+    if (!slot || !isModelRoutingModelId(value)) {
+      await interaction.reply({ content: "Неизвестный LLM slot/model.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await runtime.runtimeConfig.setModelSlot(slot, value, interaction.user.id);
+    await interaction.update(await buildLlmPanelResponse(runtime, slot, interaction.guildId));
   }
 }
 
@@ -1567,6 +1632,11 @@ async function routeButtonInteraction(runtime: BotRuntime, interaction: ButtonIn
     return;
   }
 
+  if (interaction.customId.startsWith(`${LLM_PANEL_PREFIX}:`)) {
+    await handleLlmPanelButton(runtime, interaction, isOwner);
+    return;
+  }
+
   if (!interaction.customId.startsWith(`${POWER_PANEL_PREFIX}:`)) {
     return;
   }
@@ -1587,6 +1657,35 @@ async function routeButtonInteraction(runtime: BotRuntime, interaction: ButtonIn
   const status = await runtime.runtimeConfig.getPowerProfileStatus();
 
   await interaction.update(buildPowerPanelResponse(content, status.activeProfile));
+}
+
+async function handleLlmPanelButton(runtime: BotRuntime, interaction: ButtonInteraction, isOwner: boolean) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (!isOwner) {
+    await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const [, action, selectedSlot] = interaction.customId.split(":");
+  const slot = isModelRoutingSlot(selectedSlot ?? "") ? selectedSlot as ModelRoutingSlot : "chat";
+
+  if (action === "reset-slot") {
+    await runtime.runtimeConfig.resetModelSlot(slot, interaction.user.id);
+    await interaction.update(await buildLlmPanelResponse(runtime, slot, interaction.guildId));
+    return;
+  }
+
+  if (action === "reset-all") {
+    await runtime.runtimeConfig.resetModelRouting(interaction.user.id);
+    await interaction.update(await buildLlmPanelResponse(runtime, slot, interaction.guildId));
+    return;
+  }
+
+  await interaction.reply({ content: "Неизвестная кнопка LLM panel.", flags: MessageFlags.Ephemeral });
 }
 
 async function handleHoriPanelAction(
@@ -1619,6 +1718,11 @@ async function handleHoriPanelAction(
 
   if (action === "panel_home") {
     await interaction.update(buildHoriPanelResponse("main", isOwner, isModerator));
+    return;
+  }
+
+  if (action === "llm_panel") {
+    await interaction.update(await buildLlmPanelResponse(runtime, "chat", interaction.guildId));
     return;
   }
 
@@ -1926,6 +2030,7 @@ function buildHoriPanelEmbed(tab: HoriPanelTab, isOwner: boolean, isModerator: b
     behavior: "Активность бота: чтение чата, auto-interject, reply queue, natural message splitting, media reactions.",
     memory: "Всё про память: Active Memory, hybrid recall, memory-build, topic engine, album, reflection, профили людей и отношения.",
     channels: "Каналы: policy, mute, reply length override, topic tags, поиск, summary. Web search и link understanding тоже тут.",
+    llm: "LLM routing: preset, модели по функциям, legacy fallback и диагностика токенов без россыпи env.",
     system: "Система: State panel, Power profile, lockdown, AI URL, debug trace, feature flags, context/safety diagnostics и эксперименты."
   };
 
@@ -2139,8 +2244,16 @@ function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boo
       featureAction("link_understanding_enabled", true, "Links ON", { emoji: "✅", modOnly: true }),
       featureAction("link_understanding_enabled", false, "Links OFF", { emoji: "❌", modOnly: true })
     ],
+    llm: [
+      { id: "llm_panel", label: "LLM models", emoji: "🤖", ownerOnly: true, style: ButtonStyle.Primary },
+      { id: "state_brain", label: "Brain", emoji: "🧠", ownerOnly: true },
+      { id: "state_tokens", label: "Tokens", emoji: "🪙", ownerOnly: true },
+      { id: "debug_latest", label: "Latest trace", emoji: "🔬", ownerOnly: true },
+      { id: "power_panel", label: "Power", emoji: "⚡", ownerOnly: true }
+    ],
     system: [
       { id: "state_panel", label: "State", emoji: "📡", ownerOnly: true, style: ButtonStyle.Primary },
+      { id: "llm_panel", label: "LLM models", emoji: "🤖", ownerOnly: true, style: ButtonStyle.Primary },
       { id: "power_panel", label: "Power", emoji: "⚡", ownerOnly: true, style: ButtonStyle.Primary },
       { id: "ai_url_modal", label: "AI URL", emoji: "🔗", ownerOnly: true },
       { id: "lockdown_status", label: "Lockdown?", emoji: "🔒", ownerOnly: true },
@@ -2187,6 +2300,7 @@ function horiTabLabel(tab: HoriPanelTab) {
     behavior: "⚡ Поведение",
     memory: "🧠 Память и люди",
     channels: "📡 Каналы и поиск",
+    llm: "🤖 LLM",
     system: "⚙️ Система"
   };
   return labels[tab];

@@ -1,5 +1,6 @@
 import { AnalyticsQueryService } from "@hori/analytics";
 import { assertEnvForRole, loadEnv } from "@hori/config";
+import { RuntimeConfigService } from "@hori/core";
 import { EmbeddingAdapter, ModelRouter, OllamaClient, OpenAIClient } from "@hori/llm";
 import type { LlmClient } from "@hori/llm";
 import { ProfileService, RetrievalService, SummaryService, TopicService } from "@hori/memory";
@@ -37,6 +38,7 @@ export interface WorkerRuntime {
   retrievalService: RetrievalService;
   topicService: TopicService;
   searchCache: SearchCacheService;
+  runtimeConfig: RuntimeConfigService;
   llmClient: LlmClient;
   modelRouter: ModelRouter;
   embeddingAdapter: EmbeddingAdapter;
@@ -81,6 +83,7 @@ async function main() {
     similarityThreshold: env.TOPIC_SIM_THRESHOLD
   });
   const searchCache = new SearchCacheService(prisma, redis);
+  const runtimeConfig = new RuntimeConfigService(prisma, env);
 
   const llmProvider = (env as unknown as Record<string, unknown>).LLM_PROVIDER as string;
   let llmClient: LlmClient;
@@ -108,6 +111,7 @@ async function main() {
     retrievalService,
     topicService,
     searchCache,
+    runtimeConfig,
     llmClient,
     modelRouter,
     embeddingAdapter

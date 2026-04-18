@@ -5,5 +5,6 @@ export * from "./client/openai-client";
 export * from "./prompts/prompt-templates";
 export * from "./prompts/tool-definitions";
 export * from "./router/model-profiles";
+export * from "./router/model-routing";
 export * from "./router/model-router";
 export * from "./tools/tool-orchestrator";

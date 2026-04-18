@@ -1,4 +1,19 @@
 import { buildFeatureFlags, defaultPersonaSettings, POWER_PROFILE_PRESETS, type AppEnv, type PowerProfileName } from "@hori/config";
+import {
+  defaultModelRoutingPresetForEnv,
+  isModelRoutingModelId,
+  isModelRoutingPresetName,
+  isModelRoutingSlot,
+  MODEL_ROUTING_SETTING_KEY,
+  parseStoredModelRouting,
+  resolveModelRouting,
+  sanitizeOverrides,
+  serializeModelRouting,
+  type ModelRoutingModelId,
+  type ModelRoutingPresetName,
+  type ModelRoutingSlot,
+  type ResolvedModelRouting
+} from "@hori/llm";
 import type { AppPrismaClient, FeatureFlags, PersonaSettings } from "@hori/shared";
 
 export const FEATURE_KEY_MAP = {
@@ -58,6 +73,7 @@ export interface EffectiveChannelPolicy {
 
 export interface EffectiveRuntimeSettings {
   powerProfile: PowerProfileName;
+  modelRouting: ResolvedModelRouting;
   llmMaxContextMessages: number;
   contextMaxChars: number;
   llmReplyMaxTokens: number;
@@ -77,6 +93,11 @@ export interface PowerProfileStatus {
   updatedBy?: string | null;
   updatedAt?: Date | null;
 }
+
+export type ModelRoutingStatus = ResolvedModelRouting & {
+  updatedBy?: string | null;
+  updatedAt?: Date | null;
+};
 
 export interface EffectiveRoutingConfig {
   guildSettings: PersonaSettings;
@@ -195,6 +216,68 @@ export class RuntimeConfigService {
     return this.getPowerProfileStatus();
   }
 
+  async getModelRoutingStatus(): Promise<ModelRoutingStatus> {
+    const row = await this.getRuntimeSettingRow(MODEL_ROUTING_SETTING_KEY);
+    const routing = resolveModelRouting(this.env, row?.value);
+
+    return {
+      ...routing,
+      updatedBy: row?.updatedBy,
+      updatedAt: row?.updatedAt
+    };
+  }
+
+  async setModelPreset(preset: ModelRoutingPresetName, updatedBy?: string) {
+    if (!isModelRoutingPresetName(preset)) {
+      throw new Error(`Unsupported model preset: ${preset}`);
+    }
+
+    await this.writeModelRouting(serializeModelRouting(preset), updatedBy);
+    return this.getModelRoutingStatus();
+  }
+
+  async setModelSlot(slot: ModelRoutingSlot, model: ModelRoutingModelId, updatedBy?: string) {
+    if (!isModelRoutingSlot(slot)) {
+      throw new Error(`Unsupported model slot: ${slot}`);
+    }
+
+    if (!isModelRoutingModelId(model)) {
+      throw new Error(`Unsupported model id: ${model}`);
+    }
+
+    const stored = await this.getStoredModelRoutingValue();
+    const preset = stored?.preset ?? defaultModelRoutingPresetForEnv(this.env);
+    const overrides = {
+      ...(stored?.overrides ?? {}),
+      [slot]: model
+    };
+
+    await this.writeModelRouting(serializeModelRouting(preset, overrides), updatedBy);
+    return this.getModelRoutingStatus();
+  }
+
+  async resetModelSlot(slot: ModelRoutingSlot, updatedBy?: string) {
+    if (!isModelRoutingSlot(slot)) {
+      throw new Error(`Unsupported model slot: ${slot}`);
+    }
+
+    const stored = await this.getStoredModelRoutingValue();
+    const preset = stored?.preset ?? defaultModelRoutingPresetForEnv(this.env);
+    const overrides = { ...(stored?.overrides ?? {}) };
+    delete overrides[slot];
+
+    await this.writeModelRouting(serializeModelRouting(preset, overrides), updatedBy);
+    return this.getModelRoutingStatus();
+  }
+
+  async resetModelRouting(updatedBy?: string) {
+    const stored = await this.getStoredModelRoutingValue();
+    const preset = stored?.preset ?? defaultModelRoutingPresetForEnv(this.env);
+
+    await this.writeModelRouting(serializeModelRouting(preset), updatedBy);
+    return this.getModelRoutingStatus();
+  }
+
   async getGuildSettings(guildId: string): Promise<PersonaSettings> {
     const guild = await this.prisma.guild.findUnique({
       where: { id: guildId }
@@ -274,14 +357,16 @@ export class RuntimeConfigService {
     const rows = await this.prisma.runtimeSetting.findMany({
       where: {
         key: {
-          in: [POWER_PROFILE_SETTING_KEY, ...Object.keys(RUNTIME_OVERRIDE_DEFINITIONS)]
+          in: [POWER_PROFILE_SETTING_KEY, MODEL_ROUTING_SETTING_KEY, ...Object.keys(RUNTIME_OVERRIDE_DEFINITIONS)]
         }
       }
     });
 
     const profileRow = rows.find((row) => row.key === POWER_PROFILE_SETTING_KEY);
+    const modelRoutingRow = rows.find((row) => row.key === MODEL_ROUTING_SETTING_KEY);
     const activeProfile = profileRow && isPowerProfileName(profileRow.value) ? profileRow.value : "balanced";
     const effective = applyPowerProfilePreset(this.buildBaseRuntimeSettings(), activeProfile);
+    effective.modelRouting = resolveModelRouting(this.env, modelRoutingRow?.value);
 
     for (const row of rows) {
       const definition = RUNTIME_OVERRIDE_DEFINITIONS[row.key];
@@ -308,6 +393,7 @@ export class RuntimeConfigService {
   private buildBaseRuntimeSettings(): EffectiveRuntimeSettings {
     return {
       powerProfile: "balanced",
+      modelRouting: resolveModelRouting(this.env),
       llmMaxContextMessages: this.env.LLM_MAX_CONTEXT_MESSAGES,
       contextMaxChars: this.env.CONTEXT_V2_MAX_CHARS,
       llmReplyMaxTokens: this.env.LLM_REPLY_MAX_TOKENS,
@@ -319,6 +405,48 @@ export class RuntimeConfigService {
       mediaAutoMinConfidence: this.env.MEDIA_AUTO_MIN_CONFIDENCE,
       mediaAutoMinIntensity: this.env.MEDIA_AUTO_MIN_INTENSITY
     };
+  }
+
+  private async getRuntimeSettingRow(key: string) {
+    const rows = await this.prisma.runtimeSetting.findMany({
+      where: {
+        key: {
+          in: [key]
+        }
+      }
+    });
+
+    return rows[0] ?? null;
+  }
+
+  private async getStoredModelRoutingValue() {
+    const row = await this.getRuntimeSettingRow(MODEL_ROUTING_SETTING_KEY);
+    const parsed = parseStoredModelRouting(row?.value);
+
+    return parsed.value
+      ? {
+          preset: parsed.value.preset,
+          overrides: sanitizeOverrides(parsed.value.overrides)
+        }
+      : null;
+  }
+
+  private async writeModelRouting(value: string, updatedBy?: string) {
+    await this.prisma.runtimeSetting.upsert({
+      where: { key: MODEL_ROUTING_SETTING_KEY },
+      update: {
+        value,
+        updatedBy: updatedBy ?? null,
+        updatedAt: new Date()
+      },
+      create: {
+        key: MODEL_ROUTING_SETTING_KEY,
+        value,
+        updatedBy: updatedBy ?? null
+      }
+    });
+
+    this.invalidate();
   }
 }
 

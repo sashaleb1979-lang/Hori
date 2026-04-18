@@ -18,6 +18,7 @@ export function createSummaryJob(runtime: WorkerRuntime) {
       return { skipped: true, reason: "not enough messages" };
     }
 
+    const runtimeSettings = await runtime.runtimeConfig.getRuntimeSettings();
     const prompt = buildSummaryPrompt(
       messages.map((message) => `[${message.user.globalName || message.user.username || message.userId}] ${message.content}`).join("\n"),
       "Сделай краткую и длинную сводку. В первой строке коротко, дальше подробнее."
@@ -27,7 +28,7 @@ export function createSummaryJob(runtime: WorkerRuntime) {
 
     try {
       response = await runtime.llmClient.chat({
-        model: runtime.env.OLLAMA_SMART_MODEL,
+        model: runtime.modelRouter.pickModel("summary", runtimeSettings.modelRouting),
         messages: prompt,
         temperature: profile.temperature,
         topP: profile.topP,

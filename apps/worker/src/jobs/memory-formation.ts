@@ -1,6 +1,6 @@
 import type { Job } from "bullmq";
 
-import { resolveBestInstalledChatModel, ModelRouter } from "@hori/llm";
+import { resolveBestInstalledChatModel } from "@hori/llm";
 import { MemoryFormationService, type FormationMessage, type MemoryFormationResult } from "@hori/memory";
 import { asErrorMessage, type MemoryFormationJobPayload } from "@hori/shared";
 
@@ -54,14 +54,14 @@ export function createMemoryFormationJob(runtime: WorkerRuntime) {
     }
 
     const isOpenAI = (runtime.env as unknown as Record<string, unknown>).LLM_PROVIDER === "openai";
+    const runtimeSettings = await runtime.runtimeConfig.getRuntimeSettings();
     let formationEnv: typeof runtime.env;
     let bestModelName: string;
     let bestModelReason: string;
 
     if (isOpenAI) {
-      const oaiEnv = runtime.env as unknown as Record<string, unknown>;
-      bestModelName = (oaiEnv.OPENAI_SMART_MODEL as string) ?? "gpt-4o-mini";
-      bestModelReason = "openai provider";
+      bestModelName = runtime.modelRouter.pickModelForSlot("memory", runtimeSettings.modelRouting);
+      bestModelReason = `openai ${runtimeSettings.modelRouting.preset} memory slot`;
       formationEnv = {
         ...runtime.env,
         OLLAMA_FAST_MODEL: bestModelName,

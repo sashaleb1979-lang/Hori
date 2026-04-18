@@ -3,7 +3,7 @@ import type { AppLogger, AppPrismaClient, BotReplyPayload, BotTrace, LlmCallTrac
 import { asErrorMessage, botLatencyHistogram, botRepliesCounter, buildMemoryKey, clamp, normalizeWhitespace } from "@hori/shared";
 
 import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet, getModelProfile } from "@hori/llm";
-import type { LlmChatResponse, LlmClient } from "@hori/llm";
+import type { LlmChatResponse, LlmClient, ModelRoutingSlot } from "@hori/llm";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
 import { ContextService, ReflectionService, RelationshipService, RetrievalService } from "@hori/memory";
 import { BraveSearchClient, buildSourceDigest, extractLinksFromMessage, fetchWebPage } from "@hori/search";
@@ -88,11 +88,21 @@ export class ChatOrchestrator {
     maxTokens?: number,
     overrides: { temperature?: number; topP?: number } = {}
   ) {
-    const profile = this.deps.modelRouter.pickProfile(intent);
+    return this.getLlmSettingsForSlot(this.deps.modelRouter.pickSlot(intent), intent, runtimeSettings, maxTokens, overrides);
+  }
+
+  private getLlmSettingsForSlot(
+    slot: ModelRoutingSlot,
+    profileIntent: Parameters<ModelRouter["pickProfile"]>[0],
+    runtimeSettings: EffectiveRuntimeSettings,
+    maxTokens?: number,
+    overrides: { temperature?: number; topP?: number } = {}
+  ) {
+    const profile = this.deps.modelRouter.pickProfile(profileIntent);
     const cappedMaxTokens = Math.min(maxTokens ?? runtimeSettings.llmReplyMaxTokens, profile.maxTokens, runtimeSettings.llmReplyMaxTokens);
 
     return {
-      model: this.deps.modelRouter.pickModel(intent),
+      model: this.deps.modelRouter.pickModelForSlot(slot, runtimeSettings.modelRouting),
       temperature: overrides.temperature ?? profile.temperature,
       topP: overrides.topP ?? profile.topP,
       maxTokens: cappedMaxTokens,
@@ -374,7 +384,7 @@ export class ChatOrchestrator {
           break;
       }
     } catch (error) {
-      this.deps.logger.error({ error, intent: intent.intent, model: this.deps.modelRouter.pickModel(intent.intent) }, "llm call failed, sending fallback");
+        this.deps.logger.error({ error, intent: intent.intent, model: this.deps.modelRouter.pickModel(intent.intent, runtimeSettings.modelRouting) }, "llm call failed, sending fallback");
       reply = "Сейчас не могу ответить — мозги перегрелись. Попробуй чуть позже.";
       trace.routeReason = "llm_unavailable";
     }
@@ -550,7 +560,7 @@ export class ChatOrchestrator {
     llmCalls?: LlmCallTrace[]
   ) {
     try {
-      const llm = this.getLlmSettings("chat", runtimeSettings, 96, { temperature: 0 });
+      const llm = this.getLlmSettingsForSlot("classifier", "chat", runtimeSettings, 96, { temperature: 0 });
       const messages = buildIntentClassifierPrompt(cleanedContent);
       const response = await this.deps.llmClient.chat({
         model: llm.model,
@@ -1064,7 +1074,7 @@ export class ChatOrchestrator {
     if (contour === "C") {
       const profile = getModelProfile("smart");
       return {
-        model: this.deps.modelRouter.pickModel("summary"),
+        model: this.deps.modelRouter.pickModelForSlot("chat", runtimeSettings.modelRouting),
         temperature: profile.temperature,
         topP: profile.topP,
         maxTokens: Math.min(maxTokens ?? profile.maxTokens, profile.maxTokens, runtimeSettings.llmReplyMaxTokens),
@@ -1078,7 +1088,7 @@ export class ChatOrchestrator {
     const contourCap = contour === "B" ? 120 : 48;
 
     return {
-      model: this.deps.modelRouter.pickModel("chat"),
+      model: this.deps.modelRouter.pickModelForSlot("chat", runtimeSettings.modelRouting),
       temperature: profile.temperature,
       topP: profile.topP,
       maxTokens: Math.min(maxTokens ?? profile.maxTokens, contourCap, runtimeSettings.llmReplyMaxTokens),
@@ -1318,7 +1328,7 @@ export class ChatOrchestrator {
       promptTokens,
       completionTokens,
       totalTokens: response.usage?.totalTokens ?? promptTokens + completionTokens,
-      source: response.usage?.promptTokens !== undefined || response.usage?.completionTokens !== undefined ? "ollama" : "estimated",
+      source: response.usage?.promptTokens !== undefined || response.usage?.completionTokens !== undefined ? "reported" : "estimated",
       durationMs: response.usage?.totalDurationMs
     });
   }
@@ -1488,7 +1498,7 @@ function summarizeLlmTokenTrace(llmCalls?: LlmCallTrace[]) {
 
   const promptTokens = llmCalls.reduce((sum, call) => sum + call.promptTokens, 0);
   const completionTokens = llmCalls.reduce((sum, call) => sum + call.completionTokens, 0);
-  const tokenSource = llmCalls.every((call) => call.source === "ollama") ? "ollama" : "estimated";
+  const tokenSource = llmCalls.every((call) => call.source === "reported") ? "reported" : "estimated";
 
   return {
     promptTokens,

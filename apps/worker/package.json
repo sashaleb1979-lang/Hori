@@ -12,6 +12,7 @@
   "dependencies": {
     "@hori/analytics": "workspace:*",
     "@hori/config": "workspace:*",
+    "@hori/core": "workspace:*",
     "@hori/llm": "workspace:*",
     "@hori/memory": "workspace:*",
     "@hori/search": "workspace:*",

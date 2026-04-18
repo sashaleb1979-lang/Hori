@@ -374,7 +374,7 @@ export interface LlmCallTrace {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
-  source: "ollama" | "estimated";
+  source: "reported" | "estimated";
   durationMs?: number;
 }
 
