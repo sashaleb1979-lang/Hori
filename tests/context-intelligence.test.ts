@@ -128,6 +128,9 @@ describe("context intelligence", () => {
     });
 
     expect(result.trace.version).toBe("v2");
+    if (result.trace.version !== "v2") {
+      throw new Error("expected v2 context trace");
+    }
     expect(result.trace.truncation?.maxChars).toBe(defaultRuntimeTuning.CONTEXT_V2_MAX_CHARS);
   });
 
@@ -238,6 +241,7 @@ describe("context intelligence", () => {
   it("drops duplicate queue work after source message is already done", async () => {
     const prisma = {
       replyQueueItem: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         findFirst: vi.fn().mockResolvedValue({ id: "queue-1", status: "done" }),
         create: vi.fn()
       }

@@ -144,34 +144,52 @@ function createMemoryFormationJob(runtime) {
       await markRunFailed(runtime, job.data.runId, "channel scope requires channelId");
       return { skipped: true, reason: "channelId required" };
     }
-    const bestModel = await (0, import_llm.resolveBestInstalledChatModel)(
-      runtime.env.OLLAMA_BASE_URL,
-      runtime.env.OLLAMA_SMART_MODEL,
-      runtime.logger
-    );
-    const formationEnv = {
-      ...runtime.env,
-      OLLAMA_FAST_MODEL: bestModel.model,
-      OLLAMA_SMART_MODEL: bestModel.model
-    };
+    const isOpenAI = runtime.env.LLM_PROVIDER === "openai";
+    let formationEnv;
+    let bestModelName;
+    let bestModelReason;
+    if (isOpenAI) {
+      const oaiEnv = runtime.env;
+      bestModelName = oaiEnv.OPENAI_SMART_MODEL ?? "gpt-4o-mini";
+      bestModelReason = "openai provider";
+      formationEnv = {
+        ...runtime.env,
+        OLLAMA_FAST_MODEL: bestModelName,
+        OLLAMA_SMART_MODEL: bestModelName
+      };
+    } else {
+      const bestModel = await (0, import_llm.resolveBestInstalledChatModel)(
+        runtime.env.OLLAMA_BASE_URL,
+        runtime.env.OLLAMA_SMART_MODEL,
+        runtime.logger
+      );
+      bestModelName = bestModel.model;
+      bestModelReason = bestModel.reason;
+      formationEnv = {
+        ...runtime.env,
+        OLLAMA_FAST_MODEL: bestModel.model,
+        OLLAMA_SMART_MODEL: bestModel.model
+      };
+    }
     const formationService = new import_memory.MemoryFormationService(
       runtime.prisma,
       runtime.retrievalService,
       runtime.llmClient,
-      formationEnv
+      formationEnv,
+      runtime.modelRouter.pickEmbedModel()
     );
     await runtime.prisma.memoryBuildRun.update({
       where: { id: job.data.runId },
       data: {
         status: "running",
         startedAt: /* @__PURE__ */ new Date(),
-        bestModel: bestModel.model,
+        bestModel: bestModelName,
         progressJson: {
           phase: "loading_messages",
           processedChunks: 0,
           totalChunks: 0,
-          model: bestModel.model,
-          modelReason: bestModel.reason
+          model: bestModelName,
+          modelReason: bestModelReason
         }
       }
     });
@@ -187,7 +205,7 @@ function createMemoryFormationJob(runtime) {
             resultJson: {
               skipped: true,
               reason: "no messages in database for selected scope",
-              model: bestModel.model
+              model: bestModelName
             }
           }
         });
@@ -234,8 +252,8 @@ function createMemoryFormationJob(runtime) {
           totals,
           latestChannelId: channelId,
           latestUserId: dominant.userId,
-          model: bestModel.model,
-          modelReason: bestModel.reason
+          model: bestModelName,
+          modelReason: bestModelReason
         };
         await job.updateProgress(progress);
         await runtime.prisma.memoryBuildRun.update({
@@ -250,8 +268,8 @@ function createMemoryFormationJob(runtime) {
         chunkCount: chunks.length,
         totals,
         sampleFacts,
-        model: bestModel.model,
-        modelReason: bestModel.reason
+        model: bestModelName,
+        modelReason: bestModelReason
       };
       await runtime.prisma.memoryBuildRun.update({
         where: { id: job.data.runId },
@@ -366,7 +384,7 @@ function createProfileJob(runtime) {
     let parsed;
     try {
       const response = await runtime.llmClient.chat({
-        model: runtime.env.OLLAMA_SMART_MODEL,
+        model: runtime.modelRouter.pickModel("profile"),
         messages: prompt,
         format: "json",
         temperature: Math.min(profile.temperature, 0.2),
@@ -402,7 +420,7 @@ function createProfileJob(runtime) {
     const latestChannelId = messages[0]?.channelId;
     if (latestChannelId && messages.length) {
       try {
-        const formationService = new import_memory2.MemoryFormationService(runtime.prisma, runtime.retrievalService, runtime.llmClient, runtime.env);
+        const formationService = new import_memory2.MemoryFormationService(runtime.prisma, runtime.retrievalService, runtime.llmClient, runtime.env, runtime.modelRouter.pickEmbedModel());
         const priorSummaries = await runtime.summaryService.getRecentSummaries(job.data.guildId, latestChannelId, 2);
         await formationService.runFormation({
           guildId: job.data.guildId,
@@ -543,8 +561,17 @@ async function main() {
     similarityThreshold: env.TOPIC_SIM_THRESHOLD
   });
   const searchCache = new import_search.SearchCacheService(prisma, redis);
-  const llmClient = new import_llm4.OllamaClient(env, logger);
-  const embeddingAdapter = new import_llm4.EmbeddingAdapter(llmClient, env);
+  const llmProvider = env.LLM_PROVIDER;
+  let llmClient;
+  if (llmProvider === "openai") {
+    llmClient = new import_llm4.OpenAIClient(env, logger);
+    logger.info("worker LLM provider: OpenAI");
+  } else {
+    llmClient = new import_llm4.OllamaClient(env, logger);
+    logger.info("worker LLM provider: Ollama");
+  }
+  const modelRouter = new import_llm4.ModelRouter(env);
+  const embeddingAdapter = new import_llm4.EmbeddingAdapter(llmClient, modelRouter);
   const runtime = {
     env,
     logger,
@@ -558,6 +585,7 @@ async function main() {
     topicService,
     searchCache,
     llmClient,
+    modelRouter,
     embeddingAdapter
   };
   const workers = [

@@ -1719,7 +1719,7 @@ async function handleHoriPanelAction(
       const state = await getOwnerLockdownState(runtime, true);
       await interaction.update(
         buildHoriPanelDetailResponse(
-          "owner",
+          "system",
           isOwner,
           isModerator,
           "Owner Lockdown",
@@ -1734,7 +1734,7 @@ async function handleHoriPanelAction(
     const cleared = enabled ? await runtime.replyQueue.clearAll() : { count: 0 };
     await interaction.update(
       buildHoriPanelDetailResponse(
-        "owner",
+        "system",
         isOwner,
         isModerator,
         enabled ? "Lockdown включён" : "Lockdown выключен",

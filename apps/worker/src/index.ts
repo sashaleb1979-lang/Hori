@@ -82,7 +82,7 @@ async function main() {
   });
   const searchCache = new SearchCacheService(prisma, redis);
 
-  const llmProvider = (env as Record<string, unknown>).LLM_PROVIDER as string;
+  const llmProvider = (env as unknown as Record<string, unknown>).LLM_PROVIDER as string;
   let llmClient: LlmClient;
 
   if (llmProvider === "openai") {

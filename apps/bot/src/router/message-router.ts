@@ -326,73 +326,83 @@ async function processInvocation(
     queueItemId = queueTrace.itemId ?? null;
   }
 
-  const result = await runtime.orchestrator.handleMessage(envelope, routingConfig, queueTrace);
+  try {
+    const result = await runtime.orchestrator.handleMessage(envelope, routingConfig, queueTrace);
 
-  const replyToSend = prepareReplyForDelivery(result.reply);
-  if (replyToSend !== result.reply) {
-    runtime.logger.warn(
-      {
-        messageId: envelope.messageId,
-        channelId: envelope.channelId,
-        guildId: envelope.guildId,
-        intent: result.trace.intent,
-        hasOriginalReply: Boolean(result.reply),
-        originalReplyType: typeof result.reply
-      },
-      "orchestrator returned empty reply, using fallback"
-    );
-  }
+    if (!result.trace.responded) {
+      return;
+    }
 
-  const replyText = typeof replyToSend === "string" ? replyToSend : replyToSend.text;
-  const hasMedia = typeof replyToSend !== "string" && Boolean(replyToSend.media);
-  const microSplitChunks = result.trace.microReaction?.splitChunks;
-  const splitPlan = hasMedia
-    ? null
-    : microSplitChunks?.length
-      ? {
-          chunks: microSplitChunks,
-          delayMs: 650,
-          reason: "micro_reaction"
-        }
-      : planNaturalMessageSplit({
-        text: replyText,
-        enabled: routingConfig.featureFlags.naturalMessageSplittingEnabled,
-        intent: result.trace.intent,
-        explicitInvocation: envelope.explicitInvocation,
-        triggerSource: result.trace.triggerSource,
-        messageKind: result.trace.behavior?.messageKind,
-        nowMs: Date.now(),
-        lastSplitAtMs: naturalSplitCooldownByChannel.get(message.channelId),
-        cooldownMs: runtime.env.NATURAL_SPLIT_COOLDOWN_SEC * 1000,
-        chance: runtime.env.NATURAL_SPLIT_CHANCE,
-        random: Math.random()
-      });
+    const replyToSend = prepareReplyForDelivery(result.reply);
+    if (replyToSend !== result.reply) {
+      runtime.logger.warn(
+        {
+          messageId: envelope.messageId,
+          channelId: envelope.channelId,
+          guildId: envelope.guildId,
+          intent: result.trace.intent,
+          hasOriginalReply: Boolean(result.reply),
+          originalReplyType: typeof result.reply
+        },
+        "orchestrator returned empty reply, using fallback"
+      );
+    }
 
-  if (splitPlan) {
-    naturalSplitCooldownByChannel.set(message.channelId, Date.now());
-  }
+    const replyText = typeof replyToSend === "string" ? replyToSend : replyToSend.text;
+    const hasMedia = typeof replyToSend !== "string" && Boolean(replyToSend.media);
+    const microSplitChunks = result.trace.microReaction?.splitChunks;
+    const splitPlan = hasMedia
+      ? null
+      : microSplitChunks?.length
+        ? {
+            chunks: microSplitChunks,
+            delayMs: 650,
+            reason: "micro_reaction"
+          }
+        : planNaturalMessageSplit({
+          text: replyText,
+          enabled: routingConfig.featureFlags.naturalMessageSplittingEnabled,
+          intent: result.trace.intent,
+          explicitInvocation: envelope.explicitInvocation,
+          triggerSource: result.trace.triggerSource,
+          messageKind: result.trace.behavior?.messageKind,
+          nowMs: Date.now(),
+          lastSplitAtMs: naturalSplitCooldownByChannel.get(message.channelId),
+          cooldownMs: runtime.env.NATURAL_SPLIT_COOLDOWN_SEC * 1000,
+          chance: runtime.env.NATURAL_SPLIT_CHANCE,
+          random: Math.random()
+        });
 
-  await sendReply(message, replyToSend, {
-    naturalChunks: splitPlan?.chunks,
-    naturalDelayMs: splitPlan?.delayMs
-  });
+    if (splitPlan) {
+      naturalSplitCooldownByChannel.set(message.channelId, Date.now());
+    }
 
-  if (queueItemId) {
-    await runtime.replyQueue.complete(queueItemId);
-    await drainReplyQueue(runtime, message);
-  }
-
-  if (autoInterject) {
-    await runtime.prisma.interjectionLog.create({
-      data: {
-        guildId: envelope.guildId,
-        channelId: envelope.channelId,
-        userId: envelope.userId,
-        reason: "auto_interject",
-        confidence: 0.8,
-        outcome: "sent"
-      }
+    await sendReply(message, replyToSend, {
+      naturalChunks: splitPlan?.chunks,
+      naturalDelayMs: splitPlan?.delayMs
     });
+
+    if (autoInterject) {
+      await runtime.prisma.interjectionLog.create({
+        data: {
+          guildId: envelope.guildId,
+          channelId: envelope.channelId,
+          userId: envelope.userId,
+          reason: "auto_interject",
+          confidence: 0.8,
+          outcome: "sent"
+        }
+      });
+    }
+  } finally {
+    if (queueItemId) {
+      try {
+        await runtime.replyQueue.complete(queueItemId);
+        await drainReplyQueue(runtime, message);
+      } catch (error) {
+        runtime.logger.warn({ error, queueItemId }, "reply queue cleanup failed");
+      }
+    }
   }
 }
 

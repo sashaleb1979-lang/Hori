@@ -34,6 +34,8 @@ export class ReplyQueueService {
     triggerSource?: TriggerSource;
     explicitInvocation: boolean;
   }): Promise<ReplyQueueTrace> {
+    await this.reapExpiredProcessing(input.guildId, input.channelId);
+
     const existing = await this.prisma.replyQueueItem.findFirst({
       where: { sourceMsgId: input.sourceMsgId },
       orderBy: { createdAt: "desc" }
@@ -160,6 +162,8 @@ export class ReplyQueueService {
   }
 
   async nextQueued(guildId: string, channelId: string): Promise<ReplyQueueItemSnapshot | null> {
+    await this.reapExpiredProcessing(guildId, channelId);
+
     const queued = await this.prisma.replyQueueItem.findMany({
       where: {
         guildId,
@@ -208,6 +212,8 @@ export class ReplyQueueService {
   }
 
   async status(guildId: string, channelId?: string | null): Promise<{ queued: number; processing: number; dropped: number }> {
+    await this.reapExpiredProcessing(guildId, channelId);
+
     const where = {
       guildId,
       ...(channelId ? { channelId } : {})
@@ -220,6 +226,21 @@ export class ReplyQueueService {
     ]);
 
     return { queued, processing, dropped };
+  }
+
+  private async reapExpiredProcessing(guildId: string, channelId?: string | null): Promise<void> {
+    await this.prisma.replyQueueItem.updateMany({
+      where: {
+        guildId,
+        ...(channelId ? { channelId } : {}),
+        status: "processing",
+        lockedUntil: { lte: new Date() }
+      },
+      data: {
+        status: "dropped",
+        lockedUntil: null
+      }
+    });
   }
 
   async clear(guildId: string, channelId?: string | null): Promise<{ count: number }> {

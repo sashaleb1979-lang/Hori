@@ -53,13 +53,13 @@ export function createMemoryFormationJob(runtime: WorkerRuntime) {
       return { skipped: true, reason: "channelId required" };
     }
 
-    const isOpenAI = (runtime.env as Record<string, unknown>).LLM_PROVIDER === "openai";
+    const isOpenAI = (runtime.env as unknown as Record<string, unknown>).LLM_PROVIDER === "openai";
     let formationEnv: typeof runtime.env;
     let bestModelName: string;
     let bestModelReason: string;
 
     if (isOpenAI) {
-      const oaiEnv = runtime.env as Record<string, unknown>;
+      const oaiEnv = runtime.env as unknown as Record<string, unknown>;
       bestModelName = (oaiEnv.OPENAI_SMART_MODEL as string) ?? "gpt-4o-mini";
       bestModelReason = "openai provider";
       formationEnv = {
