@@ -99,6 +99,12 @@ describe("ReplyQueueService", () => {
               }
             }
 
+            if (where.createdAt && typeof where.createdAt === "object" && "lte" in (where.createdAt as Record<string, unknown>)) {
+              if (!(row.createdAt instanceof Date) || row.createdAt > ((where.createdAt as { lte: Date }).lte)) {
+                continue;
+              }
+            }
+
             Object.assign(row, args?.data ?? {}, { updatedAt: new Date() });
             count += 1;
           }
@@ -227,6 +233,12 @@ describe("ReplyQueueService", () => {
               }
             }
 
+            if (args.where.createdAt && typeof args.where.createdAt === "object" && "lte" in (args.where.createdAt as Record<string, unknown>)) {
+              if (!(row.createdAt instanceof Date) || row.createdAt > ((args.where.createdAt as { lte: Date }).lte)) {
+                continue;
+              }
+            }
+
             Object.assign(row, args.data, { updatedAt: new Date() });
             count += 1;
           }
@@ -251,6 +263,120 @@ describe("ReplyQueueService", () => {
 
     expect(result.action).toBe("processing");
     expect(rows.find((row) => row.id === "queue-stale")?.status).toBe("dropped");
+    expect(rows.find((row) => row.sourceMsgId === "msg-new")?.status).toBe("processing");
+  });
+
+  it("drops orphaned queued rows before they can keep a channel busy forever", async () => {
+    const rows: Array<Record<string, unknown>> = [
+      {
+        id: "queue-orphaned",
+        guildId: "guild-1",
+        channelId: "channel-1",
+        targetUserId: "user-old",
+        sourceMsgId: "msg-orphaned",
+        priority: 980,
+        status: "queued",
+        lockedUntil: null,
+        createdAt: new Date(Date.now() - 60_000),
+        updatedAt: new Date(Date.now() - 60_000),
+      },
+    ];
+
+    const prisma = {
+      replyQueueItem: {
+        async findFirst(args: { where: Record<string, unknown> }) {
+          const where = args.where;
+          return (
+            rows.find((row) => {
+              if (where.sourceMsgId && row.sourceMsgId !== where.sourceMsgId) {
+                return false;
+              }
+
+              if (where.guildId && row.guildId !== where.guildId) {
+                return false;
+              }
+
+              if (where.channelId && row.channelId !== where.channelId) {
+                return false;
+              }
+
+              if (where.status && row.status !== where.status) {
+                return false;
+              }
+
+              if (where.lockedUntil && typeof where.lockedUntil === "object" && "gt" in (where.lockedUntil as Record<string, unknown>)) {
+                return row.lockedUntil instanceof Date && row.lockedUntil > ((where.lockedUntil as { gt: Date }).gt);
+              }
+
+              return true;
+            }) ?? null
+          ) as Record<string, unknown> | null;
+        },
+        async count(args: { where: { guildId: string; channelId: string; status: { in: string[] } } }) {
+          return rows.filter(
+            (row) =>
+              row.guildId === args.where.guildId &&
+              row.channelId === args.where.channelId &&
+              args.where.status.in.includes(String(row.status))
+          ).length;
+        },
+        async create(args: { data: Record<string, unknown> }) {
+          const row = { id: `queue-${rows.length + 1}`, createdAt: new Date(), updatedAt: new Date(), ...args.data };
+          rows.push(row);
+          return row;
+        },
+        async updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }) {
+          let count = 0;
+
+          for (const row of rows) {
+            if (args.where.guildId && row.guildId !== args.where.guildId) {
+              continue;
+            }
+
+            if (args.where.channelId && row.channelId !== args.where.channelId) {
+              continue;
+            }
+
+            if (args.where.status && row.status !== args.where.status) {
+              continue;
+            }
+
+            if (args.where.lockedUntil && typeof args.where.lockedUntil === "object" && "lte" in (args.where.lockedUntil as Record<string, unknown>)) {
+              if (!(row.lockedUntil instanceof Date) || row.lockedUntil > ((args.where.lockedUntil as { lte: Date }).lte)) {
+                continue;
+              }
+            }
+
+            if (args.where.createdAt && typeof args.where.createdAt === "object" && "lte" in (args.where.createdAt as Record<string, unknown>)) {
+              if (!(row.createdAt instanceof Date) || row.createdAt > ((args.where.createdAt as { lte: Date }).lte)) {
+                continue;
+              }
+            }
+
+            Object.assign(row, args.data, { updatedAt: new Date() });
+            count += 1;
+          }
+
+          return { count };
+        },
+      },
+    } as unknown as AppPrismaClient;
+
+    const service = new ReplyQueueService(prisma, 45);
+    const result = await service.claimOrQueue({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      sourceMsgId: "msg-new",
+      targetUserId: "user-new",
+      messageKind: "direct_mention",
+      mentionCount: 1,
+      createdAt: new Date(),
+      triggerSource: "mention",
+      explicitInvocation: true,
+    });
+
+    expect(result.action).toBe("processing");
+    expect(rows.find((row) => row.id === "queue-orphaned")?.status).toBe("dropped");
     expect(rows.find((row) => row.sourceMsgId === "msg-new")?.status).toBe("processing");
   });
 });

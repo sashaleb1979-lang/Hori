@@ -34,7 +34,9 @@ export class ReplyQueueService {
     triggerSource?: TriggerSource;
     explicitInvocation: boolean;
   }): Promise<ReplyQueueTrace> {
-    await this.reapExpiredProcessing(input.guildId, input.channelId);
+    const now = new Date();
+    await this.reapExpiredProcessing(input.guildId, input.channelId, now);
+    await this.dropOrphanedQueued(input.guildId, input.channelId, now);
 
     const existing = await this.prisma.replyQueueItem.findFirst({
       where: { sourceMsgId: input.sourceMsgId },
@@ -212,7 +214,9 @@ export class ReplyQueueService {
   }
 
   async status(guildId: string, channelId?: string | null): Promise<{ queued: number; processing: number; dropped: number }> {
-    await this.reapExpiredProcessing(guildId, channelId);
+    const now = new Date();
+    await this.reapExpiredProcessing(guildId, channelId, now);
+    await this.dropOrphanedQueued(guildId, channelId, now);
 
     const where = {
       guildId,
@@ -228,13 +232,42 @@ export class ReplyQueueService {
     return { queued, processing, dropped };
   }
 
-  private async reapExpiredProcessing(guildId: string, channelId?: string | null): Promise<void> {
+  private async reapExpiredProcessing(guildId: string, channelId?: string | null, now = new Date()): Promise<void> {
     await this.prisma.replyQueueItem.updateMany({
       where: {
         guildId,
         ...(channelId ? { channelId } : {}),
         status: "processing",
-        lockedUntil: { lte: new Date() }
+        lockedUntil: { lte: now }
+      },
+      data: {
+        status: "dropped",
+        lockedUntil: null
+      }
+    });
+  }
+
+  private async dropOrphanedQueued(guildId: string, channelId?: string | null, now = new Date()): Promise<void> {
+    const activeProcessing = await this.prisma.replyQueueItem.findFirst({
+      where: {
+        guildId,
+        ...(channelId ? { channelId } : {}),
+        status: "processing",
+        lockedUntil: { gt: now }
+      },
+      select: { id: true }
+    });
+
+    if (activeProcessing) {
+      return;
+    }
+
+    await this.prisma.replyQueueItem.updateMany({
+      where: {
+        guildId,
+        ...(channelId ? { channelId } : {}),
+        status: "queued",
+        createdAt: { lte: new Date(now.getTime() - this.busyTtlSec * 1000) }
       },
       data: {
         status: "dropped",
