@@ -32,14 +32,33 @@ const HORI_ACTION_PREFIX = "hori-action";
 const HORI_STATE_PANEL_PREFIX = "hori-state";
 const POWER_PANEL_PREFIX = "power-panel";
 const POWER_PROFILES = ["economy", "balanced", "expanded", "max"] as const;
-const HORI_PANEL_TABS = ["main", "owner", "style", "liveliness", "memory", "people", "channels", "search", "experiments", "diagnostics"] as const;
+const HORI_PANEL_TABS = ["main", "persona", "behavior", "memory", "channels", "system"] as const;
 type HoriPanelTab = (typeof HORI_PANEL_TABS)[number];
 type HoriPanelAction = {
   id: string;
   label: string;
+  emoji?: string;
   style?: ButtonStyle;
   ownerOnly?: boolean;
   modOnly?: boolean;
+};
+
+const TAB_EMOJI: Record<HoriPanelTab, string> = {
+  main: "🏠",
+  persona: "🎭",
+  behavior: "⚡",
+  memory: "🧠",
+  channels: "📡",
+  system: "⚙️"
+};
+
+const TAB_COLOR: Record<HoriPanelTab, number> = {
+  main: 0x5865F2,
+  persona: 0xED4245,
+  behavior: 0xFEE75C,
+  memory: 0x57F287,
+  channels: 0x5865F2,
+  system: 0xEB459E
 };
 
 const PANEL_FEATURE_LABELS = {
@@ -1899,32 +1918,26 @@ function buildHoriPanelDetailResponse(
 }
 
 function buildHoriPanelEmbed(tab: HoriPanelTab, isOwner: boolean, isModerator: boolean) {
-  const ownerLine = isOwner ? "owner master panel активна" : isModerator ? "moderator-доступ активен вне панели" : "обычный доступ идёт через прямые /hori команды";
+  const role = isOwner ? "👑 owner" : isModerator ? "🛡️ moderator" : "👤 user";
 
   const tabText: Record<HoriPanelTab, string> = {
-    main: "Owner master panel: быстрый вход в persona, runtime, memory, channel, search и диагностику без старого командного шума.",
-    owner: isOwner
-      ? "Owner panel: power profile, lockdown, relationship редактор, media sync-pack, server memory-build и отдельная state-панель."
-      : "Owner panel скрыта. Тут ничего страшного, просто не твоё меню",
-    style: "Стиль: женская персона, язык, длина, interject tendency, запреты и быстрые тумблеры tone/playful/roast.",
-    liveliness: "Живость: чтение чата, auto-interject, reply queue, natural message sprinting и быстрые quiet/live переключатели.",
-    memory: "Память: Active Memory + Hybrid Recall, memory-build, topic engine, album и interaction requests теперь тоже доступны быстрыми тумблерами.",
-    people: "Люди: свой профиль видит каждый; owner/moderator могут смотреть подробнее, owner настраивает relationship цифры",
-    channels: "Каналы: replies/interjections, mute, local reply length override, topic tags, policy и локальная channel memory",
-    search: "Поиск: диагностика Brave/Ollama/cooldown/denylist, быстрый search modal и on/off для web search и link understanding.",
-    experiments: "Эксперименты: media reactions, selective engagement, context actions, reflection и прочие экспериментальные переключатели прямо с панели.",
-    diagnostics: "Диагностика: последние trace, feature flags, search preflight, строгие safety/context тумблеры и состояние памяти."
+    main: "Быстрый доступ к статусу, помощи, поиску, очереди и профилю. Отсюда можно перейти в любой раздел.",
+    persona: "Настройки персоны: имя, стиль, roughness/sarcasm/roast, длина ответов, mood и запреты. Живой preset для быстрого сброса.",
+    behavior: "Активность бота: чтение чата, auto-interject, reply queue, natural message splitting, media reactions.",
+    memory: "Всё про память: Active Memory, hybrid recall, memory-build, topic engine, album, reflection, профили людей и отношения.",
+    channels: "Каналы: policy, mute, reply length override, topic tags, поиск, summary. Web search и link understanding тоже тут.",
+    system: "Система: State panel, Power profile, lockdown, AI URL, debug trace, feature flags, context/safety diagnostics и эксперименты."
   };
 
-  const actions = getHoriTabActions(tab, isOwner, isModerator).map((action) => action.label).join(" / ") || "нет доступных кнопок";
+  const actions = getHoriTabActions(tab, isOwner, isModerator).map((a) => a.label).join(" · ") || "—";
 
   return new EmbedBuilder()
-    .setTitle(`Hori Panel: ${horiTabLabel(tab)}`)
+    .setTitle(`${TAB_EMOJI[tab]} Hori Panel — ${horiTabLabel(tab)}`)
+    .setColor(TAB_COLOR[tab])
     .setDescription(tabText[tab])
     .addFields(
-      { name: "Доступ", value: ownerLine, inline: true },
-      { name: "Кнопки", value: actions.slice(0, 1024) },
-      { name: "Команды", value: "Основной вход: `/hori`. Legacy `/bot-*` скрыты из регистрации по умолчанию." }
+      { name: "Доступ", value: role, inline: true },
+      { name: "Кнопки", value: actions.slice(0, 1024) }
     );
 }
 
@@ -1938,6 +1951,7 @@ function buildHoriPanelRows(tab: HoriPanelTab, isOwner: boolean, isModerator: bo
           ...HORI_PANEL_TABS.map((value) => ({
             label: horiTabLabel(value),
             value,
+            emoji: TAB_EMOJI[value],
             default: value === tab
           }))
         )
@@ -1948,12 +1962,14 @@ function buildHoriPanelRows(tab: HoriPanelTab, isOwner: boolean, isModerator: bo
   for (let index = 0; index < actions.length; index += 5) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        ...actions.slice(index, index + 5).map((action) =>
-          new ButtonBuilder()
+        ...actions.slice(index, index + 5).map((action) => {
+          const btn = new ButtonBuilder()
             .setCustomId(`${HORI_ACTION_PREFIX}:${action.id}`)
             .setLabel(action.label)
-            .setStyle(action.style ?? ButtonStyle.Secondary)
-        )
+            .setStyle(action.style ?? ButtonStyle.Secondary);
+          if (action.emoji) btn.setEmoji(action.emoji);
+          return btn;
+        })
       )
     );
   }
@@ -1969,11 +1985,12 @@ async function buildHoriStatePanelResponse(runtime: BotRuntime, tab: HoriStateTa
     content: "",
     embeds: [
       new EmbedBuilder()
-        .setTitle(panel.title)
+        .setTitle(`📡 ${panel.title}`)
+        .setColor(0xEB459E)
         .setDescription(panel.description)
         .addFields(...panel.fields.map((field) => ({
           name: field.name,
-          value: field.value || "none",
+          value: field.value || "—",
           inline: field.inline
         })))
     ],
@@ -1999,195 +2016,162 @@ function buildHoriStatePanelRows(tab: HoriStateTab) {
       new ButtonBuilder()
         .setCustomId(`${HORI_ACTION_PREFIX}:panel_home`)
         .setLabel("Panel")
+        .setEmoji("🏠")
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(`${HORI_ACTION_PREFIX}:state_brain`)
         .setLabel("Brain")
+        .setEmoji("🧠")
         .setStyle(tab === "brain" ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(`${HORI_ACTION_PREFIX}:state_trace`)
         .setLabel("Trace")
+        .setEmoji("📜")
         .setStyle(tab === "trace" ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(`${HORI_ACTION_PREFIX}:state_tokens`)
         .setLabel("Tokens")
+        .setEmoji("🪙")
         .setStyle(tab === "tokens" ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(`${HORI_ACTION_PREFIX}:power_panel`)
         .setLabel("Power")
+        .setEmoji("⚡")
         .setStyle(ButtonStyle.Primary)
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`${HORI_ACTION_PREFIX}:debug_latest`)
         .setLabel("Latest trace")
+        .setEmoji("🔬")
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(`${HORI_ACTION_PREFIX}:search_diagnose`)
         .setLabel("Search diag")
+        .setEmoji("🩺")
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(`${HORI_ACTION_PREFIX}:state_search`)
         .setLabel("Search state")
+        .setEmoji("🔎")
         .setStyle(tab === "search" ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(`${HORI_ACTION_PREFIX}:state_features`)
         .setLabel("Features")
+        .setEmoji("🏷️")
         .setStyle(tab === "features" ? ButtonStyle.Primary : ButtonStyle.Secondary)
     )
   ];
 }
 
 function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boolean) {
-  const common = [
-    { id: "status", label: "Статус", style: ButtonStyle.Primary },
-    { id: "help", label: "Help" },
-    { id: "search_query_modal", label: "Search" },
-    { id: "queue_status", label: "Queue" },
-    { id: "mood_status", label: "Mood" },
-    { id: "profile_self", label: "Мой профиль" },
-    { id: "memory_self", label: "Моя память" }
-  ];
-
-  const byTab: Record<HoriPanelTab, Array<{ id: string; label: string; style?: ButtonStyle; ownerOnly?: boolean; modOnly?: boolean }>> = {
-    main: common,
-    owner: [
-      { id: "state_panel", label: "State", ownerOnly: true, style: ButtonStyle.Primary },
-      { id: "state_trace", label: "Trace", ownerOnly: true },
-      { id: "state_tokens", label: "Tokens", ownerOnly: true },
-      { id: "power_panel", label: "Power", ownerOnly: true, style: ButtonStyle.Primary },
-      { id: "ai_url_modal", label: "AI URL", ownerOnly: true },
-      { id: "relationship_edit_modal", label: "Edit relation", ownerOnly: true },
-      { id: "lockdown_status", label: "Lockdown?", ownerOnly: true },
-      { id: "lockdown_on", label: "Lockdown on", ownerOnly: true, style: ButtonStyle.Danger },
-      { id: "lockdown_off", label: "Lockdown off", ownerOnly: true },
-      { id: "media_sync", label: "Media sync", ownerOnly: true },
-      { id: "media_list", label: "Media list", ownerOnly: true },
-      { id: "memory_build_server", label: "Build сервер", ownerOnly: true }
-    ] satisfies HoriPanelAction[],
-    style: [
-      { id: "style_status", label: "Snapshot", style: ButtonStyle.Primary },
-      { id: "style_default", label: "Живой preset", modOnly: true, style: ButtonStyle.Primary },
-      { id: "style_edit_modal", label: "Edit style", modOnly: true },
-      { id: "mood_playful", label: "Mood playful", modOnly: true },
-      { id: "mood_normal", label: "Mood normal", modOnly: true },
-      { id: "natural_split_on", label: "Sprinting on", modOnly: true },
-      { id: "natural_split_off", label: "Sprinting off", modOnly: true },
-      featureAction("playful_mode_enabled", true, "Playful on", { modOnly: true }),
-      featureAction("playful_mode_enabled", false, "Playful off", { modOnly: true }),
-      featureAction("irritated_mode_enabled", true, "Irritated on", { modOnly: true }),
-      featureAction("irritated_mode_enabled", false, "Irritated off", { modOnly: true }),
-      featureAction("roast", true, "Roast on", { modOnly: true }),
-      featureAction("roast", false, "Roast off", { modOnly: true }),
-      { id: "feature_status", label: "Фичи" },
-      { id: "status", label: "Статус" }
-    ] satisfies HoriPanelAction[],
-    liveliness: [
-      { id: "read_chat_on", label: "Читать чат", modOnly: true, style: ButtonStyle.Primary },
-      { id: "read_chat_off", label: "Тихий канал", modOnly: true },
-      { id: "natural_split_on", label: "2 чанка", modOnly: true },
-      { id: "natural_split_off", label: "1 chunk", modOnly: true },
-      { id: "mood_status", label: "Mood" },
-      { id: "queue_status", label: "Queue" },
-      featureAction("auto_interject", true, "Interject on", { modOnly: true }),
-      featureAction("auto_interject", false, "Interject off", { modOnly: true }),
-      featureAction("reply_queue_enabled", true, "Queue on", { modOnly: true }),
-      featureAction("reply_queue_enabled", false, "Queue off", { modOnly: true }),
-      { id: "media_sync", label: "GIF pack", ownerOnly: true },
-      { id: "reflection_status", label: "Reflection" },
-      { id: "feature_status", label: "Фичи" }
-    ] satisfies HoriPanelAction[],
+  const byTab: Record<HoriPanelTab, HoriPanelAction[]> = {
+    main: [
+      { id: "status", label: "Статус", emoji: "📊", style: ButtonStyle.Primary },
+      { id: "help", label: "Help", emoji: "❓" },
+      { id: "search_query_modal", label: "Поиск", emoji: "🔍" },
+      { id: "queue_status", label: "Queue", emoji: "📬" },
+      { id: "mood_status", label: "Mood", emoji: "🎭" },
+      { id: "profile_self", label: "Мой профиль", emoji: "👤" },
+      { id: "memory_self", label: "Моя память", emoji: "💭" }
+    ],
+    persona: [
+      { id: "style_status", label: "Snapshot", emoji: "📋", style: ButtonStyle.Primary },
+      { id: "style_edit_modal", label: "Редактор", emoji: "✏️", modOnly: true, style: ButtonStyle.Primary },
+      { id: "style_default", label: "Живой preset", emoji: "🔄", modOnly: true },
+      { id: "mood_playful", label: "Playful", emoji: "🎉", modOnly: true },
+      { id: "mood_normal", label: "Normal", emoji: "😐", modOnly: true },
+      featureAction("playful_mode_enabled", true, "Playful ON", { emoji: "✅", modOnly: true }),
+      featureAction("playful_mode_enabled", false, "Playful OFF", { emoji: "❌", modOnly: true }),
+      featureAction("irritated_mode_enabled", true, "Irritated ON", { emoji: "✅", modOnly: true }),
+      featureAction("irritated_mode_enabled", false, "Irritated OFF", { emoji: "❌", modOnly: true }),
+      featureAction("roast", true, "Roast ON", { emoji: "✅", modOnly: true }),
+      featureAction("roast", false, "Roast OFF", { emoji: "❌", modOnly: true })
+    ],
+    behavior: [
+      { id: "read_chat_on", label: "Читать чат", emoji: "📖", modOnly: true, style: ButtonStyle.Primary },
+      { id: "read_chat_off", label: "Тихий режим", emoji: "🔇", modOnly: true },
+      { id: "natural_split_on", label: "Split ON", emoji: "✂️", modOnly: true },
+      { id: "natural_split_off", label: "Split OFF", emoji: "📃", modOnly: true },
+      featureAction("auto_interject", true, "Interject ON", { emoji: "✅", modOnly: true }),
+      featureAction("auto_interject", false, "Interject OFF", { emoji: "❌", modOnly: true }),
+      featureAction("reply_queue_enabled", true, "Queue ON", { emoji: "✅", modOnly: true }),
+      featureAction("reply_queue_enabled", false, "Queue OFF", { emoji: "❌", modOnly: true }),
+      featureAction("media_reactions_enabled", true, "Media ON", { emoji: "✅", modOnly: true }),
+      featureAction("media_reactions_enabled", false, "Media OFF", { emoji: "❌", modOnly: true }),
+      featureAction("selective_engagement_enabled", true, "Engage ON", { emoji: "✅", modOnly: true }),
+      featureAction("selective_engagement_enabled", false, "Engage OFF", { emoji: "❌", modOnly: true }),
+      { id: "media_sync", label: "GIF pack", emoji: "🎞️", ownerOnly: true },
+      { id: "media_list", label: "Media list", emoji: "📋" }
+    ],
     memory: [
-      { id: "memory_status", label: "Memory status", style: ButtonStyle.Primary },
-      { id: "memory_build_channel", label: "Build канал", modOnly: true },
-      { id: "memory_build_server", label: "Build сервер", ownerOnly: true },
-      featureAction("topic_engine_enabled", true, "Topic on", { modOnly: true }),
-      featureAction("topic_engine_enabled", false, "Topic off", { modOnly: true }),
-      featureAction("memory_album_enabled", true, "Album on", { modOnly: true }),
-      featureAction("memory_album_enabled", false, "Album off", { modOnly: true }),
-      featureAction("interaction_requests_enabled", true, "Requests on", { modOnly: true }),
-      featureAction("interaction_requests_enabled", false, "Requests off", { modOnly: true }),
-      { id: "summary_current", label: "Summary" },
-      { id: "topic_status", label: "Topic" },
-      { id: "reflection_list", label: "Lessons" },
-      { id: "memory_self", label: "Моя память" }
-    ] satisfies HoriPanelAction[],
-    people: [
-      { id: "profile_self", label: "Мой профиль", style: ButtonStyle.Primary },
-      { id: "dossier_modal", label: "Open dossier", ownerOnly: true, style: ButtonStyle.Primary },
-      { id: "relationship_self", label: "Отношение ко мне" },
-      { id: "relationship_edit_modal", label: "Edit relation", ownerOnly: true },
-      { id: "relationship_hint", label: "Owner edit", ownerOnly: true },
-      { id: "memory_self", label: "Моя память" }
-    ] satisfies HoriPanelAction[],
+      { id: "memory_status", label: "Memory", emoji: "🧠", style: ButtonStyle.Primary },
+      { id: "memory_build_channel", label: "Build канал", emoji: "🔨", modOnly: true },
+      { id: "memory_build_server", label: "Build сервер", emoji: "🏗️", ownerOnly: true },
+      featureAction("topic_engine_enabled", true, "Topic ON", { emoji: "✅", modOnly: true }),
+      featureAction("topic_engine_enabled", false, "Topic OFF", { emoji: "❌", modOnly: true }),
+      featureAction("memory_album_enabled", true, "Album ON", { emoji: "✅", modOnly: true }),
+      featureAction("memory_album_enabled", false, "Album OFF", { emoji: "❌", modOnly: true }),
+      featureAction("interaction_requests_enabled", true, "Requests ON", { emoji: "✅", modOnly: true }),
+      featureAction("interaction_requests_enabled", false, "Requests OFF", { emoji: "❌", modOnly: true }),
+      { id: "summary_current", label: "Summary", emoji: "📝" },
+      { id: "topic_status", label: "Topic", emoji: "💬" },
+      { id: "reflection_list", label: "Lessons", emoji: "📚" },
+      { id: "profile_self", label: "Мой профиль", emoji: "👤" },
+      { id: "dossier_modal", label: "Досье", emoji: "🔎", ownerOnly: true, style: ButtonStyle.Primary },
+      { id: "relationship_self", label: "Отношение", emoji: "💞" },
+      { id: "relationship_edit_modal", label: "Edit relation", emoji: "✏️", ownerOnly: true },
+      { id: "relationship_hint", label: "Hints", emoji: "💡", ownerOnly: true }
+    ],
     channels: [
-      { id: "channel_policy", label: "Policy", style: ButtonStyle.Primary },
-      { id: "channel_edit_modal", label: "Edit channel", modOnly: true },
-      { id: "read_chat_on", label: "Interject on", modOnly: true },
-      { id: "read_chat_off", label: "Quiet mode", modOnly: true },
-      { id: "topic_status", label: "Topic" },
-      { id: "topic_reset", label: "Reset topic", modOnly: true },
-      { id: "queue_status", label: "Queue" },
-      { id: "queue_clear", label: "Clear queue", modOnly: true },
-      { id: "summary_current", label: "Summary" },
-      { id: "memory_status", label: "Channel memory" }
-    ] satisfies HoriPanelAction[],
-    search: [
-      { id: "search_query_modal", label: "Search", style: ButtonStyle.Primary },
-      { id: "search_diagnose", label: "Диагностика", style: ButtonStyle.Primary },
-      featureAction("web_search", true, "Search on", { modOnly: true }),
-      featureAction("web_search", false, "Search off", { modOnly: true }),
-      featureAction("link_understanding_enabled", true, "Links on", { modOnly: true }),
-      featureAction("link_understanding_enabled", false, "Links off", { modOnly: true }),
-      { id: "feature_status", label: "Фичи" },
-      { id: "state_search", label: "Search state", ownerOnly: true },
-      { id: "state_tokens", label: "Tokens", ownerOnly: true }
-    ] satisfies HoriPanelAction[],
-    experiments: [
-      { id: "natural_split_on", label: "Sprinting on", modOnly: true, style: ButtonStyle.Primary },
-      { id: "natural_split_off", label: "Sprinting off", modOnly: true },
-      { id: "mood_playful", label: "Mood playful", modOnly: true },
-      featureAction("media_reactions_enabled", true, "Media on", { modOnly: true }),
-      featureAction("media_reactions_enabled", false, "Media off", { modOnly: true }),
-      featureAction("selective_engagement_enabled", true, "Selective on", { modOnly: true }),
-      featureAction("selective_engagement_enabled", false, "Selective off", { modOnly: true }),
-      featureAction("context_actions", true, "Ctx actions on", { modOnly: true }),
-      featureAction("context_actions", false, "Ctx actions off", { modOnly: true }),
-      featureAction("self_reflection_lessons_enabled", true, "Reflect on", { modOnly: true }),
-      featureAction("self_reflection_lessons_enabled", false, "Reflect off", { modOnly: true }),
-      { id: "feature_status", label: "Фичи" },
-      { id: "media_list", label: "Media list" },
-      { id: "reflection_status", label: "Reflection" },
-      { id: "reflection_list", label: "Lessons" },
-      { id: "media_sync", label: "Media sync", ownerOnly: true }
-    ] satisfies HoriPanelAction[],
-    diagnostics: [
-      { id: "debug_latest", label: "Latest trace", style: ButtonStyle.Primary },
-      { id: "search_diagnose", label: "Search diag" },
-      featureAction("anti_slop_strict_mode", true, "Strict on", { modOnly: true }),
-      featureAction("anti_slop_strict_mode", false, "Strict off", { modOnly: true }),
-      featureAction("context_confidence_enabled", true, "Ctx conf on", { modOnly: true }),
-      featureAction("context_confidence_enabled", false, "Ctx conf off", { modOnly: true }),
-      featureAction("channel_aware_mode", true, "Channel-aware on", { modOnly: true }),
-      featureAction("channel_aware_mode", false, "Channel-aware off", { modOnly: true }),
-      featureAction("message_kind_aware_mode", true, "Kind-aware on", { modOnly: true }),
-      featureAction("message_kind_aware_mode", false, "Kind-aware off", { modOnly: true }),
-      { id: "feature_status", label: "Фичи" },
-      { id: "queue_status", label: "Queue" },
-      { id: "stats_week", label: "Stats" },
-      { id: "state_trace", label: "Trace state", ownerOnly: true },
-      { id: "state_tokens", label: "Token state", ownerOnly: true },
-      { id: "status", label: "Статус" }
-    ] satisfies HoriPanelAction[]
+      { id: "channel_policy", label: "Policy", emoji: "📋", style: ButtonStyle.Primary },
+      { id: "channel_edit_modal", label: "Edit channel", emoji: "✏️", modOnly: true },
+      { id: "topic_status", label: "Topic", emoji: "💬" },
+      { id: "topic_reset", label: "Reset topic", emoji: "🗑️", modOnly: true },
+      { id: "queue_status", label: "Queue", emoji: "📬" },
+      { id: "queue_clear", label: "Clear queue", emoji: "🧹", modOnly: true },
+      { id: "summary_current", label: "Summary", emoji: "📝" },
+      { id: "memory_status", label: "Memory канала", emoji: "🧠" },
+      { id: "search_query_modal", label: "Поиск", emoji: "🔍", style: ButtonStyle.Primary },
+      { id: "search_diagnose", label: "Диагностика", emoji: "🩺" },
+      featureAction("web_search", true, "Search ON", { emoji: "✅", modOnly: true }),
+      featureAction("web_search", false, "Search OFF", { emoji: "❌", modOnly: true }),
+      featureAction("link_understanding_enabled", true, "Links ON", { emoji: "✅", modOnly: true }),
+      featureAction("link_understanding_enabled", false, "Links OFF", { emoji: "❌", modOnly: true })
+    ],
+    system: [
+      { id: "state_panel", label: "State", emoji: "📡", ownerOnly: true, style: ButtonStyle.Primary },
+      { id: "power_panel", label: "Power", emoji: "⚡", ownerOnly: true, style: ButtonStyle.Primary },
+      { id: "ai_url_modal", label: "AI URL", emoji: "🔗", ownerOnly: true },
+      { id: "lockdown_status", label: "Lockdown?", emoji: "🔒", ownerOnly: true },
+      { id: "lockdown_on", label: "Lockdown ON", emoji: "🚨", ownerOnly: true, style: ButtonStyle.Danger },
+      { id: "lockdown_off", label: "Lockdown OFF", emoji: "🔓", ownerOnly: true },
+      { id: "debug_latest", label: "Latest trace", emoji: "🔬", style: ButtonStyle.Primary },
+      { id: "feature_status", label: "Фичи", emoji: "🏷️" },
+      { id: "search_diagnose", label: "Search diag", emoji: "🩺" },
+      { id: "stats_week", label: "Stats", emoji: "📊" },
+      featureAction("anti_slop_strict_mode", true, "Strict ON", { emoji: "✅", modOnly: true }),
+      featureAction("anti_slop_strict_mode", false, "Strict OFF", { emoji: "❌", modOnly: true }),
+      featureAction("context_confidence_enabled", true, "Ctx conf ON", { emoji: "✅", modOnly: true }),
+      featureAction("context_confidence_enabled", false, "Ctx conf OFF", { emoji: "❌", modOnly: true }),
+      featureAction("context_actions", true, "Ctx actions ON", { emoji: "✅", modOnly: true }),
+      featureAction("context_actions", false, "Ctx actions OFF", { emoji: "❌", modOnly: true }),
+      featureAction("channel_aware_mode", true, "Channel-aware ON", { emoji: "✅", modOnly: true }),
+      featureAction("channel_aware_mode", false, "Channel-aware OFF", { emoji: "❌", modOnly: true }),
+      featureAction("message_kind_aware_mode", true, "Kind-aware ON", { emoji: "✅", modOnly: true }),
+      featureAction("message_kind_aware_mode", false, "Kind-aware OFF", { emoji: "❌", modOnly: true }),
+      featureAction("self_reflection_lessons_enabled", true, "Reflect ON", { emoji: "✅", modOnly: true }),
+      featureAction("self_reflection_lessons_enabled", false, "Reflect OFF", { emoji: "❌", modOnly: true }),
+      { id: "reflection_status", label: "Reflection", emoji: "🪞" },
+      { id: "state_trace", label: "Trace", emoji: "📜", ownerOnly: true },
+      { id: "state_tokens", label: "Tokens", emoji: "🪙", ownerOnly: true },
+      { id: "state_search", label: "Search state", emoji: "🔎", ownerOnly: true }
+    ]
   };
 
   return byTab[tab].filter((action) => {
-    if (action.ownerOnly) {
-      return isOwner;
-    }
-    if (action.modOnly) {
-      return isOwner || isModerator;
-    }
+    if (action.ownerOnly) return isOwner;
+    if (action.modOnly) return isOwner || isModerator;
     return true;
   });
 }
@@ -2198,16 +2182,12 @@ function parseHoriPanelTab(value: string | null | undefined): HoriPanelTab | nul
 
 function horiTabLabel(tab: HoriPanelTab) {
   const labels: Record<HoriPanelTab, string> = {
-    main: "Главная",
-    owner: "Владелец",
-    style: "Стиль",
-    liveliness: "Живость",
-    memory: "Память",
-    people: "Люди",
-    channels: "Каналы",
-    search: "Поиск",
-    experiments: "Эксперименты",
-    diagnostics: "Диагностика"
+    main: "🏠 Главная",
+    persona: "🎭 Персона",
+    behavior: "⚡ Поведение",
+    memory: "🧠 Память и люди",
+    channels: "📡 Каналы и поиск",
+    system: "⚙️ Система"
   };
   return labels[tab];
 }
@@ -2218,14 +2198,11 @@ function inferTabForHoriAction(action: string): HoriPanelTab {
     return inferPanelTabForFeatureKey(featureToggle.key);
   }
 
-  if (action.startsWith("memory")) return "memory";
-  if (action.startsWith("search")) return "search";
-  if (action.startsWith("lockdown") || action === "power_panel" || action === "state_panel" || action === "ai_url_modal") return "owner";
-  if (action.startsWith("relationship") || action.startsWith("profile")) return "people";
-  if (action.startsWith("channel") || action === "read_chat_on" || action === "read_chat_off" || action.startsWith("topic") || action.startsWith("queue") || action === "summary_current") return "channels";
-  if (action.startsWith("debug") || action === "feature_status") return "diagnostics";
-  if (action.startsWith("style") || action.startsWith("natural") || action.startsWith("mood")) return "style";
-  if (action.startsWith("reflection") || action === "media_list") return "experiments";
+  if (action.startsWith("memory") || action.startsWith("reflection") || action.startsWith("profile") || action.startsWith("relationship") || action === "dossier_modal") return "memory";
+  if (action.startsWith("search") || action.startsWith("channel") || action === "read_chat_on" || action === "read_chat_off" || action.startsWith("topic") || action.startsWith("queue") || action === "summary_current") return "channels";
+  if (action.startsWith("lockdown") || action === "power_panel" || action === "state_panel" || action === "ai_url_modal" || action.startsWith("debug") || action === "feature_status" || action === "stats_week" || action.startsWith("state_")) return "system";
+  if (action.startsWith("style") || action.startsWith("mood")) return "persona";
+  if (action.startsWith("natural") || action === "media_list" || action === "media_sync") return "behavior";
   return "main";
 }
 
@@ -2276,6 +2253,7 @@ function featureAction(key: PanelFeatureKey, enabled: boolean, label: string, op
   return {
     id: `feature_${key}_${enabled ? "on" : "off"}`,
     label,
+    style: enabled ? ButtonStyle.Success : ButtonStyle.Secondary,
     ...options
   };
 }
@@ -2302,28 +2280,27 @@ function inferPanelTabForFeatureKey(key: PanelFeatureKey): HoriPanelTab {
   switch (key) {
     case "web_search":
     case "link_understanding_enabled":
-      return "search";
+      return "channels";
     case "auto_interject":
     case "reply_queue_enabled":
-      return "liveliness";
+    case "media_reactions_enabled":
+    case "selective_engagement_enabled":
+      return "behavior";
     case "playful_mode_enabled":
     case "irritated_mode_enabled":
     case "roast":
-      return "style";
+      return "persona";
     case "topic_engine_enabled":
     case "memory_album_enabled":
     case "interaction_requests_enabled":
       return "memory";
-    case "media_reactions_enabled":
-    case "selective_engagement_enabled":
-    case "context_actions":
-    case "self_reflection_lessons_enabled":
-      return "experiments";
     case "anti_slop_strict_mode":
     case "context_confidence_enabled":
     case "channel_aware_mode":
     case "message_kind_aware_mode":
-      return "diagnostics";
+    case "context_actions":
+    case "self_reflection_lessons_enabled":
+      return "system";
   }
 }
 
@@ -2338,19 +2315,20 @@ async function applyPanelFeatureToggle(runtime: BotRuntime, guildId: string, key
 function buildHoriDetailEmbed(title: string, body: string) {
   return new EmbedBuilder()
     .setTitle(title)
+    .setColor(0x2B2D31)
     .setDescription(clipPanelText(body));
 }
 
 function buildPowerPanelResponse(content: string, activeProfile: (typeof POWER_PROFILES)[number]) {
   return {
     content: "",
-    embeds: [buildHoriDetailEmbed("Hori Power Panel", content)],
+    embeds: [buildHoriDetailEmbed("⚡ Hori Power Panel", content)],
     components: [
       ...buildPowerPanelRows(activeProfile),
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:panel_home`).setLabel("Panel").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_brain`).setLabel("Brain").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_tokens`).setLabel("Tokens").setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:panel_home`).setLabel("Panel").setEmoji("🏠").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_brain`).setLabel("Brain").setEmoji("🧠").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_tokens`).setLabel("Tokens").setEmoji("🪙").setStyle(ButtonStyle.Secondary)
       )
     ]
   };
@@ -2368,17 +2346,19 @@ async function buildHoriStatus(runtime: BotRuntime, guildId: string, channelId: 
   ]);
 
   return [
-    "Hori status",
-    power,
-    `Owner lockdown: ${lockdown.enabled ? "on" : "off"}`,
-    memory
-  ].join("\n\n");
+    "📊 **Hori status**",
+    "",
+    `⚡ ${power}`,
+    `🔒 Owner lockdown: ${lockdown.enabled ? "**ON**" : "off"}`,
+    "",
+    `🧠 ${memory}`
+  ].join("\n");
 }
 
 async function buildFeatureStatus(runtime: BotRuntime, guildId: string) {
   const flags = await runtime.runtimeConfig.getFeatureFlags(guildId);
   return Object.entries(flags)
-    .map(([key, value]) => `${value ? "on " : "off"} ${key}`)
+    .map(([key, value]) => `${value ? "🟢" : "🔴"} ${key}`)
     .join("\n")
     .slice(0, 1900);
 }
@@ -2386,26 +2366,30 @@ async function buildFeatureStatus(runtime: BotRuntime, guildId: string) {
 async function buildChannelPolicyStatus(runtime: BotRuntime, guildId: string, channelId: string) {
   const policy = await runtime.runtimeConfig.getChannelPolicy(guildId, channelId);
   return [
-    `Channel policy for ${channelId}`,
-    `allowBotReplies=${policy.allowBotReplies}`,
-    `allowInterjections=${policy.allowInterjections}`,
-    `isMuted=${policy.isMuted}`,
-    `responseLengthOverride=${policy.responseLengthOverride ?? "inherit"}`,
-    `topicInterestTags=${policy.topicInterestTags.join(", ") || "none"}`
+    `📡 **Channel policy** · <#${channelId}>`,
+    "",
+    `${policy.allowBotReplies ? "🟢" : "🔴"} Ответы бота: **${policy.allowBotReplies ? "да" : "нет"}**`,
+    `${policy.allowInterjections ? "🟢" : "🔴"} Интерджекции: **${policy.allowInterjections ? "да" : "нет"}**`,
+    `${policy.isMuted ? "🔇" : "🔊"} Muted: **${policy.isMuted ? "да" : "нет"}**`,
+    `📏 Длина: **${policy.responseLengthOverride ?? "inherit"}**`,
+    `🏷️ Теги: ${policy.topicInterestTags.join(", ") || "—"}`
   ].join("\n");
 }
 
 async function buildStyleStatus(runtime: BotRuntime, guildId: string) {
-  const settings = await runtime.runtimeConfig.getGuildSettings(guildId);
+  const s = await runtime.runtimeConfig.getGuildSettings(guildId);
+  const bar = (val: number, max = 5) => "▓".repeat(val) + "░".repeat(max - val);
   return [
-    "Guild persona settings",
-    `botName=${settings.botName}`,
-    `preferredLanguage=${settings.preferredLanguage}`,
-    `roughness=${settings.roughnessLevel}, sarcasm=${settings.sarcasmLevel}, roast=${settings.roastLevel}`,
-    `interjectTendency=${settings.interjectTendency}, replyLength=${settings.replyLength}`,
-    `preferredStyle=${settings.preferredStyle}`,
-    `forbiddenWords=${settings.forbiddenWords.join(", ") || "none"}`,
-    `forbiddenTopics=${settings.forbiddenTopics.join(", ") || "none"}`
+    `🎭 **Persona snapshot**`,
+    "",
+    `📛 Имя: **${s.botName}** · Язык: **${s.preferredLanguage}**`,
+    `🗣️ Roughness: ${bar(s.roughnessLevel)} ${s.roughnessLevel}/5`,
+    `😏 Sarcasm: ${bar(s.sarcasmLevel)} ${s.sarcasmLevel}/5`,
+    `🔥 Roast: ${bar(s.roastLevel)} ${s.roastLevel}/5`,
+    `💬 Interject: ${bar(s.interjectTendency)} ${s.interjectTendency}/5`,
+    `📏 Длина: **${s.replyLength}**`,
+    `✍️ Стиль: ${s.preferredStyle || "—"}`,
+    `🚫 Запреты: ${[...s.forbiddenWords, ...s.forbiddenTopics].join(", ") || "—"}`
   ].join("\n");
 }
 
@@ -2435,14 +2419,14 @@ async function buildLatestDebugTrace(runtime: BotRuntime, guildId: string) {
 
 async function diagnoseSearch(runtime: BotRuntime) {
   const lines = [
-    `BRAVE_SEARCH_API_KEY: ${runtime.env.BRAVE_SEARCH_API_KEY ? "set" : "missing"}`,
-    `SEARCH_USER_COOLDOWN_SEC: ${runtime.env.SEARCH_USER_COOLDOWN_SEC}`,
-    `SEARCH_MAX_REQUESTS_PER_RESPONSE: ${runtime.env.SEARCH_MAX_REQUESTS_PER_RESPONSE}`,
-    `SEARCH_MAX_PAGES_PER_RESPONSE: ${runtime.env.SEARCH_MAX_PAGES_PER_RESPONSE}`,
-    `SEARCH_DOMAIN_DENYLIST: ${runtime.env.SEARCH_DOMAIN_DENYLIST.join(", ") || "none"}`,
-    `OLLAMA_BASE_URL: ${runtime.env.OLLAMA_BASE_URL ?? "missing"}`,
-    `OLLAMA_SMART_MODEL: ${runtime.env.OLLAMA_SMART_MODEL}`,
-    `OLLAMA_TIMEOUT_MS: ${runtime.env.OLLAMA_TIMEOUT_MS}`
+    "🩺 **Search diagnostics**",
+    "",
+    `${runtime.env.BRAVE_SEARCH_API_KEY ? "🟢" : "🔴"} BRAVE_SEARCH_API_KEY: ${runtime.env.BRAVE_SEARCH_API_KEY ? "set" : "**missing**"}`,
+    `⏱️ COOLDOWN: ${runtime.env.SEARCH_USER_COOLDOWN_SEC}s`,
+    `🔢 MAX_REQUESTS: ${runtime.env.SEARCH_MAX_REQUESTS_PER_RESPONSE} · MAX_PAGES: ${runtime.env.SEARCH_MAX_PAGES_PER_RESPONSE}`,
+    `🚫 DENYLIST: ${runtime.env.SEARCH_DOMAIN_DENYLIST.join(", ") || "—"}`,
+    `${runtime.env.OLLAMA_BASE_URL ? "🟢" : "🔴"} OLLAMA: ${runtime.env.OLLAMA_BASE_URL ?? "**missing**"}`,
+    `🤖 Model: ${runtime.env.OLLAMA_SMART_MODEL} · Timeout: ${runtime.env.OLLAMA_TIMEOUT_MS}ms`
   ];
 
   if (runtime.env.OLLAMA_BASE_URL) {
@@ -2816,12 +2800,14 @@ function parseMemoryAlbumModalId(customId: string) {
 }
 
 function buildPowerPanelRows(activeProfile: (typeof POWER_PROFILES)[number]) {
+  const profileEmoji: Record<string, string> = { economy: "🌱", balanced: "⚖️", expanded: "🚀", max: "💎" };
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       ...POWER_PROFILES.map((profile) =>
         new ButtonBuilder()
           .setCustomId(`${POWER_PANEL_PREFIX}:apply:${profile}`)
           .setLabel(profile)
+          .setEmoji(profileEmoji[profile])
           .setStyle(profile === activeProfile ? ButtonStyle.Primary : ButtonStyle.Secondary)
       )
     )

@@ -8,16 +8,12 @@ import {
 import { CONTEXT_ACTIONS } from "@hori/shared";
 
 const panelTabChoices = [
-  { name: "Главная", value: "main" },
-  { name: "Владелец", value: "owner" },
-  { name: "Стиль", value: "style" },
-  { name: "Живость", value: "liveliness" },
-  { name: "Память", value: "memory" },
-  { name: "Люди", value: "people" },
-  { name: "Каналы", value: "channels" },
-  { name: "Поиск", value: "search" },
-  { name: "Эксперименты", value: "experiments" },
-  { name: "Диагностика", value: "diagnostics" }
+  { name: "🏠 Главная", value: "main" },
+  { name: "🎭 Персона", value: "persona" },
+  { name: "⚡ Поведение", value: "behavior" },
+  { name: "🧠 Память и люди", value: "memory" },
+  { name: "📡 Каналы и поиск", value: "channels" },
+  { name: "⚙️ Система", value: "system" }
 ] as const;
 
 const stateTabChoices = [
