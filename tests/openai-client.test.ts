@@ -7,13 +7,14 @@ describe("OpenAIClient", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses GPT-5 chat-completions parameters without custom sampling", async () => {
+  it("uses GPT-5 chat-completions parameters with minimal reasoning and without custom sampling", async () => {
     const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
 
       expect(payload).toMatchObject({
         model: "gpt-5-mini",
-        max_completion_tokens: 200
+        max_completion_tokens: 120,
+        reasoning_effort: "minimal"
       });
       expect(payload).not.toHaveProperty("max_tokens");
       expect(payload).not.toHaveProperty("temperature");
@@ -35,7 +36,7 @@ describe("OpenAIClient", () => {
     await expect(client.chat({
       model: "gpt-5-mini",
       messages: [{ role: "user", content: "ping" }],
-      maxTokens: 200,
+      maxTokens: 120,
       temperature: 0.55,
       topP: 0.9
     })).resolves.toMatchObject({
@@ -55,6 +56,7 @@ describe("OpenAIClient", () => {
         top_p: 0.9
       });
       expect(payload).not.toHaveProperty("max_completion_tokens");
+      expect(payload).not.toHaveProperty("reasoning_effort");
 
       return new Response(
         JSON.stringify({

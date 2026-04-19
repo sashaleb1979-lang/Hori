@@ -101,8 +101,11 @@ export class OpenAIClient implements LlmClient {
     };
 
     if (usesMaxCompletionTokens(options.model)) {
-      body.max_completion_tokens = options.maxTokens;
-    } else {
+      if (options.maxTokens !== undefined) {
+        body.max_completion_tokens = options.maxTokens;
+      }
+      body.reasoning_effort = "minimal";
+    } else if (options.maxTokens !== undefined) {
       body.max_tokens = options.maxTokens;
     }
 
