@@ -1,5 +1,5 @@
-import type { ActiveMemoryEntry, AppPrismaClient } from "@hori/shared";
-import { toVectorLiteral } from "@hori/shared";
+import type { ActiveMemoryEntry, AppLogger, AppPrismaClient } from "@hori/shared";
+import { asErrorMessage, toVectorLiteral } from "@hori/shared";
 
 export interface HybridRecallInput {
   guildId: string;
@@ -28,10 +28,19 @@ interface ScoredHybridHit {
   reasons: Set<string>;
 }
 
-export class RetrievalService {
-  constructor(private readonly prisma: AppPrismaClient) {}
+type ServerMemoryRow = { id: string; key: string; value: string; type: string; createdAt: Date; updatedAt: Date };
+type UserMemoryRow = { id: string; key: string; value: string; createdAt: Date; userId?: string | null };
+type MessageMemoryRow = { id: string; content: string; userId: string; createdAt: Date };
+type ChannelMemoryRow = { id: string; key: string; value: string; type: string; createdAt: Date; updatedAt: Date; confidence: number; salience: number };
+type EventMemoryRow = { id: string; eventKey: string; key: string; value: string; type: string; createdAt: Date; updatedAt: Date; confidence: number; salience: number };
 
-  async findRelevantServerMemory(guildId: string, queryEmbedding?: number[], limit = 4) {
+export class RetrievalService {
+  constructor(
+    private readonly prisma: AppPrismaClient,
+    private readonly logger?: AppLogger
+  ) {}
+
+  async findRelevantServerMemory(guildId: string, queryEmbedding?: number[], limit = 4): Promise<ServerMemoryRow[]> {
     if (!queryEmbedding?.length) {
       return this.prisma.serverMemory.findMany({
         where: {
@@ -52,26 +61,31 @@ export class RetrievalService {
     }
 
     const vectorLiteral = toVectorLiteral(queryEmbedding);
+    const dimensions = queryEmbedding.length;
 
-    return this.prisma.$queryRawUnsafe<
-      Array<{ id: string; key: string; value: string; type: string; createdAt: Date; updatedAt: Date }>
-    >(
-      `
-        SELECT id, key, value, type, "createdAt", "updatedAt"
-        FROM "ServerMemory"
-        WHERE "guildId" = $1
-          AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
-          AND embedding IS NOT NULL
-        ORDER BY embedding <=> $2::vector
-        LIMIT $3
-      `,
-      guildId,
-      vectorLiteral,
-      limit
+    return this.withVectorFallback(
+      "server_memory",
+      () => this.findRelevantServerMemory(guildId, undefined, limit),
+      () => this.prisma.$queryRawUnsafe<ServerMemoryRow[]>(
+        `
+          SELECT id, key, value, type, "createdAt", "updatedAt"
+          FROM "ServerMemory"
+          WHERE "guildId" = $1
+            AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
+            AND embedding IS NOT NULL
+            AND vector_dims(embedding) = $3
+          ORDER BY embedding <=> $2::vector
+          LIMIT $4
+        `,
+        guildId,
+        vectorLiteral,
+        dimensions,
+        limit
+      )
     );
   }
 
-  async findRelevantUserMemory(guildId: string, userId: string, queryEmbedding?: number[], limit = 3) {
+  async findRelevantUserMemory(guildId: string, userId: string, queryEmbedding?: number[], limit = 3): Promise<UserMemoryRow[]> {
     if (!queryEmbedding?.length) {
       return this.prisma.userMemoryNote.findMany({
         where: {
@@ -86,52 +100,62 @@ export class RetrievalService {
     }
 
     const vectorLiteral = toVectorLiteral(queryEmbedding);
+    const dimensions = queryEmbedding.length;
 
-    return this.prisma.$queryRawUnsafe<
-      Array<{ id: string; key: string; value: string; createdAt: Date }>
-    >(
-      `
-        SELECT id, key, value, "createdAt"
-        FROM "UserMemoryNote"
-        WHERE "guildId" = $1
-          AND "userId" = $2
-          AND active = TRUE
-          AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
-          AND embedding IS NOT NULL
-        ORDER BY embedding <=> $3::vector
-        LIMIT $4
-      `,
-      guildId,
-      userId,
-      vectorLiteral,
-      limit
+    return this.withVectorFallback(
+      "user_memory",
+      () => this.findRelevantUserMemory(guildId, userId, undefined, limit),
+      () => this.prisma.$queryRawUnsafe<UserMemoryRow[]>(
+        `
+          SELECT id, key, value, "createdAt"
+          FROM "UserMemoryNote"
+          WHERE "guildId" = $1
+            AND "userId" = $2
+            AND active = TRUE
+            AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
+            AND embedding IS NOT NULL
+            AND vector_dims(embedding) = $4
+          ORDER BY embedding <=> $3::vector
+          LIMIT $5
+        `,
+        guildId,
+        userId,
+        vectorLiteral,
+        dimensions,
+        limit
+      )
     );
   }
 
-  async searchSimilarMessages(guildId: string, channelId: string, queryEmbedding: number[], limit = 5) {
+  async searchSimilarMessages(guildId: string, channelId: string, queryEmbedding: number[], limit = 5): Promise<MessageMemoryRow[]> {
     const vectorLiteral = toVectorLiteral(queryEmbedding);
+    const dimensions = queryEmbedding.length;
 
-    return this.prisma.$queryRawUnsafe<
-      Array<{ id: string; content: string; userId: string; createdAt: Date }>
-    >(
-      `
-        SELECT m.id, m.content, m."userId", m."createdAt"
-        FROM "MessageEmbedding" e
-        INNER JOIN "Message" m ON m.id = e."messageId"
-        WHERE e."guildId" = $1
-          AND e."channelId" = $2
-          AND e.embedding IS NOT NULL
-        ORDER BY e.embedding <=> $3::vector
-        LIMIT $4
-      `,
-      guildId,
-      channelId,
-      vectorLiteral,
-      limit
+    return this.withVectorFallback(
+      "message_similarity",
+      () => Promise.resolve([]),
+      () => this.prisma.$queryRawUnsafe<MessageMemoryRow[]>(
+        `
+          SELECT m.id, m.content, m."userId", m."createdAt"
+          FROM "MessageEmbedding" e
+          INNER JOIN "Message" m ON m.id = e."messageId"
+          WHERE e."guildId" = $1
+            AND e."channelId" = $2
+            AND e.embedding IS NOT NULL
+            AND e.dimensions = $4
+          ORDER BY e.embedding <=> $3::vector
+          LIMIT $5
+        `,
+        guildId,
+        channelId,
+        vectorLiteral,
+        dimensions,
+        limit
+      )
     );
   }
 
-  async findRelevantChannelMemory(guildId: string, channelId: string, queryEmbedding?: number[], limit = 4) {
+  async findRelevantChannelMemory(guildId: string, channelId: string, queryEmbedding?: number[], limit = 4): Promise<ChannelMemoryRow[]> {
     if (!queryEmbedding?.length) {
       return this.prisma.channelMemoryNote.findMany({
         where: {
@@ -156,29 +180,34 @@ export class RetrievalService {
     }
 
     const vectorLiteral = toVectorLiteral(queryEmbedding);
+    const dimensions = queryEmbedding.length;
 
-    return this.prisma.$queryRawUnsafe<
-      Array<{ id: string; key: string; value: string; type: string; createdAt: Date; updatedAt: Date; confidence: number; salience: number }>
-    >(
-      `
-        SELECT id, key, value, type, "createdAt", "updatedAt", confidence, salience
-        FROM "ChannelMemoryNote"
-        WHERE "guildId" = $1
-          AND "channelId" = $2
-          AND active = TRUE
-          AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
-          AND embedding IS NOT NULL
-        ORDER BY embedding <=> $3::vector
-        LIMIT $4
-      `,
-      guildId,
-      channelId,
-      vectorLiteral,
-      limit
+    return this.withVectorFallback(
+      "channel_memory",
+      () => this.findRelevantChannelMemory(guildId, channelId, undefined, limit),
+      () => this.prisma.$queryRawUnsafe<ChannelMemoryRow[]>(
+        `
+          SELECT id, key, value, type, "createdAt", "updatedAt", confidence, salience
+          FROM "ChannelMemoryNote"
+          WHERE "guildId" = $1
+            AND "channelId" = $2
+            AND active = TRUE
+            AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
+            AND embedding IS NOT NULL
+            AND vector_dims(embedding) = $4
+          ORDER BY embedding <=> $3::vector
+          LIMIT $5
+        `,
+        guildId,
+        channelId,
+        vectorLiteral,
+        dimensions,
+        limit
+      )
     );
   }
 
-  async findRelevantEventMemory(guildId: string, channelId: string, queryEmbedding?: number[], limit = 4) {
+  async findRelevantEventMemory(guildId: string, channelId: string, queryEmbedding?: number[], limit = 4): Promise<EventMemoryRow[]> {
     if (!queryEmbedding?.length) {
       return this.prisma.eventMemory.findMany({
         where: {
@@ -208,25 +237,30 @@ export class RetrievalService {
     }
 
     const vectorLiteral = toVectorLiteral(queryEmbedding);
+    const dimensions = queryEmbedding.length;
 
-    return this.prisma.$queryRawUnsafe<
-      Array<{ id: string; eventKey: string; key: string; value: string; type: string; createdAt: Date; updatedAt: Date; confidence: number; salience: number }>
-    >(
-      `
-        SELECT id, "eventKey", key, value, type, "createdAt", "updatedAt", confidence, salience
-        FROM "EventMemory"
-        WHERE "guildId" = $1
-          AND active = TRUE
-          AND ("channelId" = $2 OR "channelId" IS NULL OR tags && ARRAY['server','global']::TEXT[])
-          AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
-          AND embedding IS NOT NULL
-        ORDER BY embedding <=> $3::vector
-        LIMIT $4
-      `,
-      guildId,
-      channelId,
-      vectorLiteral,
-      limit
+    return this.withVectorFallback(
+      "event_memory",
+      () => this.findRelevantEventMemory(guildId, channelId, undefined, limit),
+      () => this.prisma.$queryRawUnsafe<EventMemoryRow[]>(
+        `
+          SELECT id, "eventKey", key, value, type, "createdAt", "updatedAt", confidence, salience
+          FROM "EventMemory"
+          WHERE "guildId" = $1
+            AND active = TRUE
+            AND ("channelId" = $2 OR "channelId" IS NULL OR tags && ARRAY['server','global']::TEXT[])
+            AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
+            AND embedding IS NOT NULL
+            AND vector_dims(embedding) = $4
+          ORDER BY embedding <=> $3::vector
+          LIMIT $5
+        `,
+        guildId,
+        channelId,
+        vectorLiteral,
+        dimensions,
+        limit
+      )
     );
   }
 
@@ -235,7 +269,7 @@ export class RetrievalService {
     const vectorLimit = Math.max(limit, 8);
     const lexicalLimit = Math.max(limit, 8);
     const vectorRows = input.queryEmbedding?.length
-      ? await this.getVectorHybridRows(input, vectorLimit)
+      ? await this.withVectorFallback("hybrid_recall", () => Promise.resolve([]), () => this.getVectorHybridRows(input, vectorLimit))
       : [];
     const lexicalRows = await this.getLexicalHybridRows(input, lexicalLimit);
     const recentRows = vectorRows.length || lexicalRows.length ? [] : await this.getRecentHybridRows(input, Math.min(limit, 6));
@@ -424,6 +458,7 @@ export class RetrievalService {
     }
 
     const vectorLiteral = toVectorLiteral(input.queryEmbedding);
+    const dimensions = input.queryEmbedding.length;
     const perScopeLimit = Math.max(2, Math.ceil(limit / 2));
     const [server, user, channel, events, messages] = await Promise.all([
       this.prisma.$queryRawUnsafe<Array<Omit<HybridRow, "rank" | "reason">>>(
@@ -433,11 +468,13 @@ export class RetrievalService {
           WHERE "guildId" = $1
             AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
             AND embedding IS NOT NULL
+            AND vector_dims(embedding) = $3
           ORDER BY embedding <=> $2::vector
-          LIMIT $3
+          LIMIT $4
         `,
         input.guildId,
         vectorLiteral,
+        dimensions,
         perScopeLimit
       ),
       this.prisma.$queryRawUnsafe<Array<Omit<HybridRow, "rank" | "reason">>>(
@@ -449,12 +486,14 @@ export class RetrievalService {
             AND active = TRUE
             AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
             AND embedding IS NOT NULL
+            AND vector_dims(embedding) = $4
           ORDER BY embedding <=> $3::vector
-          LIMIT $4
+          LIMIT $5
         `,
         input.guildId,
         input.userId,
         vectorLiteral,
+        dimensions,
         perScopeLimit
       ),
       this.prisma.$queryRawUnsafe<Array<Omit<HybridRow, "rank" | "reason">>>(
@@ -466,12 +505,14 @@ export class RetrievalService {
             AND active = TRUE
             AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
             AND embedding IS NOT NULL
+            AND vector_dims(embedding) = $4
           ORDER BY embedding <=> $3::vector
-          LIMIT $4
+          LIMIT $5
         `,
         input.guildId,
         input.channelId,
         vectorLiteral,
+        dimensions,
         perScopeLimit
       ),
       this.prisma.$queryRawUnsafe<Array<Omit<HybridRow, "rank" | "reason">>>(
@@ -483,12 +524,14 @@ export class RetrievalService {
             AND ("channelId" = $2 OR "channelId" IS NULL OR tags && ARRAY['server','global']::TEXT[])
             AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
             AND embedding IS NOT NULL
+            AND vector_dims(embedding) = $4
           ORDER BY embedding <=> $3::vector
-          LIMIT $4
+          LIMIT $5
         `,
         input.guildId,
         input.channelId,
         vectorLiteral,
+        dimensions,
         perScopeLimit
       ),
       this.prisma.$queryRawUnsafe<Array<Omit<HybridRow, "rank" | "reason">>>(
@@ -499,12 +542,14 @@ export class RetrievalService {
           WHERE e."guildId" = $1
             AND e."channelId" = $2
             AND e.embedding IS NOT NULL
+            AND e.dimensions = $4
           ORDER BY e.embedding <=> $3::vector
-          LIMIT $4
+          LIMIT $5
         `,
         input.guildId,
         input.channelId,
         vectorLiteral,
+        dimensions,
         perScopeLimit
       )
     ]);
@@ -614,6 +659,44 @@ export class RetrievalService {
       "recent"
     );
   }
+
+  private async withVectorFallback<T>(
+    operation: string,
+    fallback: () => Promise<T>,
+    run: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      if (!isVectorDimensionError(error)) {
+        throw error;
+      }
+
+      this.logger?.warn(
+        { error: asErrorMessage(error), operation },
+        "vector retrieval skipped because embedding dimensions differ"
+      );
+      return fallback();
+    }
+  }
+}
+
+function isVectorDimensionError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const record = error as {
+    code?: unknown;
+    message?: unknown;
+    meta?: { message?: unknown };
+  };
+  const message = [record.message, record.meta?.message]
+    .filter((value): value is string => typeof value === "string")
+    .join("\n");
+
+  return (record.code === "P2010" && /different vector dimensions/i.test(message))
+    || /different vector dimensions/i.test(message);
 }
 
 function extractLexicalTerms(query: string) {

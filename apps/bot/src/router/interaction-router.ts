@@ -2445,6 +2445,7 @@ async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRou
   const activeSlot = MODEL_ROUTING_SLOTS.includes(selectedSlot) ? selectedSlot : "chat";
   const activeModel = status.slots[activeSlot];
   const preset = MODEL_ROUTING_PRESETS[status.preset];
+  const embeddingStatus = formatEmbeddingStatus(status);
   const telemetry = guildId ? await buildLlmTelemetry(runtime, guildId) : "Открой панель внутри сервера, чтобы увидеть telemetry.";
   const updated = status.updatedAt
     ? `\nupdated=${status.updatedAt.toISOString()}${status.updatedBy ? ` by ${status.updatedBy}` : ""}`
@@ -2462,14 +2463,14 @@ async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRou
           `Provider: **${status.provider}** · source=${status.source}${updated}`,
           `Selected slot: **${activeSlot}** -> \`${activeModel}\``,
           "",
-          "Embeddings locked here: `text-embedding-3-small` by default. Changing embedding dimensions needs a separate reindex.",
+          `Embeddings locked here: \`${embeddingStatus}\`. Changing embedding dimensions needs a separate reindex.`,
           parseWarning
         ].filter(Boolean).join("\n"))
         .addFields(
           { name: "Slots", value: clipFieldText(formatLlmSlots(status.slots, status.overrides, activeSlot)) },
           {
             name: "Legacy fallback",
-            value: clipFieldText(`chat=${status.legacyFallback.chat}\nsmart=${status.legacyFallback.smart}\nembed=${status.embeddingModel}`),
+            value: clipFieldText(`chat=${status.legacyFallback.chat}\nsmart=${status.legacyFallback.smart}\nembed=${embeddingStatus}`),
             inline: true
           },
           { name: "Telemetry", value: clipFieldText(telemetry) }
@@ -2558,6 +2559,12 @@ function formatLlmSlots(
       return `${active}${override} ${slot}: ${slots[slot]}`;
     })
     .join("\n");
+}
+
+function formatEmbeddingStatus(status: { embeddingModel: string; embeddingDimensions?: number }) {
+  return status.embeddingDimensions
+    ? `${status.embeddingModel} @ ${status.embeddingDimensions} dims`
+    : status.embeddingModel;
 }
 
 async function buildLlmTelemetry(runtime: BotRuntime, guildId: string) {

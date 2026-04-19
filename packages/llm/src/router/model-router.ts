@@ -13,6 +13,8 @@ import {
   utilityFastModelProfile
 } from "./model-profiles";
 import {
+  OPENAI_EMBEDDING_DIMENSIONS,
+  OPENAI_EMBEDDING_MODEL,
   resolveModelRouting,
   slotForIntent,
   type ModelRoutingSlot,
@@ -23,7 +25,6 @@ type ProviderAwareEnv = AppEnv & {
   LLM_PROVIDER?: string;
   OPENAI_CHAT_MODEL?: string;
   OPENAI_SMART_MODEL?: string;
-  OPENAI_EMBED_MODEL?: string;
 };
 
 export class ModelRouter {
@@ -71,11 +72,24 @@ export class ModelRouter {
   }
 
   pickEmbedModel(): string {
+    return this.pickEmbeddingModel().model;
+  }
+
+  pickEmbedDimensions(): number | undefined {
+    return this.pickEmbeddingModel().dimensions;
+  }
+
+  pickEmbeddingModel(): { model: string; dimensions?: number } {
     if (this.isOpenAI) {
-      return this.providerEnv.OPENAI_EMBED_MODEL ?? "text-embedding-3-small";
+      return {
+        model: OPENAI_EMBEDDING_MODEL,
+        dimensions: OPENAI_EMBEDDING_DIMENSIONS
+      };
     }
 
-    return this.env.OLLAMA_EMBED_MODEL;
+    return {
+      model: this.env.OLLAMA_EMBED_MODEL
+    };
   }
 
   pickProfile(intent: BotIntent): ModelProfile {

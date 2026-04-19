@@ -170,18 +170,29 @@ export class TopicService {
   }
 
   private async getEmbeddingSimilarity(topicId: string, embedding: number[]) {
-    const rows = await this.prisma.$queryRawUnsafe<Array<{ similarity: number | null }>>(
-      `
-        SELECT 1 - (embedding <=> $1::vector) AS similarity
-        FROM "TopicSession"
-        WHERE id = $2 AND embedding IS NOT NULL
-        LIMIT 1
-      `,
-      toVectorLiteral(embedding),
-      topicId
-    );
+    try {
+      const rows = await this.prisma.$queryRawUnsafe<Array<{ similarity: number | null }>>(
+        `
+          SELECT 1 - (embedding <=> $1::vector) AS similarity
+          FROM "TopicSession"
+          WHERE id = $2
+            AND embedding IS NOT NULL
+            AND vector_dims(embedding) = $3
+          LIMIT 1
+        `,
+        toVectorLiteral(embedding),
+        topicId,
+        embedding.length
+      );
 
-    return rows[0]?.similarity ?? null;
+      return rows[0]?.similarity ?? null;
+    } catch (error) {
+      if (isVectorDimensionError(error)) {
+        return null;
+      }
+
+      throw error;
+    }
   }
 
   private async setTopicEmbedding(topicId: string, embedding: number[]) {
@@ -199,6 +210,24 @@ export class TopicService {
   private get similarityThreshold() {
     return this.options.similarityThreshold ?? 0.35;
   }
+}
+
+function isVectorDimensionError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const record = error as {
+    code?: unknown;
+    message?: unknown;
+    meta?: { message?: unknown };
+  };
+  const message = [record.message, record.meta?.message]
+    .filter((value): value is string => typeof value === "string")
+    .join("\n");
+
+  return (record.code === "P2010" && /different vector dimensions/i.test(message))
+    || /different vector dimensions/i.test(message);
 }
 
 function buildTitle(content: string) {

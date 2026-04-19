@@ -50,7 +50,11 @@ export interface LlmChatOptions {
   numBatch?: number;
 }
 
+export interface LlmEmbedOptions {
+  dimensions?: number;
+}
+
 export interface LlmClient {
   chat(options: LlmChatOptions): Promise<LlmChatResponse>;
-  embed(model: string, input: string | string[]): Promise<number[][]>;
+  embed(model: string, input: string | string[], options?: LlmEmbedOptions): Promise<number[][]>;
 }

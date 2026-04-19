@@ -564,7 +564,7 @@ async function main() {
   const analytics = new import_analytics.AnalyticsQueryService(prisma);
   const summaryService = new import_memory3.SummaryService(prisma);
   const profileService = new import_memory3.ProfileService(prisma, env);
-  const retrievalService = new import_memory3.RetrievalService(prisma);
+  const retrievalService = new import_memory3.RetrievalService(prisma, logger);
   const topicService = new import_memory3.TopicService(prisma, {
     topicTtlMinutes: env.TOPIC_TTL_MINUTES,
     similarityThreshold: env.TOPIC_SIM_THRESHOLD

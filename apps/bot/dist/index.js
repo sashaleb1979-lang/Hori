@@ -369,10 +369,11 @@ var BotStateService = class {
       getOwnerLockdownState(this.runtime, true),
       this.runtime.runtimeConfig.getModelRoutingStatus()
     ]);
+    const embeddingStatus = modelRouting.embeddingDimensions ? `${modelRouting.embeddingModel} @ ${modelRouting.embeddingDimensions} dims` : modelRouting.embeddingModel;
     const llm = modelRouting.provider === "openai" ? [
       `provider=openai preset=${modelRouting.preset}`,
       ...import_llm.MODEL_ROUTING_SLOTS.map((slot) => `${slot}=${modelRouting.slots[slot]}`),
-      `embed=${modelRouting.embeddingModel}`
+      `embed=${embeddingStatus}`
     ].join("\n") : `provider=ollama
 url=${this.runtime.env.OLLAMA_BASE_URL ?? "missing"}
 fast=${this.runtime.env.OLLAMA_FAST_MODEL}
@@ -2544,6 +2545,7 @@ async function buildLlmPanelResponse(runtime, selectedSlot = "chat", guildId) {
   const activeSlot = import_llm2.MODEL_ROUTING_SLOTS.includes(selectedSlot) ? selectedSlot : "chat";
   const activeModel = status.slots[activeSlot];
   const preset = import_llm2.MODEL_ROUTING_PRESETS[status.preset];
+  const embeddingStatus = formatEmbeddingStatus(status);
   const telemetry = guildId ? await buildLlmTelemetry(runtime, guildId) : "\u041E\u0442\u043A\u0440\u043E\u0439 \u043F\u0430\u043D\u0435\u043B\u044C \u0432\u043D\u0443\u0442\u0440\u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430, \u0447\u0442\u043E\u0431\u044B \u0443\u0432\u0438\u0434\u0435\u0442\u044C telemetry.";
   const updated = status.updatedAt ? `
 updated=${status.updatedAt.toISOString()}${status.updatedBy ? ` by ${status.updatedBy}` : ""}` : "";
@@ -2558,7 +2560,7 @@ Routing JSON \u0431\u044B\u043B \u043F\u0440\u043E\u0438\u0433\u043D\u043E\u0440
         `Provider: **${status.provider}** \xB7 source=${status.source}${updated}`,
         `Selected slot: **${activeSlot}** -> \`${activeModel}\``,
         "",
-        "Embeddings locked here: `text-embedding-3-small` by default. Changing embedding dimensions needs a separate reindex.",
+        `Embeddings locked here: \`${embeddingStatus}\`. Changing embedding dimensions needs a separate reindex.`,
         parseWarning
       ].filter(Boolean).join("\n")).addFields(
         { name: "Slots", value: clipFieldText(formatLlmSlots(status.slots, status.overrides, activeSlot)) },
@@ -2566,7 +2568,7 @@ Routing JSON \u0431\u044B\u043B \u043F\u0440\u043E\u0438\u0433\u043D\u043E\u0440
           name: "Legacy fallback",
           value: clipFieldText(`chat=${status.legacyFallback.chat}
 smart=${status.legacyFallback.smart}
-embed=${status.embeddingModel}`),
+embed=${embeddingStatus}`),
           inline: true
         },
         { name: "Telemetry", value: clipFieldText(telemetry) }
@@ -2620,6 +2622,9 @@ function formatLlmSlots(slots, overrides, activeSlot) {
     const override = overrides[slot] ? "*" : " ";
     return `${active}${override} ${slot}: ${slots[slot]}`;
   }).join("\n");
+}
+function formatEmbeddingStatus(status) {
+  return status.embeddingDimensions ? `${status.embeddingModel} @ ${status.embeddingDimensions} dims` : status.embeddingModel;
 }
 async function buildLlmTelemetry(runtime, guildId) {
   const rows = await runtime.prisma.botEventLog.findMany({
@@ -3563,7 +3568,7 @@ async function bootstrapBot() {
   const analytics = new import_analytics2.AnalyticsQueryService(prisma);
   const summaryService = new import_memory2.SummaryService(prisma);
   const relationshipService = new import_memory2.RelationshipService(prisma);
-  const retrievalService = new import_memory2.RetrievalService(prisma);
+  const retrievalService = new import_memory2.RetrievalService(prisma, logger);
   const activeMemoryService = new import_memory2.ActiveMemoryService(retrievalService);
   const memoryAlbumService = new import_memory2.MemoryAlbumService(prisma);
   const interactionRequestService = new import_memory2.InteractionRequestService(prisma);

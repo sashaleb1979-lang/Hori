@@ -146,6 +146,54 @@ describe("OllamaClient", () => {
     expect(response.message.content).toBe("Привет");
   });
 
+  it("ignores embedding dimensions because Ollama models define their own vector size", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/tags")) {
+        return new Response(
+          JSON.stringify({ models: [{ name: "nomic-embed-text:latest" }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      expect(url.endsWith("/api/embed")).toBe(true);
+      const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(payload).toEqual({
+        model: "nomic-embed-text:latest",
+        keep_alive: "10m",
+        input: "хори привет"
+      });
+
+      return new Response(
+        JSON.stringify({ embeddings: [[0.1, 0.2, 0.3]] }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OllamaClient(
+      {
+        OLLAMA_BASE_URL: "http://localhost:11434",
+        OLLAMA_TIMEOUT_MS: 5_000,
+        OLLAMA_FAST_MODEL: "qwen3.5:9b",
+        OLLAMA_SMART_MODEL: "qwen3.5:9b",
+        OLLAMA_EMBED_MODEL: "nomic-embed-text",
+        LLM_REPLY_MAX_TOKENS: 96,
+        OLLAMA_KEEP_ALIVE: "10m"
+      } as never,
+      {
+        error: vi.fn(),
+        warn: vi.fn(),
+        info: vi.fn(),
+        debug: vi.fn()
+      } as never
+    );
+
+    await expect(client.embed("nomic-embed-text", "хори привет", { dimensions: 768 })).resolves.toEqual([[0.1, 0.2, 0.3]]);
+  });
+
   it("logs tunnel traffic, prompts and raw responses when enabled", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);

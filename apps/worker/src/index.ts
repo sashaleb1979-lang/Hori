@@ -77,7 +77,7 @@ async function main() {
   const analytics = new AnalyticsQueryService(prisma);
   const summaryService = new SummaryService(prisma);
   const profileService = new ProfileService(prisma, env);
-  const retrievalService = new RetrievalService(prisma);
+  const retrievalService = new RetrievalService(prisma, logger);
   const topicService = new TopicService(prisma, {
     topicTtlMinutes: env.TOPIC_TTL_MINUTES,
     similarityThreshold: env.TOPIC_SIM_THRESHOLD

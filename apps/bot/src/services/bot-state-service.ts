@@ -66,11 +66,14 @@ export class BotStateService {
       getOwnerLockdownState(this.runtime, true),
       this.runtime.runtimeConfig.getModelRoutingStatus()
     ]);
+    const embeddingStatus = modelRouting.embeddingDimensions
+      ? `${modelRouting.embeddingModel} @ ${modelRouting.embeddingDimensions} dims`
+      : modelRouting.embeddingModel;
     const llm = modelRouting.provider === "openai"
       ? [
           `provider=openai preset=${modelRouting.preset}`,
           ...MODEL_ROUTING_SLOTS.map((slot) => `${slot}=${modelRouting.slots[slot]}`),
-          `embed=${modelRouting.embeddingModel}`
+          `embed=${embeddingStatus}`
         ].join("\n")
       : `provider=ollama\nurl=${this.runtime.env.OLLAMA_BASE_URL ?? "missing"}\nfast=${this.runtime.env.OLLAMA_FAST_MODEL}\nsmart=${this.runtime.env.OLLAMA_SMART_MODEL}`;
 

@@ -108,7 +108,7 @@ export async function bootstrapBot() {
   const analytics = new AnalyticsQueryService(prisma);
   const summaryService = new SummaryService(prisma);
   const relationshipService = new RelationshipService(prisma);
-  const retrievalService = new RetrievalService(prisma);
+  const retrievalService = new RetrievalService(prisma, logger);
   const activeMemoryService = new ActiveMemoryService(retrievalService);
   const memoryAlbumService = new MemoryAlbumService(prisma);
   const interactionRequestService = new InteractionRequestService(prisma);

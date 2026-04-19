@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { loadEnv } from "@hori/config";
-import { ModelRouter, parseStoredModelRouting, resolveModelRouting, serializeModelRouting } from "@hori/llm";
+import { EmbeddingAdapter, ModelRouter, parseStoredModelRouting, resolveModelRouting, serializeModelRouting } from "@hori/llm";
 
 describe("ModelRouter", () => {
   it("defaults both fast and smart tiers to qwen3.5:9b", () => {
@@ -94,5 +94,24 @@ describe("ModelRouter", () => {
 
     expect(parsed.value?.overrides?.chat).toBeUndefined();
     expect(parsed.value?.overrides?.search).toBe("gpt-5.4-mini");
+  });
+
+  it("locks OpenAI embeddings to text-embedding-3-small at 768 dimensions", async () => {
+    const env = loadEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      LLM_PROVIDER: "openai",
+      OPENAI_EMBED_MODEL: "text-embedding-3-large"
+    });
+    const router = new ModelRouter(env);
+    const embed = vi.fn().mockResolvedValue([[0.1, 0.2, 0.3]]);
+    const adapter = new EmbeddingAdapter({ embed } as never, router);
+
+    await expect(adapter.embedOne("хори привет")).resolves.toEqual([0.1, 0.2, 0.3]);
+    expect(router.pickEmbeddingModel()).toEqual({
+      model: "text-embedding-3-small",
+      dimensions: 768
+    });
+    expect(embed).toHaveBeenCalledWith("text-embedding-3-small", "хори привет", { dimensions: 768 });
   });
 });

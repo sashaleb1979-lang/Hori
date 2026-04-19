@@ -2,7 +2,8 @@ import type { AppEnv } from "@hori/config";
 import type { AppLogger } from "@hori/shared";
 import { asErrorMessage } from "@hori/shared";
 
-import type { LlmChatOptions, LlmChatResponse, LlmClient, LlmToolCall } from "./llm-client";
+import { OPENAI_EMBEDDING_DIMENSIONS } from "../router/model-routing";
+import type { LlmChatOptions, LlmChatResponse, LlmClient, LlmToolCall, LlmEmbedOptions } from "./llm-client";
 
 /* ------------------------------------------------------------------ */
 /*  OpenAI-compatible LlmClient                                       */
@@ -206,12 +207,13 @@ export class OpenAIClient implements LlmClient {
     };
   }
 
-  async embed(model: string, input: string | string[]): Promise<number[][]> {
+  async embed(model: string, input: string | string[], options: LlmEmbedOptions = {}): Promise<number[][]> {
     const inputArray = Array.isArray(input) ? input : [input];
 
     const body = {
       model,
-      input: inputArray
+      input: inputArray,
+      dimensions: options.dimensions ?? OPENAI_EMBEDDING_DIMENSIONS
     };
 
     const response = await fetch(`${OPENAI_BASE_URL}/embeddings`, {

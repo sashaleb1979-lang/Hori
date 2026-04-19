@@ -1,6 +1,8 @@
 import type { AppEnv } from "@hori/config";
 
 export const MODEL_ROUTING_SETTING_KEY = "llm.model_routing";
+export const OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
+export const OPENAI_EMBEDDING_DIMENSIONS = 768;
 
 export const MODEL_ROUTING_SLOTS = [
   "classifier",
@@ -101,6 +103,7 @@ export interface ResolvedModelRouting {
     smart: string;
   };
   embeddingModel: string;
+  embeddingDimensions?: number;
   parseError?: string;
 }
 
@@ -165,8 +168,9 @@ export function resolveModelRouting(env: AppEnv, rawStoredValue?: string | null)
     overrides,
     legacyFallback,
     embeddingModel: provider === "openai"
-      ? (env as ProviderAwareEnv).OPENAI_EMBED_MODEL ?? "text-embedding-3-small"
+      ? OPENAI_EMBEDDING_MODEL
       : env.OLLAMA_EMBED_MODEL,
+    embeddingDimensions: provider === "openai" ? OPENAI_EMBEDDING_DIMENSIONS : undefined,
     parseError: parsed.error
   };
 }

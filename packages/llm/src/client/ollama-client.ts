@@ -2,7 +2,7 @@ import type { AppEnv } from "@hori/config";
 import type { AppLogger } from "@hori/shared";
 import { asErrorMessage } from "@hori/shared";
 
-import type { LlmChatOptions, LlmChatResponse, LlmClient, LlmToolCall } from "./llm-client";
+import type { LlmChatOptions, LlmChatResponse, LlmClient, LlmToolCall, LlmEmbedOptions } from "./llm-client";
 
 interface OllamaTagsResponse {
   models?: Array<{ name?: string }>;
@@ -516,7 +516,7 @@ export class OllamaClient implements LlmClient {
     }
   }
 
-  async embed(model: string, input: string | string[]): Promise<number[][]> {
+  async embed(model: string, input: string | string[], _options: LlmEmbedOptions = {}): Promise<number[][]> {
     return this.withRequestSlot(() => this.embedUnqueued(model, input));
   }
 
