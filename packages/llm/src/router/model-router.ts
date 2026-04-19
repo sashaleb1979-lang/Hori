@@ -13,6 +13,14 @@ import {
   utilityFastModelProfile
 } from "./model-profiles";
 
+import {
+  type ModelRoutingSlot,
+  type ResolvedModelRouting,
+  OPENAI_EMBEDDING_MODEL,
+  OPENAI_EMBEDDING_DIMENSIONS,
+  slotForIntent
+} from "./model-routing";
+
 type ProviderAwareEnv = AppEnv & {
   LLM_PROVIDER?: string;
   OPENAI_CHAT_MODEL?: string;
@@ -46,7 +54,19 @@ export class ModelRouter {
     }
   }
 
-  pickModel(intent: BotIntent) {
+  pickSlot(intent: BotIntent): ModelRoutingSlot {
+    return slotForIntent(intent);
+  }
+
+  pickModelForSlot(slot: ModelRoutingSlot, routing: ResolvedModelRouting): string {
+    return routing.slots[slot];
+  }
+
+  pickModel(intent: BotIntent, routing?: ResolvedModelRouting): string {
+    if (routing) {
+      return this.pickModelForSlot(this.pickSlot(intent), routing);
+    }
+
     if (this.isOpenAI) {
       const env = this.providerEnv;
       return this.pickKind(intent) === "smart"
@@ -55,6 +75,17 @@ export class ModelRouter {
     }
 
     return this.pickKind(intent) === "smart" ? this.env.OLLAMA_SMART_MODEL : this.env.OLLAMA_FAST_MODEL;
+  }
+
+  pickEmbeddingModel(): { model: string; dimensions?: number } {
+    if (this.isOpenAI) {
+      return {
+        model: OPENAI_EMBEDDING_MODEL,
+        dimensions: OPENAI_EMBEDDING_DIMENSIONS
+      };
+    }
+
+    return { model: this.env.OLLAMA_EMBED_MODEL };
   }
 
   pickEmbedModel(): string {
@@ -86,4 +117,3 @@ export class ModelRouter {
     }
   }
 }
-
