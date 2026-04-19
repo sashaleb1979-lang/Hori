@@ -90,6 +90,9 @@ importers:
       '@hori/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@hori/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@hori/llm':
         specifier: workspace:*
         version: link:../../packages/llm
