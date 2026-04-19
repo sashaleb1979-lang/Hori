@@ -46,13 +46,13 @@ describe("ModelRouter", () => {
 
     expect(routing.preset).toBe("balanced_openai");
     expect(router.pickModelForSlot("classifier", routing)).toBe("gpt-5-nano");
-  expect(router.pickModel("chat", routing)).toBe("gpt-4o-mini");
-    expect(router.pickModel("summary", routing)).toBe("gpt-5-mini");
-    expect(router.pickModel("rewrite", routing)).toBe("gpt-5-mini");
-    expect(router.pickModel("profile", routing)).toBe("gpt-5-mini");
-    expect(router.pickModel("memory_write", routing)).toBe("gpt-5-mini");
-    expect(router.pickModel("search", routing)).toBe("gpt-5.4-mini");
-    expect(router.pickModel("analytics", routing)).toBe("gpt-5.4-mini");
+  expect(router.pickModel("chat", routing)).toBe("gpt-5.4-nano");
+    expect(router.pickModel("summary", routing)).toBe("gpt-5.4-nano");
+    expect(router.pickModel("rewrite", routing)).toBe("gpt-5.4-nano");
+    expect(router.pickModel("profile", routing)).toBe("gpt-5.4-nano");
+    expect(router.pickModel("memory_write", routing)).toBe("gpt-5.4-nano");
+    expect(router.pickModel("search", routing)).toBe("gpt-5.4-nano");
+    expect(router.pickModel("analytics", routing)).toBe("gpt-5.4-nano");
   });
 
   it("keeps legacy OpenAI env routing available", () => {

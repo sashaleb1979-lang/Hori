@@ -257,10 +257,12 @@ export interface ComposeBehaviorPromptInput {
   contextTrace?: ContextTrace;
   debugOverrides?: PersonaDebugOverrides;
   isDirectMessage?: boolean;
+  contour?: "A" | "B" | "C";
 }
 
 export interface ComposeBehaviorPromptOutput {
   prompt: string;
+  staticPrefix: string;
   trace: import("@hori/shared").PersonaBehaviorTrace;
   limits: PersonaResponseLimits;
 }

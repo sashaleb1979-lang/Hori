@@ -125,8 +125,8 @@ const coreEnvSchema = z.object({
   OLLAMA_LOG_MAX_CHARS: intish.default(12000),
 
   OPENAI_API_KEY: z.string().optional(),
-  OPENAI_CHAT_MODEL: z.string().default("gpt-4o-mini"),
-  OPENAI_SMART_MODEL: z.string().default("gpt-4o-mini"),
+  OPENAI_CHAT_MODEL: z.string().default("gpt-5.4-nano"),
+  OPENAI_SMART_MODEL: z.string().default("gpt-5.4-nano"),
   OPENAI_EMBED_MODEL: z.string().default("text-embedding-3-small"),
 
   BRAVE_SEARCH_API_KEY: z.string().optional(),

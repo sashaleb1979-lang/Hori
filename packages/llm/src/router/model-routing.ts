@@ -21,6 +21,7 @@ export const MODEL_ROUTING_MODEL_IDS = [
   "gpt-4o-mini",
   "gpt-5-nano",
   "gpt-5-mini",
+  "gpt-5.4-nano",
   "gpt-5.4-mini"
 ] as const;
 
@@ -36,13 +37,13 @@ export interface ModelRoutingPreset {
 
 const balancedOpenAiSlots: ModelRoutingSlots = {
   classifier: "gpt-5-nano",
-  chat: "gpt-4o-mini",
-  summary: "gpt-5-mini",
-  rewrite: "gpt-5-mini",
-  search: "gpt-5.4-mini",
-  analytics: "gpt-5.4-mini",
-  profile: "gpt-5-mini",
-  memory: "gpt-5-mini"
+  chat: "gpt-5.4-nano",
+  summary: "gpt-5.4-nano",
+  rewrite: "gpt-5.4-nano",
+  search: "gpt-5.4-nano",
+  analytics: "gpt-5.4-nano",
+  profile: "gpt-5.4-nano",
+  memory: "gpt-5.4-nano"
 };
 
 export const MODEL_ROUTING_PRESETS = {
@@ -57,30 +58,30 @@ export const MODEL_ROUTING_PRESETS = {
   },
   economy_openai: {
     label: "Economy OpenAI",
-    description: "Avoids gpt-5.4-mini; cheaper for routine traffic.",
+    description: "Uses gpt-5-nano everywhere; cheapest possible.",
     slots: {
       classifier: "gpt-5-nano",
-      chat: "gpt-5-mini",
-      summary: "gpt-5-mini",
-      rewrite: "gpt-5-mini",
-      search: "gpt-5-mini",
-      analytics: "gpt-5-mini",
+      chat: "gpt-5-nano",
+      summary: "gpt-5-nano",
+      rewrite: "gpt-5-nano",
+      search: "gpt-5-nano",
+      analytics: "gpt-5-nano",
       profile: "gpt-5-nano",
       memory: "gpt-5-nano"
     }
   },
   quality_openai: {
     label: "Quality OpenAI",
-    description: "Uses gpt-5.4-mini for most visible reasoning and synthesis.",
+    description: "Uses gpt-5.4-mini for chat, gpt-5.4-nano for utilities.",
     slots: {
       classifier: "gpt-5-nano",
       chat: "gpt-5.4-mini",
-      summary: "gpt-5.4-mini",
-      rewrite: "gpt-5-mini",
-      search: "gpt-5.4-mini",
-      analytics: "gpt-5.4-mini",
-      profile: "gpt-5-mini",
-      memory: "gpt-5-mini"
+      summary: "gpt-5.4-nano",
+      rewrite: "gpt-5.4-nano",
+      search: "gpt-5.4-nano",
+      analytics: "gpt-5.4-nano",
+      profile: "gpt-5.4-nano",
+      memory: "gpt-5.4-nano"
     }
   }
 } as const satisfies Record<string, ModelRoutingPreset>;

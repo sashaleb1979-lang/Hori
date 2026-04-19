@@ -70,8 +70,8 @@ export class ModelRouter {
     if (this.isOpenAI) {
       const env = this.providerEnv;
       return this.pickKind(intent) === "smart"
-        ? env.OPENAI_SMART_MODEL ?? "gpt-4o-mini"
-        : env.OPENAI_CHAT_MODEL ?? "gpt-4o-mini";
+        ? env.OPENAI_SMART_MODEL ?? "gpt-5.4-nano"
+        : env.OPENAI_CHAT_MODEL ?? "gpt-5.4-nano";
     }
 
     return this.pickKind(intent) === "smart" ? this.env.OLLAMA_SMART_MODEL : this.env.OLLAMA_FAST_MODEL;

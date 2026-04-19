@@ -19,6 +19,7 @@ import {
 } from "@hori/shared";
 
 import { createCleanupJob } from "./jobs/cleanup";
+import { createConversationAnalysisJob } from "./jobs/conversation-analysis";
 import { createEmbeddingJob } from "./jobs/embeddings";
 import { createMemoryFormationJob } from "./jobs/memory-formation";
 import { createProfileJob } from "./jobs/profiles";
@@ -124,7 +125,8 @@ async function main() {
     createWorker(QUEUE_NAMES.topic, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createTopicJob(runtime), 1),
     createWorker(QUEUE_NAMES.memoryFormation, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createMemoryFormationJob(runtime), 1),
     createWorker(QUEUE_NAMES.searchCache, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSearchCacheCleanupJob(runtime), 1),
-    createWorker(QUEUE_NAMES.cleanup, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createCleanupJob(runtime), 1)
+    createWorker(QUEUE_NAMES.cleanup, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createCleanupJob(runtime), 1),
+    createWorker(QUEUE_NAMES.conversationAnalysis, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createConversationAnalysisJob(runtime), 1)
   ];
 
   await Promise.all([

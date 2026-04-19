@@ -2,6 +2,7 @@ import { asErrorMessage } from "@hori/shared";
 
 interface QueueHandle {
   add(jobName: string, payload?: unknown, options?: unknown): Promise<unknown>;
+  getJob?(jobId: string): Promise<{ isDelayed(): Promise<boolean>; remove(): Promise<void> } | undefined>;
 }
 
 interface QueueRuntime {
@@ -13,6 +14,7 @@ interface QueueRuntime {
     profile: QueueHandle;
     embedding: QueueHandle;
     topic: QueueHandle;
+    conversationAnalysis: QueueHandle;
   };
   logger: {
     warn(input: unknown, message?: string): void;
@@ -69,6 +71,32 @@ export async function enqueueBackgroundJobs(runtime: QueueRuntime, envelope: {
         { guildId: envelope.guildId, channelId: envelope.channelId, messageId: envelope.messageId },
         { jobId: buildJobId("topic", envelope.messageId) }
       )
+    },
+    {
+      queue: "conversationAnalysis",
+      task: (async () => {
+        // Remove existing delayed job so delay resets from the latest message
+        const jobId = buildJobId("conv-analysis", envelope.guildId, envelope.userId);
+        try {
+          const existing = await runtime.queues.conversationAnalysis.getJob?.(jobId);
+          if (existing && (await existing.isDelayed())) await existing.remove();
+        } catch { /* job doesn't exist or already processed */ }
+        return runtime.queues.conversationAnalysis.add(
+          "conversation-analysis",
+          {
+            guildId: envelope.guildId,
+            userId: envelope.userId,
+            channelId: envelope.channelId,
+            lastMessageAt: new Date().toISOString()
+          },
+          {
+            jobId,
+            delay: 60 * 60 * 1000,
+            removeOnComplete: 20,
+            removeOnFail: 50
+          }
+        );
+      })()
     }
   ];
 

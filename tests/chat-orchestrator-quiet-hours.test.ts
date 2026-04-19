@@ -30,8 +30,8 @@ const env = {
   OLLAMA_LOG_RESPONSES: false,
   OLLAMA_LOG_MAX_CHARS: 12000,
   OPENAI_API_KEY: "test",
-  OPENAI_CHAT_MODEL: "gpt-4o-mini",
-  OPENAI_SMART_MODEL: "gpt-4o-mini",
+  OPENAI_CHAT_MODEL: "gpt-5.4-nano",
+  OPENAI_SMART_MODEL: "gpt-5.4-nano",
   OPENAI_EMBED_MODEL: "text-embedding-3-small",
   BRAVE_SEARCH_API_KEY: undefined,
   CFG: undefined,
@@ -197,7 +197,7 @@ describe("chat orchestrator quiet hours", () => {
     expect(result.trace.responseBudget).toBeDefined();
     expect(result.trace.responseBudget?.contour).toBe("B");
     expect(result.trace.responseBudget?.reason).not.toBe("quiet_hours:auto_interject");
-    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.model === "gpt-4o-mini")).toBe(true);
+    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.model === "gpt-5.4-nano")).toBe(true);
     expect(chat).toHaveBeenCalledTimes(2);
   });
 
@@ -225,6 +225,6 @@ describe("chat orchestrator quiet hours", () => {
     expect(result.reply).toBe("нормальный ответ");
     expect(result.trace.responseBudget).toBeDefined();
     expect(result.trace.responseBudget?.contour).toBe("B");
-    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.model === "gpt-4o-mini")).toBe(true);
+    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.model === "gpt-5.4-nano")).toBe(true);
   });
 });

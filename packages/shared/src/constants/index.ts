@@ -5,7 +5,8 @@ export const QUEUE_NAMES = {
   topic: "topic.update",
   memoryFormation: "memory.formation",
   cleanup: "cleanup.execute",
-  searchCache: "search-cache.cleanup"
+  searchCache: "search-cache.cleanup",
+  conversationAnalysis: "conversation.analyze"
 } as const;
 
 export const CONTEXT_ACTIONS = {

@@ -40,13 +40,13 @@ const CONTOUR_C_KINDS = new Set([
 const CONTOUR_B_KINDS = new Set([
   "casual_address",
   "smalltalk_hangout",
-  "meme_bait",
   "reply_to_bot",
 ]);
 
 const CONTOUR_A_KINDS = new Set([
   "low_signal_noise",
   "repeated_question",
+  "meme_bait",
 ]);
 
 // ============================================================================
@@ -161,6 +161,14 @@ const CONTOUR_A_TEMPLATES = [
   "ок",
   "лол",
   "ну ок",
+  "ну",
+  "окей",
+  "ладно",
+  "а",
+  "ого",
+  "да уж",
+  "бывает",
+  "ну такое",
   "👀",
   "😐",
   "🤔",

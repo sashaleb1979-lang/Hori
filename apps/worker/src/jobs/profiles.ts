@@ -83,6 +83,11 @@ export function createProfileJob(runtime: WorkerRuntime) {
       isEligible: true
     });
 
+    // Invalidate Redis context cache so next request gets fresh data
+    try {
+      await runtime.redis.del(`ctx:profile:${job.data.guildId}:${job.data.userId}`);
+    } catch { /* redis may be unavailable in local mode */ }
+
     const latestChannelId = messages[0]?.channelId;
     if (latestChannelId && messages.length) {
       try {

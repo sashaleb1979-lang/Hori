@@ -33,6 +33,7 @@ export function createAppQueues(redisUrl: string, prefix: string) {
     memoryFormation: createQueue(QUEUE_NAMES.memoryFormation, redisUrl, prefix, { removeOnComplete: 20, removeOnFail: 50 }),
     cleanup: createQueue(QUEUE_NAMES.cleanup, redisUrl, prefix, { removeOnComplete: 20, removeOnFail: 50 }),
     searchCache: createQueue(QUEUE_NAMES.searchCache, redisUrl, prefix, { removeOnComplete: 20, removeOnFail: 20 }),
+    conversationAnalysis: createQueue(QUEUE_NAMES.conversationAnalysis, redisUrl, prefix, { removeOnComplete: 50, removeOnFail: 50 }),
     prefix
   };
 }

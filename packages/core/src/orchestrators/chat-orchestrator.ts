@@ -194,11 +194,13 @@ export class ChatOrchestrator {
           relationship: affinityRelationship
         })
       : undefined;
+    const contourMaxChars = contour.contour === "C" ? runtimeSettings.contextMaxChars : Math.min(runtimeSettings.contextMaxChars, 1000);
     const { contextText, memoryLayers, trace: contextTrace } = this.contextBuilder.buildPromptContext(contextBundle, {
       message,
       intent: intent.intent,
-      maxChars: runtimeSettings.contextMaxChars,
-      contextV2Enabled: runtimeConfig.featureFlags.contextV2Enabled
+      maxChars: contourMaxChars,
+      contextV2Enabled: runtimeConfig.featureFlags.contextV2Enabled,
+      messageKind
     });
     const linkContext = runtimeConfig.featureFlags.webSearch && runtimeConfig.featureFlags.linkUnderstandingEnabled
       ? await this.buildLinkUnderstandingContext(intent.cleanedContent)
@@ -271,7 +273,8 @@ export class ChatOrchestrator {
       userLanguage: guildSettings.preferredLanguage,
       isMention: message.mentionedBot || message.mentionsBotByName,
       isReplyToBot: message.triggerSource === "reply",
-      isSelfInitiated: message.triggerSource === "auto_interject"
+      isSelfInitiated: message.triggerSource === "auto_interject",
+      contour: contour.contour
     });
     const systemPrompt = [
       behavior.prompt,
@@ -281,6 +284,7 @@ export class ChatOrchestrator {
     ]
       .filter(Boolean)
       .join("\n\n");
+    const staticPrefix = behavior.staticPrefix;
 
     const trace: BotTrace = {
       triggerSource: message.triggerSource,
@@ -384,7 +388,7 @@ export class ChatOrchestrator {
         default:
           reply = contour.contour === "A"
             ? pickContourAResponse()
-            : await this.handleChat(intent.cleanedContent, systemPrompt, promptContextText, runtimeSettings, behavior.limits.maxTokens, contour.contour, llmCalls);
+            : await this.handleChat(intent.cleanedContent, systemPrompt, promptContextText, runtimeSettings, behavior.limits.maxTokens, contour.contour, llmCalls, staticPrefix);
           break;
       }
     } catch (error) {
@@ -630,10 +634,19 @@ export class ChatOrchestrator {
     runtimeSettings: EffectiveRuntimeSettings,
     maxTokens?: number,
     contour: Contour = "B",
-    llmCalls?: LlmCallTrace[]
+    llmCalls?: LlmCallTrace[],
+    staticPrefix?: string
   ) {
     const llm = this.getChatSettingsForContour(contour, runtimeSettings, maxTokens);
-    const messages: Array<{ role: "system" | "user"; content: string }> = [{ role: "system", content: systemPrompt }];
+    const messages: Array<{ role: "system" | "user"; content: string }> = [];
+
+    // Static prefix goes first — enables OpenAI prompt prefix caching (50% discount on cached tokens).
+    // This block is stable per guild and rarely changes between requests.
+    if (staticPrefix?.trim()) {
+      messages.push({ role: "system", content: staticPrefix });
+    }
+
+    messages.push({ role: "system", content: systemPrompt });
 
     if (contextText.trim()) {
       messages.push({

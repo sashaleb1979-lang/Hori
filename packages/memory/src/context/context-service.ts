@@ -1,10 +1,14 @@
 import type { AppPrismaClient, BotIntent, ContextBundleV2, ContextEntity, MessageEnvelope } from "@hori/shared";
+import type { AppRedisClient } from "@hori/shared";
 
 import { SummaryService } from "../summaries/summary-service";
 import { ProfileService } from "../profiles/profile-service";
 import { RelationshipService } from "../relationships/relationship-service";
 import { RetrievalService } from "../retrieval/retrieval-service";
 import { ActiveMemoryService } from "../active/active-memory-service";
+
+const PROFILE_CACHE_TTL = 300;       // 5 min
+const RELATIONSHIP_CACHE_TTL = 300;  // 5 min
 
 export class ContextService {
   constructor(
@@ -13,7 +17,8 @@ export class ContextService {
     private readonly profiles: ProfileService,
     private readonly relationships: RelationshipService,
     private readonly retrieval: RetrievalService,
-    private readonly activeMemory?: ActiveMemoryService
+    private readonly activeMemory?: ActiveMemoryService,
+    private readonly redis?: AppRedisClient
   ) {}
 
   async buildContext(options: {
@@ -37,8 +42,8 @@ export class ContextService {
         include: { user: true }
       }),
       this.summaries.getRecentSummaries(options.guildId, options.channelId, 3),
-      this.profiles.getProfile(options.guildId, options.userId),
-      this.relationships.getRelationship(options.guildId, options.userId),
+      this.getCachedProfile(options.guildId, options.userId),
+      this.getCachedRelationship(options.guildId, options.userId),
       this.retrieval.findRelevantServerMemory(options.guildId, options.queryEmbedding),
       this.getReplyChain(options.guildId, options.channelId, options.message?.replyToMessageId ?? null),
       this.getActiveTopic(options.guildId, options.channelId),
@@ -203,6 +208,51 @@ export class ContextService {
 
     return memories.map((memory) => ({ ...memory, score: 0.8 }));
   }
+
+  // ---- Redis read-through cache for profile / relationship ----
+
+  private async getCachedProfile(guildId: string, userId: string) {
+    if (this.redis) {
+      try {
+        const cached = await this.redis.get(`ctx:profile:${guildId}:${userId}`);
+        if (cached) return JSON.parse(cached, dateReviver);
+      } catch { /* fallthrough to DB */ }
+    }
+
+    const profile = await this.profiles.getProfile(guildId, userId);
+
+    if (this.redis && profile) {
+      this.redis.set(`ctx:profile:${guildId}:${userId}`, JSON.stringify(profile), "EX", PROFILE_CACHE_TTL).catch(() => {});
+    }
+
+    return profile;
+  }
+
+  private async getCachedRelationship(guildId: string, userId: string) {
+    if (this.redis) {
+      try {
+        const cached = await this.redis.get(`ctx:rel:${guildId}:${userId}`);
+        if (cached) return JSON.parse(cached, dateReviver);
+      } catch { /* fallthrough to DB */ }
+    }
+
+    const relationship = await this.relationships.getRelationship(guildId, userId);
+
+    if (this.redis && relationship) {
+      this.redis.set(`ctx:rel:${guildId}:${userId}`, JSON.stringify(relationship), "EX", RELATIONSHIP_CACHE_TTL).catch(() => {});
+    }
+
+    return relationship;
+  }
+
+  /** Invalidate cached profile/relationship after an update (call from worker jobs). */
+  async invalidateUserCache(guildId: string, userId: string) {
+    if (!this.redis) return;
+    await Promise.allSettled([
+      this.redis.del(`ctx:profile:${guildId}:${userId}`),
+      this.redis.del(`ctx:rel:${guildId}:${userId}`)
+    ]);
+  }
 }
 
 function detectEntities(content: string): ContextEntity[] {
@@ -221,4 +271,13 @@ function detectEntities(content: string): ContextEntity[] {
 
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+function dateReviver(_key: string, value: unknown) {
+  if (typeof value === "string" && ISO_DATE_RE.test(value)) {
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  return value;
 }

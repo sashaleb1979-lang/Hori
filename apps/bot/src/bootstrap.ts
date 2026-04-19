@@ -24,6 +24,7 @@ interface BotQueues {
   memoryFormation: BotQueueHandle;
   cleanup: BotQueueHandle;
   searchCache: BotQueueHandle;
+  conversationAnalysis: BotQueueHandle;
   prefix: string;
 }
 
@@ -70,6 +71,7 @@ function createNoopQueues(logger: ReturnType<typeof createLogger>, prefix: strin
     memoryFormation: createNoopQueue("memoryFormation"),
     cleanup: createNoopQueue("cleanup"),
     searchCache: createNoopQueue("searchCache"),
+    conversationAnalysis: createNoopQueue("conversationAnalysis"),
     prefix
   };
 }
@@ -119,7 +121,7 @@ export async function bootstrapBot() {
   const moodService = new MoodService(prisma);
   const mediaReactionService = new MediaReactionService(prisma);
   const replyQueueService = new ReplyQueueService(prisma, env.REPLY_QUEUE_BUSY_TTL_SEC);
-  const contextService = new ContextService(prisma, summaryService, profileService, relationshipService, retrievalService, activeMemoryService);
+  const contextService = new ContextService(prisma, summaryService, profileService, relationshipService, retrievalService, activeMemoryService, redisReady ? redis : undefined);
 
   // --- LLM client: выбор провайдера ---
   const llmProvider = (env as unknown as Record<string, unknown>).LLM_PROVIDER as string;

@@ -1,6 +1,36 @@
 import { defaultRuntimeTuning } from "@hori/config";
 import type { BotIntent, ContextBundle, ContextBundleV2, ContextTrace, MemoryLayer, MessageEnvelope } from "@hori/shared";
 
+// ---------------------------------------------------------------------------
+// Selective context: which categories matter for each messageKind.
+// Categories not listed are skipped → fewer input tokens for cheap messages.
+// ---------------------------------------------------------------------------
+
+const CONTEXT_CATEGORIES_BY_KIND: Record<string, Set<string>> = {
+  direct_mention:    new Set(["reply_chain", "active_topic", "user_profile", "relationship", "recent_messages", "active_memory", "entities", "entity_memory"]),
+  opinion_question:  new Set(["active_topic", "user_profile", "relationship", "recent_messages", "entities", "entity_memory"]),
+  info_question:     new Set(["reply_chain", "active_topic", "entities", "entity_memory", "server_memory", "recent_messages"]),
+  provocation:       new Set(["user_profile", "relationship", "recent_messages"]),
+  meta_feedback:     new Set(["user_profile", "relationship", "reply_chain"]),
+  casual_address:    new Set(["reply_chain", "user_profile", "recent_messages"]),
+  smalltalk_hangout: new Set(["user_profile", "recent_messages"]),
+  meme_bait:         new Set(["relationship", "recent_messages"]),
+  reply_to_bot:      new Set(["reply_chain", "active_topic", "user_profile", "recent_messages"]),
+  request_for_explanation: new Set(["reply_chain", "active_topic", "entities", "entity_memory", "server_memory", "recent_messages"]),
+  command_like_request: new Set(["reply_chain", "active_topic", "user_profile", "recent_messages"]),
+};
+
+// Full set — used when messageKind is unknown or for non-chat intents.
+const ALL_CATEGORIES = new Set([
+  "reply_chain", "active_topic", "entities", "entity_memory", "active_memory",
+  "user_profile", "relationship", "channel_summaries", "server_memory", "recent_messages"
+]);
+
+function relevantCategories(messageKind?: string): Set<string> {
+  if (!messageKind) return ALL_CATEGORIES;
+  return CONTEXT_CATEGORIES_BY_KIND[messageKind] ?? ALL_CATEGORIES;
+}
+
 export class ContextBuilderService {
   buildPromptContext(
     bundle: ContextBundle,
@@ -9,6 +39,7 @@ export class ContextBuilderService {
       intent?: BotIntent;
       maxChars?: number;
       contextV2Enabled?: boolean;
+      messageKind?: string;
     } = {}
   ) {
     if (options.contextV2Enabled && isContextBundleV2(bundle)) {
@@ -74,14 +105,16 @@ export class ContextBuilderService {
       message?: MessageEnvelope;
       intent?: BotIntent;
       maxChars?: number;
+      messageKind?: string;
     }
   ) {
     const maxChars = options.maxChars ?? defaultRuntimeTuning.CONTEXT_V2_MAX_CHARS;
+    const relevant = relevantCategories(options.messageKind);
     const memoryLayers: MemoryLayer[] = [];
     const sectionsUsed: string[] = [];
     const anchorSections: string[] = [];
 
-    if (bundle.replyChain.length) {
+    if (relevant.has("reply_chain") && bundle.replyChain.length) {
       memoryLayers.push("reply_chain");
       sectionsUsed.push("reply_chain");
       anchorSections.push(
@@ -90,7 +123,7 @@ export class ContextBuilderService {
       );
     }
 
-    if (bundle.activeTopic) {
+    if (relevant.has("active_topic") && bundle.activeTopic) {
       memoryLayers.push("active_topic");
       sectionsUsed.push("active_topic");
       const facts = asStringArray(bundle.activeTopic.summaryFacts)
@@ -110,7 +143,7 @@ export class ContextBuilderService {
       );
     }
 
-    if (bundle.entities.length) {
+    if (relevant.has("entities") && bundle.entities.length) {
       sectionsUsed.push("entities");
       anchorSections.push(
         "[ENTITY TRIGGERS]\n" +
@@ -121,7 +154,7 @@ export class ContextBuilderService {
       );
     }
 
-    if (bundle.entityMemories.length) {
+    if (relevant.has("entity_memory") && bundle.entityMemories.length) {
       memoryLayers.push("entity_memory");
       sectionsUsed.push("entity_memory");
       anchorSections.push(
@@ -133,7 +166,7 @@ export class ContextBuilderService {
       );
     }
 
-    if (bundle.activeMemory?.entries.length) {
+    if (relevant.has("active_memory") && bundle.activeMemory?.entries.length) {
       memoryLayers.push("active_memory");
       sectionsUsed.push("active_memory");
 
@@ -154,7 +187,7 @@ export class ContextBuilderService {
       if (scopes.has("message")) memoryLayers.push("similar_messages");
     }
 
-    if (bundle.userProfile) {
+    if (relevant.has("user_profile") && bundle.userProfile) {
       memoryLayers.push("user_profile");
       sectionsUsed.push("user_profile");
       anchorSections.push(
@@ -162,7 +195,7 @@ export class ContextBuilderService {
       );
     }
 
-    if (bundle.relationship) {
+    if (relevant.has("relationship") && bundle.relationship) {
       memoryLayers.push("relationship");
       sectionsUsed.push("relationship");
       anchorSections.push(
@@ -170,13 +203,13 @@ export class ContextBuilderService {
       );
     }
 
-    if (bundle.summaries.length) {
+    if (relevant.has("channel_summaries") && bundle.summaries.length) {
       memoryLayers.push("channel_summaries");
       sectionsUsed.push("channel_summaries");
       anchorSections.push("Сводки канала:\n" + bundle.summaries.slice(0, 2).map((summary) => `- ${summary.summaryShort}`).join("\n"));
     }
 
-    if (bundle.serverMemories.length) {
+    if (relevant.has("server_memory") && bundle.serverMemories.length) {
       memoryLayers.push("server_memory");
       sectionsUsed.push("server_memory");
       anchorSections.push(
@@ -188,7 +221,7 @@ export class ContextBuilderService {
       );
     }
 
-    const recentMessages = uniqueRecentMessages(bundle);
+    const recentMessages = relevant.has("recent_messages") ? uniqueRecentMessages(bundle) : [];
     let recentLines = recentMessages.map((message) => formatMessage(message.author, message.content));
     let droppedRecentMessages = 0;
 

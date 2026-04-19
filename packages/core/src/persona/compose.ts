@@ -948,21 +948,42 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     isSelfInitiated
   });
   const blocks: BlockResult[] = [];
+  const staticBlocks: BlockResult[] = [];
   const add = (block: BlockResult | null) => {
     if (block) {
       blocks.push(block);
     }
   };
+  const addStatic = (block: BlockResult | null) => {
+    if (block) {
+      staticBlocks.push(block);
+    }
+  };
 
-  add(buildIdentityBlock(persona));
-  add(buildCoreBlock());
-  add(buildStyleRulesBlock(persona, { isDirectMessage }));
+  // --- Static prefix (stable per guild, cached by OpenAI prefix caching) ---
+  addStatic(buildIdentityBlock(persona));
+  addStatic(buildCoreBlock());
+  addStatic(buildStyleRulesBlock(persona, { isDirectMessage }));
+  addStatic(buildAntiSlopBlock({ profile: antiSlopProfile, rules: persona.antiSlopRules, forbiddenPatterns: persona.forbiddenPatterns }));
+  addStatic(buildAnalogySuppressionBlock(analogyBan));
+  addStatic(
+    buildFewShotBlock({ contour: input.contour === "B" ? "B" : "C" })
+  );
+  addStatic(buildLegacyServerOverlay(input));
+
+  // --- Dynamic blocks (vary per message) ---
   add(buildToneBlock(mode, persona.responseModeDefaults[mode]));
   add(buildChannelStyleBlock(channelKind, persona.channelOverrides[channelKind]));
   add(buildMessageKindBlock(messageKind));
   add(buildReplyModeBlock(replyMode));
   add(buildMetaFeedbackBlock(messageKind));
   add(buildConcreteGroundingBlock({ messageKind, constraintFollowUp }));
+  if (constraintFollowUp || messageKind === "reply_to_bot") {
+    add(buildFewShotBlock({ includeConcreteReplyAnchors: true, skipBaseAnchors: true }));
+  }
+  if (messageKind === "meta_feedback") {
+    add(buildFewShotBlock({ includeMetaFeedbackAnchors: true, skipBaseAnchors: true }));
+  }
   if (messageKind !== "smalltalk_hangout" && messageKind !== "low_signal_noise") {
     add(buildContextUsageBlock(input));
   }
@@ -1003,23 +1024,16 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   if (!isLightMessage) {
     add(buildStaleTakeMediaBlock({ staleTakeDetected, mediaReactionEligible }));
   }
-  add(buildAntiSlopBlock({ profile: antiSlopProfile, rules: persona.antiSlopRules, forbiddenPatterns: persona.forbiddenPatterns }));
-  add(buildAnalogySuppressionBlock(analogyBan));
-  add(
-    buildFewShotBlock({
-      includeConcreteReplyAnchors: constraintFollowUp || messageKind === "reply_to_bot",
-      includeMetaFeedbackAnchors: messageKind === "meta_feedback"
-    })
-  );
-  add(buildLegacyServerOverlay(input));
   add(buildModeratorOverlay(input));
   add(buildRelationshipOverlay(input));
   add(buildFinalSelectionRuleBlock());
 
-  const blocksUsed = blocks.map((block) => block.name);
+  const allBlocks = [...staticBlocks, ...blocks];
+  const blocksUsed = allBlocks.map((block) => block.name);
 
   return {
     prompt: blocks.map((block) => block.content).join("\n\n"),
+    staticPrefix: staticBlocks.map((block) => block.content).join("\n\n"),
     limits,
     trace: {
       personaName: persona.personaId,

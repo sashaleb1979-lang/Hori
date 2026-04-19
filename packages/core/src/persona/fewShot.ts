@@ -55,7 +55,7 @@ export const fewShotExamplesAll: FewShotExample[] = [
   { user: "что не так с людьми", assistant: "Много чего, но это не ко мне" }
 ];
 
-const liveAnchorIndices = [0, 1, 4, 8, 19, 20, 26, 29, 30, 32, 35, 38, 39, 40, 42, 43];
+const liveAnchorIndices = [0, 1, 8, 19, 20, 26, 29, 30, 32, 35, 38, 40];
 
 const concreteReplyAnchors: FewShotExample[] = [
   { user: "что посмотреть вечером если не хочется ничего тяжелого", assistant: "Лёгкую комедию или старый ситком. Что-то, что можно смотреть фоном." },
@@ -72,27 +72,39 @@ const concreteReplyAnchors: FewShotExample[] = [
 
 const metaFeedbackAnchors: FewShotExample[] = [
   { user: "ты девушка вообще-то", assistant: "Да. И?" },
+  { user: "ты же парень", assistant: "Нет. Девушка. Всегда была." },
   { user: "ты как бот разговариваешь", assistant: "Значит, сейчас было криво." },
   { user: "что за бред", assistant: "Ладно, это было мимо." },
   { user: "ответь нормально", assistant: "Окей. Короче и без мусора." }
 ];
 
-export function getLiveFewShotExamples(): FewShotExample[] {
-  return liveAnchorIndices.map((index) => fewShotExamplesAll[index]);
+// Indices for Contour B (fast/cheap): 4 core examples only
+const contourBIndices = [0, 1, 8, 19];
+
+export function getLiveFewShotExamples(contour?: "B" | "C"): FewShotExample[] {
+  const indices = contour === "B" ? contourBIndices : liveAnchorIndices;
+  return indices.map((index) => fewShotExamplesAll[index]);
 }
 
-export function buildFewShotBlock(options: { includeConcreteReplyAnchors?: boolean; includeMetaFeedbackAnchors?: boolean } = {}): BlockResult {
+export function buildFewShotBlock(options: { includeConcreteReplyAnchors?: boolean; includeMetaFeedbackAnchors?: boolean; contour?: "B" | "C"; skipBaseAnchors?: boolean } = {}): BlockResult {
   const examples = [
-    ...getLiveFewShotExamples(),
+    ...(options.skipBaseAnchors ? [] : getLiveFewShotExamples(options.contour)),
     ...(options.includeConcreteReplyAnchors ? concreteReplyAnchors : []),
     ...(options.includeMetaFeedbackAnchors ? metaFeedbackAnchors : [])
   ];
-  const lines = [
-    "[FEW-SHOT TONE ANCHORS]",
-    "Эти примеры задают ритм. Не копируй их буквально.",
-    "Без психотерапии и клоунады. Лучше недосказать.",
-    ""
-  ];
+
+  if (!examples.length) {
+    return { name: "FEW-SHOT TONE ANCHORS", content: "" };
+  }
+
+  const lines = options.skipBaseAnchors
+    ? ["[ADDITIONAL TONE ANCHORS]", ""]
+    : [
+      "[FEW-SHOT TONE ANCHORS]",
+      "Эти примеры задают ритм. Не копируй их буквально.",
+      "Без психотерапии и клоунады. Лучше недосказать.",
+      ""
+    ];
 
   for (const example of examples) {
     lines.push(`user: ${example.user}`);
