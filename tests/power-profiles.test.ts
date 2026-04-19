@@ -161,7 +161,7 @@ describe("power profiles", () => {
     });
     let routingSetting: { key: string; value: string; updatedBy: string | null; updatedAt: Date } = {
       key: "llm.model_routing",
-      value: serializeModelRouting("balanced_openai", { chat: "gpt-5.4-mini" }),
+      value: serializeModelRouting("balanced_openai", { chat: "gpt-5-mini" }),
       updatedBy: "owner-1",
       updatedAt: new Date("2026-04-12T12:00:00Z")
     };
@@ -196,11 +196,11 @@ describe("power profiles", () => {
     const service = new RuntimeConfigService(prisma, env);
 
     const overridden = await service.getModelRoutingStatus();
-    expect(overridden.slots.chat).toBe("gpt-5.4-mini");
+    expect(overridden.slots.chat).toBe("gpt-5-mini");
 
     const reset = await service.resetModelSlot("chat", "owner-2");
 
-    expect(reset.slots.chat).toBe("gpt-5-mini");
+    expect(reset.slots.chat).toBe("gpt-5.4-mini");
     expect(reset.overrides.chat).toBeUndefined();
     expect(reset.updatedBy).toBe("owner-2");
   });
