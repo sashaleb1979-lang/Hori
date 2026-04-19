@@ -97,15 +97,20 @@ export class OpenAIClient implements LlmClient {
 
     const body: Record<string, unknown> = {
       model: options.model,
-      messages,
-      max_tokens: options.maxTokens
+      messages
     };
 
-    if (options.temperature !== undefined) {
+    if (usesMaxCompletionTokens(options.model)) {
+      body.max_completion_tokens = options.maxTokens;
+    } else {
+      body.max_tokens = options.maxTokens;
+    }
+
+    if (options.temperature !== undefined && supportsCustomSampling(options.model)) {
       body.temperature = options.temperature;
     }
 
-    if (options.topP !== undefined) {
+    if (options.topP !== undefined && supportsCustomSampling(options.model)) {
       body.top_p = options.topP;
     }
 
@@ -237,4 +242,12 @@ export class OpenAIClient implements LlmClient {
       .sort((a, b) => a.index - b.index)
       .map((d) => d.embedding);
   }
+}
+
+function usesMaxCompletionTokens(model: string) {
+  return /^gpt-5(?:[.-]|$)/i.test(model);
+}
+
+function supportsCustomSampling(model: string) {
+  return !/^gpt-5(?:[.-]|$)/i.test(model);
 }
