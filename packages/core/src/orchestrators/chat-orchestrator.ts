@@ -10,7 +10,7 @@ import { BraveSearchClient, buildSourceDigest, extractLinksFromMessage, fetchWeb
 import { chooseConflictStrategy, detectConflict, type ConflictDetection } from "../brain/conflict-detector";
 import { EmotionLabel, type EmotionalState } from "../brain/emotion-state";
 import { createEngineState, generateEmotionalState } from "../brain/emotion-engine";
-import { pickContourAResponse, resolveContour, type Contour } from "../brain/response-budget";
+import { getHourInTimeZone, pickContourAResponse, resolveContour, type Contour } from "../brain/response-budget";
 import { IntentRouter } from "../intents/intent-router";
 import { detectMessageKind } from "../persona/messageKinds";
 import { PersonaService } from "../persona/persona-service";
@@ -163,9 +163,13 @@ export class ChatOrchestrator {
     const contour = intent.intent === "chat"
       ? resolveContour({
           messageKind,
-          currentHour: message.createdAt.getHours(),
+          currentHour: getHourInTimeZone(message.createdAt),
           quietHoursEnabled: this.deps.env.QUIET_HOURS_ENABLED,
-          isAutoInterject: message.triggerSource === "auto_interject"
+          isAutoInterject: message.triggerSource === "auto_interject",
+          triggerSource: message.triggerSource,
+          explicitInvocation: message.explicitInvocation,
+          mentionedBot: message.mentionedBot,
+          mentionsBotByName: message.mentionsBotByName
         })
       : { contour: "C" as const, reason: `intent:${intent.intent}` };
     const affinityRelationship = runtimeConfig.featureFlags.affinitySignalsEnabled

@@ -5,8 +5,11 @@
  * Контур B: fast model (~50 токенов) — короткий контекстный ответ.
  * Контур C: smart model (полный pipeline) — глубокий ответ с persona + emotion.
  *
- * quiet_hours из AICO agency.yaml: ночью (22:00–08:00) → контур A.
+ * quiet_hours из AICO agency.yaml: ночью (22:00–08:00) → контур A
+ * только для фоновой инициативы. Прямой диалог всегда идет в LLM-контур.
  */
+
+import type { TriggerSource } from "@hori/shared";
 
 // ============================================================================
 // CONTOUR TYPE
@@ -18,6 +21,8 @@ export interface ContourDecision {
   contour: Contour;
   reason: string;
 }
+
+export const QUIET_HOURS_TIME_ZONE = "Europe/Moscow";
 
 // ============================================================================
 // MESSAGE KIND → CONTOUR MAPPING
@@ -64,6 +69,20 @@ export function isQuietHours(
   return currentHour >= start && currentHour < end;
 }
 
+export function getHourInTimeZone(
+  date: Date,
+  timeZone = QUIET_HOURS_TIME_ZONE,
+): number {
+  const formatted = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).format(date);
+  const hour = Number.parseInt(formatted, 10);
+
+  return Number.isFinite(hour) ? hour : date.getUTCHours();
+}
+
 // ============================================================================
 // RESOLVE CONTOUR
 // ============================================================================
@@ -72,21 +91,42 @@ export function isQuietHours(
  * Определить контур обработки для входящего сообщения.
  *
  * Приоритет:
- * 1. quiet_hours → A (ночью только шаблоны)
- * 2. messageKind → C / B / A
- * 3. fallback → B
+ * 1. quiet_hours для auto_interject → A (ночью без фоновых вмешательств)
+ * 2. auto_interject вне quiet_hours → B
+ * 3. messageKind → C / B / A
+ * 4. fallback → B
  */
 export function resolveContour(params: {
   messageKind: string;
   currentHour: number;
   quietHoursEnabled?: boolean;
   isAutoInterject?: boolean;
+  triggerSource?: TriggerSource;
+  explicitInvocation?: boolean;
+  mentionedBot?: boolean;
+  mentionsBotByName?: boolean;
 }): ContourDecision {
-  const { messageKind, currentHour, quietHoursEnabled = true, isAutoInterject = false } = params;
+  const {
+    messageKind,
+    currentHour,
+    quietHoursEnabled = true,
+    triggerSource,
+    explicitInvocation = false,
+    mentionedBot = false,
+    mentionsBotByName = false,
+  } = params;
+  const isAutoInterject = params.isAutoInterject ?? triggerSource === "auto_interject";
+  const isDirectedHumanTurn =
+    explicitInvocation ||
+    mentionedBot ||
+    mentionsBotByName ||
+    triggerSource === "reply" ||
+    triggerSource === "mention" ||
+    triggerSource === "name";
 
-  // Quiet hours → контур A (без LLM)
-  if (quietHoursEnabled && isQuietHours(currentHour)) {
-    return { contour: "A", reason: "quiet_hours" };
+  // Quiet hours режут только фоновую инициативу, а не живой диалог.
+  if (quietHoursEnabled && isQuietHours(currentHour) && isAutoInterject && !isDirectedHumanTurn) {
+    return { contour: "A", reason: "quiet_hours:auto_interject" };
   }
 
   // Auto-interject всегда B (не тратим smart model)
