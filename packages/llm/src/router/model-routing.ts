@@ -36,7 +36,7 @@ export interface ModelRoutingPreset {
 
 const balancedOpenAiSlots: ModelRoutingSlots = {
   classifier: "gpt-5-nano",
-  chat: "gpt-5-mini",
+  chat: "gpt-5.4-mini",
   summary: "gpt-5-mini",
   rewrite: "gpt-5-mini",
   search: "gpt-5.4-mini",

@@ -947,7 +947,9 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   add(buildReplyModeBlock(replyMode));
   add(buildMetaFeedbackBlock(messageKind));
   add(buildConcreteGroundingBlock({ messageKind, constraintFollowUp }));
-  add(buildContextUsageBlock(input));
+  if (messageKind !== "smalltalk_hangout" && messageKind !== "low_signal_noise") {
+    add(buildContextUsageBlock(input));
+  }
   add(buildMemoryUsageBlock());
   add(buildLengthBlock(limits));
   add(buildWeakModelBrevityBlock(persona, requestedDepth));
@@ -956,18 +958,23 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   if (messageKind === "smalltalk_hangout") {
     add(buildLowPressureSmalltalkBlock({ hasContextHook: smalltalkContextHook }));
   }
-  add(
-    buildSnarkConfidenceBlock({
-      threshold: snarkConfidenceThreshold,
-      isSelfInitiated,
-      contextPrecisionBias: persona.contextualBehavior.contextPrecisionBias,
-      contextConfidence: input.contextScores?.contextConfidence,
-      mockeryConfidence: input.contextScores?.mockeryConfidence
-    })
-  );
-  add(buildContextEnergyBlock(contextEnergy));
-  add(buildSlangBlock({ profile: slangProfile, rules: persona.slangRules }));
-  add(buildIdeologicalBlock({ state: ideologicalFlavour, config: persona.politicalFlavour }));
+  const isLightMessage = messageKind === "smalltalk_hangout" || messageKind === "casual_address" || messageKind === "low_signal_noise" || messageKind === "reply_to_bot";
+  if (!isLightMessage) {
+    add(
+      buildSnarkConfidenceBlock({
+        threshold: snarkConfidenceThreshold,
+        isSelfInitiated,
+        contextPrecisionBias: persona.contextualBehavior.contextPrecisionBias,
+        contextConfidence: input.contextScores?.contextConfidence,
+        mockeryConfidence: input.contextScores?.mockeryConfidence
+      })
+    );
+    add(buildContextEnergyBlock(contextEnergy));
+  }
+  if (!isLightMessage) {
+    add(buildSlangBlock({ profile: slangProfile, rules: persona.slangRules }));
+    add(buildIdeologicalBlock({ state: ideologicalFlavour, config: persona.politicalFlavour }));
+  }
   if (isSelfInitiated) {
     add(
       buildSelfInterjectionBlock({
@@ -977,7 +984,9 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
       })
     );
   }
-  add(buildStaleTakeMediaBlock({ staleTakeDetected, mediaReactionEligible }));
+  if (!isLightMessage) {
+    add(buildStaleTakeMediaBlock({ staleTakeDetected, mediaReactionEligible }));
+  }
   add(buildAntiSlopBlock({ profile: antiSlopProfile, rules: persona.antiSlopRules, forbiddenPatterns: persona.forbiddenPatterns }));
   add(buildAnalogySuppressionBlock(analogyBan));
   add(

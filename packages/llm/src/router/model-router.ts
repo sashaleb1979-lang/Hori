@@ -47,6 +47,7 @@ export class ModelRouter {
       case "profile":
       case "memory_write":
       case "memory_forget":
+      case "chat":
         return "smart";
       default:
         return "fast";
@@ -114,7 +115,7 @@ export class ModelRouter {
   }
 
   private isSmartSlot(slot: ModelRoutingSlot) {
-    return slot !== "classifier" && slot !== "chat";
+    return slot !== "classifier";
   }
 }
 

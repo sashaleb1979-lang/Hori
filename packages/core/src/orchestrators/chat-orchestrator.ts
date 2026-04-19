@@ -403,6 +403,22 @@ export class ChatOrchestrator {
       forbiddenWords: guildSettings.forbiddenWords
     });
 
+    if (
+      (messageKind === "smalltalk_hangout" || messageKind === "casual_address") &&
+      reply.length > 200
+    ) {
+      this.deps.logger.warn(
+        {
+          messageKind,
+          replyLength: reply.length,
+          maxChars: behavior.limits.maxChars,
+          messageId: message.messageId,
+          channelId: message.channelId
+        },
+        "long reply for light message kind — possible over-generation"
+      );
+    }
+
     await this.recordAffinitySignal(runtimeConfig.featureFlags.affinitySignalsEnabled, {
       guildId: message.guildId,
       userId: message.userId,
