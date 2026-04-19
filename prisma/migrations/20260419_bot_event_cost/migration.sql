@@ -1,0 +1,2 @@
+ALTER TABLE "BotEventLog"
+  ADD COLUMN "costUsd" DOUBLE PRECISION;

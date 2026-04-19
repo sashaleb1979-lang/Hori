@@ -1,6 +1,6 @@
 import type { AppEnv } from "@hori/config";
 import type { AppLogger } from "@hori/shared";
-import { asErrorMessage } from "@hori/shared";
+import { asErrorMessage, llmRetriesCounter } from "@hori/shared";
 
 import { OPENAI_EMBEDDING_DIMENSIONS } from "../router/model-routing";
 import type { LlmChatOptions, LlmChatResponse, LlmClient, LlmToolCall, LlmEmbedOptions } from "./llm-client";
@@ -220,6 +220,7 @@ export class OpenAIClient implements LlmClient {
   private async fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
     let response: Response | undefined;
     let lastError: Error | undefined;
+    let lastErrorBody: string | undefined;
     const { signal: _origSignal, ...initWithoutSignal } = init;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -233,12 +234,17 @@ export class OpenAIClient implements LlmClient {
           return response;
         }
 
+        // Drain body to free the socket before retrying
+        lastErrorBody = await response.text().catch(() => "unknown error");
+
         const retryAfterHeader = response.headers.get("retry-after");
-        const delayMs = retryAfterHeader
-          ? Math.min(Number(retryAfterHeader) * 1000, 10_000)
+        const parsedRetryAfter = retryAfterHeader ? Number(retryAfterHeader) : NaN;
+        const delayMs = Number.isFinite(parsedRetryAfter)
+          ? Math.min(parsedRetryAfter * 1000, 10_000)
           : RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
 
         if (attempt < MAX_RETRIES) {
+          llmRetriesCounter.inc({ reason: String(response.status) });
           this.logger.warn(
             { status: response.status, attempt: attempt + 1, delayMs, url },
             `openai retryable error ${response.status}, retrying in ${delayMs}ms`
@@ -249,6 +255,7 @@ export class OpenAIClient implements LlmClient {
         lastError = error instanceof Error ? error : new Error(String(error));
         if (attempt < MAX_RETRIES && isTransientError(lastError)) {
           const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+          llmRetriesCounter.inc({ reason: "transient" });
           this.logger.warn(
             { error: lastError.message, attempt: attempt + 1, delayMs, url },
             `openai transient error, retrying in ${delayMs}ms`
@@ -260,11 +267,12 @@ export class OpenAIClient implements LlmClient {
       }
     }
 
-    if (!response) {
-      throw lastError ?? new Error("OpenAI request failed after retries");
+    // All retries exhausted — throw with saved error context
+    if (response && !response.ok) {
+      throw new Error(`OpenAI API error ${response.status} after ${MAX_RETRIES + 1} attempts: ${lastErrorBody ?? "unknown error"}`);
     }
 
-    return response;
+    throw lastError ?? new Error("OpenAI request failed after retries");
   }
 
   async embed(model: string, input: string | string[], options: LlmEmbedOptions = {}): Promise<number[][]> {

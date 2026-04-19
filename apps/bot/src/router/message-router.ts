@@ -21,7 +21,7 @@ const COOLDOWN_MAX_AGE_MS = 30 * 60 * 1000;
 setInterval(() => {
   for (const [channelId, debouncer] of inboundDebouncers) {
     if (debouncer.pending === 0) {
-      debouncer.cancel();
+      void debouncer.flushNow();
       inboundDebouncers.delete(channelId);
     }
   }

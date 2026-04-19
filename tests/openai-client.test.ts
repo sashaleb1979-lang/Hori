@@ -119,10 +119,10 @@ describe("OpenAIClient", () => {
     const client = createClient();
     await expect(
       client.chat({ model: "gpt-5-nano", messages: [{ role: "user", content: "test" }] })
-    ).rejects.toThrow("OpenAI API error 500");
+    ).rejects.toThrow(/OpenAI API error 500.*after 3 attempts.*internal error/);
 
     expect(fetchMock).toHaveBeenCalledTimes(3); // 1 initial + 2 retries
-  });
+  }, 10_000);
 
   it("does not retry on 400 (non-retryable)", async () => {
     const fetchMock = vi.fn(async () => {
