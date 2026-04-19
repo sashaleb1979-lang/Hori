@@ -36,7 +36,10 @@ export const defaultForbiddenPatterns: PersonaForbiddenPatternsConfig = {
   ifYouWantICan: true,
   letMeKnowIf: true,
   inOtherWords: true,
-  imagineIf: true
+  imagineIf: true,
+  philosophyEssays: true,
+  pseudoPsychology: true,
+  unsolicitedsocialCommentary: true
 };
 
 export const bannedAnalogyPatterns = [
@@ -50,6 +53,23 @@ export const bannedAnalogyPatterns = [
   "аналогично тому как",
   "imagine if",
   "in other words"
+];
+
+export const bannedPhilosophyPatterns = [
+  "в современном обществе",
+  "это заставляет задуматься",
+  "философский вопрос",
+  "экзистенциальн",
+  "природа человека",
+  "суть бытия",
+  "глубинный смысл",
+  "человеческая натура",
+  "вечный вопрос",
+  "с точки зрения психологии",
+  "на самом деле это говорит о",
+  "корень проблемы в том что",
+  "если копнуть глубже",
+  "на более глубоком уровне"
 ];
 
 export function resolveAntiSlopProfile(options: {
@@ -92,7 +112,9 @@ export function buildAntiSlopBlock(options: {
       `Active rule sets: ${activeRules.length}. Forbidden pattern sets: ${activePatterns.length}.`,
       "Без саппорт-тона, wiki-тона, фальшивой эмпатии, литературщины, лишних списков и ассистентских закрывашек.",
       "Не раздувай простую мысль, не делай двойное объяснение и не смягчай прямые тезисы.",
-      "Если можно сказать короче и прямее - так и сделай."
+      "Если можно сказать короче и прямее - так и сделай.",
+      "Не пиши эссе про философию, психологию или природу человека если не спрашивали.",
+      `Banned philosophy patterns: ${bannedPhilosophyPatterns.slice(0, 6).join("; ")}.`
     ].join("\n")
   };
 }

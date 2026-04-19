@@ -20,9 +20,9 @@ const modelProfiles: Record<ModelKind, ModelProfile> = {
 };
 
 export const chatModelProfile: ModelProfile = {
-  temperature: 0.55,
+  temperature: 0.38,
   maxTokens: 280,
-  topP: 0.90
+  topP: 0.85
 };
 
 export const utilityFastModelProfile: ModelProfile = {

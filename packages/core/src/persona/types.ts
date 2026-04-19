@@ -190,6 +190,9 @@ export interface PersonaForbiddenPatternsConfig {
   letMeKnowIf: boolean;
   inOtherWords: boolean;
   imagineIf: boolean;
+  philosophyEssays: boolean;
+  pseudoPsychology: boolean;
+  unsolicitedsocialCommentary: boolean;
 }
 
 export interface PersonaConfig {

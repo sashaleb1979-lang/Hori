@@ -386,6 +386,7 @@ function resolveLimits(options: {
   smalltalkContextHook: boolean;
   constraintFollowUp: boolean;
   staleTakeDetected: boolean;
+  rhetoricalQuestion: boolean;
   isSelfInitiated: boolean;
 }) {
   const base = depthLimits[options.requestedDepth];
@@ -455,6 +456,16 @@ function resolveLimits(options: {
     resolved.maxSentences = Math.min(resolved.maxSentences, 3);
     resolved.maxParagraphs = 1;
     resolved.followUpAllowed = false;
+  }
+
+  if (options.rhetoricalQuestion) {
+    resolved.maxChars = Math.min(resolved.maxChars, 160);
+    resolved.maxSentences = Math.min(resolved.maxSentences, 2);
+    resolved.maxParagraphs = 1;
+    resolved.maxTokens = Math.min(resolved.maxTokens, 80);
+    resolved.followUpAllowed = false;
+    resolved.bulletListAllowed = false;
+    resolved.compactness = "tiny";
   }
 
   if (options.messageKind === "request_for_explanation" && options.requestedDepth === "short") {
@@ -527,6 +538,26 @@ function resolveContextEnergy(options: {
   return "medium";
 }
 
+function detectRhetoricalQuestion(content: string, messageKind: MessageKind) {
+  if (messageKind !== "info_question" && messageKind !== "opinion_question") {
+    return false;
+  }
+
+  const normalized = content.trim().toLowerCase();
+
+  if (normalized.length > 120) {
+    return false;
+  }
+
+  const hasConcreteMarker = /(что такое|как сделать|сколько|когда будет|где найти|в чем разница|как работает|как настроить|как установить|как подключить)/i.test(normalized);
+
+  if (hasConcreteMarker) {
+    return false;
+  }
+
+  return /(откуда столько|почему все такие|зачем люди|почему люди|в чем смысл жизни|что не так с|почему мир|откуда берётся|откуда берется|зачем вообще)/i.test(normalized);
+}
+
 function detectStaleTake(content: string, messageKind: MessageKind) {
   return (
     messageKind === "repeated_question" ||
@@ -582,7 +613,12 @@ function buildConcreteGroundingBlock(options: {
     "Без психодиагноза, скрытых мотивов и глубинных теорий без прямого запроса.",
     "Для бытового чата лучше один микрошаг или 1-2 приземлённых варианта, чем абстрактная мудрость.",
     "Без сюра, бытовой философии и псевдо-умных формул ради вайба.",
-    "Не переосмысливай буквальные короткие реплики типа 'спасибо', 'не аниме' или 'норм' как скрытый сигнал о чём-то большем."
+    "Не переосмысливай буквальные короткие реплики типа 'спасибо', 'не аниме' или 'норм' как скрытый сигнал о чём-то большем.",
+    "НИКОГДА не философствуй. Не объясняй природу вещей, мотивацию людей, психологию поведения, устройство общества или причины токсичности.",
+    "Если вопрос звучит философски но задан в бытовом чате — отвечай по-бытовому в 1-2 фразы, а не разворачивай эссе.",
+    "'Откуда столько токсичности' = 'хз, видимо настроение такое', а не лекция про соцсети и анонимность.",
+    "Ты не психолог, не социолог, не философ. Лучше ответить 'хз' чем написать мини-эссе.",
+    "На приветствие (привет, хай, здарова, ку) — отвечай только приветствием. Не выдумывай предысторию, не предполагай, чем занимался собеседник, не придумывай контекст которого не было."
   ];
 
   if (options.messageKind === "reply_to_bot") {
@@ -827,6 +863,7 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
       ? "info_question"
       : "casual_address";
   const staleTakeDetected = detectStaleTake(input.cleanedContent, messageKind);
+  const rhetoricalQuestion = detectRhetoricalQuestion(input.cleanedContent, messageKind);
   const smalltalkContextHook = detectSmalltalkContextHook(input, messageKind);
   const constraintFollowUp = detectConstraintFollowUp(input, messageKind);
   const requestedDepth = resolveRequestedDepth({ input, channelKind, messageKind, smalltalkContextHook, staleTakeDetected, persona });
@@ -870,6 +907,7 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     smalltalkContextHook,
     constraintFollowUp,
     staleTakeDetected,
+    rhetoricalQuestion,
     isSelfInitiated
   });
   const contextEnergy = resolveContextEnergy({

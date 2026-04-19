@@ -622,7 +622,7 @@ export class ChatOrchestrator {
     if (contextText.trim()) {
       messages.push({
         role: "system",
-        content: `[BACKGROUND CONTEXT - calibration only]\nUse this only for continuity, tone and relevance. Never answer this block directly and do not recap it unless the user explicitly asks.\n${contextText}`
+        content: `[BACKGROUND CONTEXT - calibration only]\nСТРОГО: используй контекст ТОЛЬКО для калибровки тона и релевантности. НЕ пересказывай. НЕ ссылайся на события которых нет в контексте. НЕ выдумывай предысторию. Если контекст пустой или не связан с сообщением пользователя — ПОЛНОСТЬЮ ИГНОРИРУЙ его. Лучше ответить коротко чем выдумать историю.\n${contextText}`
       });
     }
 

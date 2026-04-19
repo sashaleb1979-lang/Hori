@@ -164,6 +164,17 @@ export class RelationshipService {
     userId: string,
   ): Promise<RelationshipVector> {
     const vector = await this.getVector(guildId, userId);
+
+    // Grace period: don't punish users Hori barely knows yet
+    if (vector.interactionCount < 10) {
+      return this.upsertRelationship({
+        ...vector,
+        guildId,
+        userId,
+        interactionCount: vector.interactionCount + 1,
+      });
+    }
+
     const newTrust = Math.max(0, vector.trustLevel - 0.04);
     const newCloseness = Math.max(0, vector.closeness - 0.02);
     const autoSharp = newTrust <= 0.28 || newCloseness <= 0.22;
