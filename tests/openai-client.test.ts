@@ -81,6 +81,64 @@ describe("OpenAIClient", () => {
     });
   });
 
+  it("retries on 429 then succeeds", async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls++;
+      if (calls === 1) {
+        return new Response("rate limited", { status: 429, headers: { "Retry-After": "0" } });
+      }
+      return new Response(
+        JSON.stringify({
+          choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createClient();
+    const result = await client.chat({
+      model: "gpt-5-nano",
+      messages: [{ role: "user", content: "test" }]
+    });
+
+    expect(result.message.content).toBe("ok");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws after exhausting retries on 500", async () => {
+    const fetchMock = vi.fn(async () => {
+      return new Response("internal error", { status: 500 });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createClient();
+    await expect(
+      client.chat({ model: "gpt-5-nano", messages: [{ role: "user", content: "test" }] })
+    ).rejects.toThrow("OpenAI API error 500");
+
+    expect(fetchMock).toHaveBeenCalledTimes(3); // 1 initial + 2 retries
+  });
+
+  it("does not retry on 400 (non-retryable)", async () => {
+    const fetchMock = vi.fn(async () => {
+      return new Response("bad request", { status: 400 });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createClient();
+    await expect(
+      client.chat({ model: "gpt-5-nano", messages: [{ role: "user", content: "test" }] })
+    ).rejects.toThrow("OpenAI API error 400");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("requests 768-dimensional embeddings by default", async () => {
     const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       const payload = JSON.parse(String(init?.body)) as {

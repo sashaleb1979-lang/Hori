@@ -1,4 +1,4 @@
-import { Counter, Histogram, Registry, collectDefaultMetrics } from "prom-client";
+import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from "prom-client";
 
 export const metricsRegistry = new Registry();
 
@@ -29,6 +29,27 @@ export const searchRequestsCounter = new Counter({
   name: "hori_search_requests_total",
   help: "Brave search requests made by the bot",
   labelNames: ["status"],
+  registers: [metricsRegistry]
+});
+
+export const llmTokensCounter = new Counter({
+  name: "hori_llm_tokens_total",
+  help: "Total LLM tokens consumed",
+  labelNames: ["model", "type"],
+  registers: [metricsRegistry]
+});
+
+export const llmCostCounter = new Counter({
+  name: "hori_llm_cost_usd_total",
+  help: "Cumulative LLM cost in USD",
+  labelNames: ["model"],
+  registers: [metricsRegistry]
+});
+
+export const llmRetriesCounter = new Counter({
+  name: "hori_llm_retries_total",
+  help: "Total LLM API retries",
+  labelNames: ["reason"],
   registers: [metricsRegistry]
 });
 

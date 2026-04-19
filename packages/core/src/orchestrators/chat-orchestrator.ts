@@ -1,8 +1,8 @@
 import type { AppEnv } from "@hori/config";
 import type { AppLogger, AppPrismaClient, BotReplyPayload, BotTrace, LlmCallTrace, LlmChatMessage, MessageEnvelope, SearchHit } from "@hori/shared";
-import { asErrorMessage, botLatencyHistogram, botRepliesCounter, buildMemoryKey, clamp, normalizeWhitespace } from "@hori/shared";
+import { asErrorMessage, botLatencyHistogram, botRepliesCounter, buildMemoryKey, clamp, llmCostCounter, llmTokensCounter, normalizeWhitespace } from "@hori/shared";
 
-import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet, getModelProfile } from "@hori/llm";
+import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, calculateCostUsd, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet, getModelProfile } from "@hori/llm";
 import type { LlmChatResponse, LlmClient, ModelRoutingSlot } from "@hori/llm";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
 import { ContextService, ReflectionService, RelationshipService, RetrievalService } from "@hori/memory";
@@ -1501,6 +1501,7 @@ export class ChatOrchestrator {
           completionTokens: tokenTotals.completionTokens,
           totalTokens: tokenTotals.totalTokens,
           tokenSource: tokenTotals.tokenSource,
+          costUsd: tokenTotals.costUsd,
           relationshipApplied: trace.relationshipApplied,
           debugTrace: trace as never
         }
@@ -1525,7 +1526,8 @@ function summarizeLlmTokenTrace(llmCalls?: LlmCallTrace[]) {
       promptTokens: null,
       completionTokens: null,
       totalTokens: null,
-      tokenSource: null
+      tokenSource: null,
+      costUsd: null,
     };
   }
 
@@ -1533,11 +1535,21 @@ function summarizeLlmTokenTrace(llmCalls?: LlmCallTrace[]) {
   const completionTokens = llmCalls.reduce((sum, call) => sum + call.completionTokens, 0);
   const tokenSource = llmCalls.every((call) => call.source === "reported") ? "reported" : "estimated";
 
+  let costUsd = 0;
+  for (const call of llmCalls) {
+    const callCost = calculateCostUsd(call.model, call.promptTokens, call.completionTokens);
+    costUsd += callCost;
+    llmTokensCounter.inc({ model: call.model, type: "prompt" }, call.promptTokens);
+    llmTokensCounter.inc({ model: call.model, type: "completion" }, call.completionTokens);
+    llmCostCounter.inc({ model: call.model }, callCost);
+  }
+
   return {
     promptTokens,
     completionTokens,
     totalTokens: promptTokens + completionTokens,
-    tokenSource
+    tokenSource,
+    costUsd,
   };
 }
 

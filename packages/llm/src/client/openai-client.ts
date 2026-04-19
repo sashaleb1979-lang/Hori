@@ -12,6 +12,9 @@ import type { LlmChatOptions, LlmChatResponse, LlmClient, LlmToolCall, LlmEmbedO
 
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_OPENAI_TIMEOUT_MS = 60_000;
+const MAX_RETRIES = 2;
+const RETRY_BASE_DELAY_MS = 500;
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
 interface OpenAIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -141,14 +144,13 @@ export class OpenAIClient implements LlmClient {
 
     const startMs = Date.now();
 
-    const response = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+    const response = await this.fetchWithRetry(`${OPENAI_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`
       },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(this.timeoutMs)
+      body: JSON.stringify(body)
     });
 
     if (!response.ok) {
@@ -215,6 +217,56 @@ export class OpenAIClient implements LlmClient {
     };
   }
 
+  private async fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+    let response: Response | undefined;
+    let lastError: Error | undefined;
+    const { signal: _origSignal, ...initWithoutSignal } = init;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        response = await fetch(url, {
+          ...initWithoutSignal,
+          signal: AbortSignal.timeout(this.timeoutMs)
+        });
+
+        if (response.ok || !RETRYABLE_STATUS_CODES.has(response.status)) {
+          return response;
+        }
+
+        const retryAfterHeader = response.headers.get("retry-after");
+        const delayMs = retryAfterHeader
+          ? Math.min(Number(retryAfterHeader) * 1000, 10_000)
+          : RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+
+        if (attempt < MAX_RETRIES) {
+          this.logger.warn(
+            { status: response.status, attempt: attempt + 1, delayMs, url },
+            `openai retryable error ${response.status}, retrying in ${delayMs}ms`
+          );
+          await sleep(delayMs);
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (attempt < MAX_RETRIES && isTransientError(lastError)) {
+          const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+          this.logger.warn(
+            { error: lastError.message, attempt: attempt + 1, delayMs, url },
+            `openai transient error, retrying in ${delayMs}ms`
+          );
+          await sleep(delayMs);
+          continue;
+        }
+        throw lastError;
+      }
+    }
+
+    if (!response) {
+      throw lastError ?? new Error("OpenAI request failed after retries");
+    }
+
+    return response;
+  }
+
   async embed(model: string, input: string | string[], options: LlmEmbedOptions = {}): Promise<number[][]> {
     const inputArray = Array.isArray(input) ? input : [input];
 
@@ -224,14 +276,13 @@ export class OpenAIClient implements LlmClient {
       dimensions: options.dimensions ?? OPENAI_EMBEDDING_DIMENSIONS
     };
 
-    const response = await fetch(`${OPENAI_BASE_URL}/embeddings`, {
+    const response = await this.fetchWithRetry(`${OPENAI_BASE_URL}/embeddings`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`
       },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(this.timeoutMs)
+      body: JSON.stringify(body)
     });
 
     if (!response.ok) {
@@ -253,4 +304,13 @@ function usesMaxCompletionTokens(model: string) {
 
 function supportsCustomSampling(model: string) {
   return !/^gpt-5(?:[.-]|$)/i.test(model);
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientError(error: Error) {
+  const msg = error.message.toLowerCase();
+  return msg.includes("timeout") || msg.includes("econnreset") || msg.includes("socket hang up") || msg.includes("fetch failed");
 }

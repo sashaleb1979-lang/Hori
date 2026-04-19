@@ -316,6 +316,7 @@ model BotEventLog {
   completionTokens    Int?
   totalTokens         Int?
   tokenSource         String?
+  costUsd             Float?
   relationshipApplied Boolean  @default(false)
   debugTrace          Json?
   createdAt           DateTime @default(now())

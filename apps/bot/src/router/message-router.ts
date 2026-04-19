@@ -13,6 +13,26 @@ import { sendReply } from "../responders/message-responder";
 const intentRouter = new IntentRouter();
 const inboundDebouncers = new Map<string, ReturnType<typeof createChannelDebouncer<PendingInvocation>>>();
 const naturalSplitCooldownByChannel = new Map<string, number>();
+
+/* Periodic cleanup of idle debouncers and stale cooldown entries to prevent memory leaks */
+const DEBOUNCER_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+const COOLDOWN_MAX_AGE_MS = 30 * 60 * 1000;
+
+setInterval(() => {
+  for (const [channelId, debouncer] of inboundDebouncers) {
+    if (debouncer.pending === 0) {
+      debouncer.cancel();
+      inboundDebouncers.delete(channelId);
+    }
+  }
+
+  const cutoff = Date.now() - COOLDOWN_MAX_AGE_MS;
+  for (const [channelId, ts] of naturalSplitCooldownByChannel) {
+    if (ts < cutoff) {
+      naturalSplitCooldownByChannel.delete(channelId);
+    }
+  }
+}, DEBOUNCER_CLEANUP_INTERVAL_MS).unref();
 export const EMPTY_REPLY_FALLBACK = "Сек, у меня ответ развалился. Повтори ещё раз.";
 
 interface PendingInvocation {
