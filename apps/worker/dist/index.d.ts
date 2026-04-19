@@ -1,5 +1,6 @@
 import { AnalyticsQueryService } from '@hori/analytics';
 import { loadEnv } from '@hori/config';
+import { RuntimeConfigService } from '@hori/core';
 import { LlmClient, ModelRouter, EmbeddingAdapter } from '@hori/llm';
 import { SummaryService, ProfileService, RetrievalService, TopicService } from '@hori/memory';
 import { SearchCacheService } from '@hori/search';
@@ -17,6 +18,7 @@ interface WorkerRuntime {
     retrievalService: RetrievalService;
     topicService: TopicService;
     searchCache: SearchCacheService;
+    runtimeConfig: RuntimeConfigService;
     llmClient: LlmClient;
     modelRouter: ModelRouter;
     embeddingAdapter: EmbeddingAdapter;

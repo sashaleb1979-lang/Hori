@@ -1,5 +1,6 @@
 import type { BotRuntime } from "../bootstrap";
 import { getOwnerLockdownState } from "../router/owner-lockdown";
+import { MODEL_ROUTING_SLOTS } from "@hori/llm";
 
 export const HORI_STATE_TABS = ["persona", "brain", "memory", "channel", "search", "queue", "media", "features", "trace", "tokens"] as const;
 export type HoriStateTab = (typeof HORI_STATE_TABS)[number];
@@ -59,21 +60,25 @@ export class BotStateService {
   }
 
   private async brain(guildId: string, channelId: string): Promise<BotStatePanel> {
-    const [routing, power, lockdown] = await Promise.all([
+    const [routing, power, lockdown, modelRouting] = await Promise.all([
       this.runtime.runtimeConfig.getRoutingConfig(guildId, channelId),
       this.runtime.slashAdmin.powerStatus(),
-      getOwnerLockdownState(this.runtime, true)
+      getOwnerLockdownState(this.runtime, true),
+      this.runtime.runtimeConfig.getModelRoutingStatus()
     ]);
+    const llm = modelRouting.provider === "openai"
+      ? [
+          `provider=openai preset=${modelRouting.preset}`,
+          ...MODEL_ROUTING_SLOTS.map((slot) => `${slot}=${modelRouting.slots[slot]}`),
+          `embed=${modelRouting.embeddingModel}`
+        ].join("\n")
+      : `provider=ollama\nurl=${this.runtime.env.OLLAMA_BASE_URL ?? "missing"}\nfast=${this.runtime.env.OLLAMA_FAST_MODEL}\nsmart=${this.runtime.env.OLLAMA_SMART_MODEL}`;
 
     return {
       title: "Состояние: мозги",
       description: "Модели, лимиты и режимы выполнения",
       fields: [
-        { name: "LLM", value: clip(
-          (this.runtime.env as unknown as Record<string, unknown>).LLM_PROVIDER === "openai"
-            ? `provider=openai\nchat=${(this.runtime.env as unknown as Record<string, unknown>).OPENAI_CHAT_MODEL ?? "gpt-4o-mini"}\nsmart=${(this.runtime.env as unknown as Record<string, unknown>).OPENAI_SMART_MODEL ?? "gpt-4o-mini"}`
-            : `provider=ollama\nurl=${this.runtime.env.OLLAMA_BASE_URL ?? "missing"}\nfast=${this.runtime.env.OLLAMA_FAST_MODEL}\nsmart=${this.runtime.env.OLLAMA_SMART_MODEL}`
-        ) },
+        { name: "LLM", value: clip(llm) },
         { name: "Power", value: clip(power) },
         { name: "Runtime", value: clip(`ctx=${routing.runtimeSettings.ollamaNumCtx}, batch=${routing.runtimeSettings.ollamaNumBatch}, replyTokens=${routing.runtimeSettings.llmReplyMaxTokens}`), inline: true },
         { name: "Lockdown", value: lockdown.enabled ? `on, updatedBy=${lockdown.updatedBy ?? "unknown"}` : "off", inline: true }

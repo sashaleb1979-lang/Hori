@@ -2164,7 +2164,12 @@ function buildHoriStatePanelRows(tab: HoriStateTab) {
         .setCustomId(`${HORI_ACTION_PREFIX}:state_features`)
         .setLabel("Features")
         .setEmoji("🏷️")
-        .setStyle(tab === "features" ? ButtonStyle.Primary : ButtonStyle.Secondary)
+        .setStyle(tab === "features" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${HORI_ACTION_PREFIX}:llm_panel`)
+        .setLabel("LLM")
+        .setEmoji("🤖")
+        .setStyle(ButtonStyle.Secondary)
     )
   ];
 }
@@ -2314,6 +2319,7 @@ function inferTabForHoriAction(action: string): HoriPanelTab {
 
   if (action.startsWith("memory") || action.startsWith("reflection") || action.startsWith("profile") || action.startsWith("relationship") || action === "dossier_modal") return "memory";
   if (action.startsWith("search") || action.startsWith("channel") || action === "read_chat_on" || action === "read_chat_off" || action.startsWith("topic") || action.startsWith("queue") || action === "summary_current") return "channels";
+  if (action.startsWith("llm")) return "llm";
   if (action.startsWith("lockdown") || action === "power_panel" || action === "state_panel" || action === "ai_url_modal" || action.startsWith("debug") || action === "feature_status" || action === "stats_week" || action.startsWith("state_")) return "system";
   if (action.startsWith("style") || action.startsWith("mood")) return "persona";
   if (action.startsWith("natural") || action === "media_list" || action === "media_sync") return "behavior";
@@ -2357,6 +2363,7 @@ function horiActionTitle(action: string) {
     search_diagnose: "Search diagnostics",
     feature_status: "Feature flags",
     channel_policy: "Channel policy",
+    llm_panel: "LLM models",
     debug_latest: "Latest trace"
   };
 
@@ -2433,6 +2440,219 @@ function buildHoriDetailEmbed(title: string, body: string) {
     .setDescription(clipPanelText(body));
 }
 
+async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRoutingSlot = "chat", guildId?: string) {
+  const status = await runtime.runtimeConfig.getModelRoutingStatus();
+  const activeSlot = MODEL_ROUTING_SLOTS.includes(selectedSlot) ? selectedSlot : "chat";
+  const activeModel = status.slots[activeSlot];
+  const preset = MODEL_ROUTING_PRESETS[status.preset];
+  const telemetry = guildId ? await buildLlmTelemetry(runtime, guildId) : "Открой панель внутри сервера, чтобы увидеть telemetry.";
+  const updated = status.updatedAt
+    ? `\nupdated=${status.updatedAt.toISOString()}${status.updatedBy ? ` by ${status.updatedBy}` : ""}`
+    : "";
+  const parseWarning = status.parseError ? `\n\nRouting JSON был проигнорирован: ${status.parseError}` : "";
+
+  return {
+    content: "",
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("🤖 Hori LLM Models")
+        .setColor(0x57F287)
+        .setDescription([
+          `Preset: **${status.preset}** (${preset.label})`,
+          `Provider: **${status.provider}** · source=${status.source}${updated}`,
+          `Selected slot: **${activeSlot}** -> \`${activeModel}\``,
+          "",
+          "Embeddings locked here: `text-embedding-3-small` by default. Changing embedding dimensions needs a separate reindex.",
+          parseWarning
+        ].filter(Boolean).join("\n"))
+        .addFields(
+          { name: "Slots", value: clipFieldText(formatLlmSlots(status.slots, status.overrides, activeSlot)) },
+          {
+            name: "Legacy fallback",
+            value: clipFieldText(`chat=${status.legacyFallback.chat}\nsmart=${status.legacyFallback.smart}\nembed=${status.embeddingModel}`),
+            inline: true
+          },
+          { name: "Telemetry", value: clipFieldText(telemetry) }
+        )
+    ],
+    components: buildLlmPanelRows(status.preset, activeSlot, activeModel)
+  };
+}
+
+function buildLlmPanelRows(activePreset: string, activeSlot: ModelRoutingSlot, activeModel: string) {
+  return [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`${LLM_PANEL_PREFIX}:preset`)
+        .setPlaceholder("LLM preset")
+        .addOptions(
+          ...Object.entries(MODEL_ROUTING_PRESETS).map(([value, preset]) => ({
+            label: preset.label,
+            value,
+            description: preset.description.slice(0, 100),
+            default: value === activePreset
+          }))
+        )
+    ),
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`${LLM_PANEL_PREFIX}:slot`)
+        .setPlaceholder("LLM slot")
+        .addOptions(
+          ...MODEL_ROUTING_SLOTS.map((slot) => ({
+            label: slot,
+            value: slot,
+            default: slot === activeSlot
+          }))
+        )
+    ),
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`${LLM_PANEL_PREFIX}:model:${activeSlot}`)
+        .setPlaceholder(`Model for ${activeSlot}`)
+        .addOptions(
+          ...MODEL_ROUTING_MODEL_IDS.map((model) => ({
+            label: model,
+            value: model,
+            default: model === activeModel
+          }))
+        )
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${LLM_PANEL_PREFIX}:reset-slot:${activeSlot}`)
+        .setLabel("Reset slot")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${LLM_PANEL_PREFIX}:reset-all:${activeSlot}`)
+        .setLabel("Reset all")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId(`${HORI_ACTION_PREFIX}:panel_home`)
+        .setLabel("Panel")
+        .setEmoji("🏠")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${HORI_ACTION_PREFIX}:state_brain`)
+        .setLabel("Brain")
+        .setEmoji("🧠")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${HORI_ACTION_PREFIX}:state_tokens`)
+        .setLabel("Tokens")
+        .setEmoji("🪙")
+        .setStyle(ButtonStyle.Secondary)
+    )
+  ];
+}
+
+function formatLlmSlots(
+  slots: Record<ModelRoutingSlot, string>,
+  overrides: Partial<Record<ModelRoutingSlot, string>>,
+  activeSlot: ModelRoutingSlot
+) {
+  return MODEL_ROUTING_SLOTS
+    .map((slot) => {
+      const active = slot === activeSlot ? ">" : " ";
+      const override = overrides[slot] ? "*" : " ";
+      return `${active}${override} ${slot}: ${slots[slot]}`;
+    })
+    .join("\n");
+}
+
+async function buildLlmTelemetry(runtime: BotRuntime, guildId: string) {
+  const rows = await runtime.prisma.botEventLog.findMany({
+    where: {
+      guildId,
+      createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+    },
+    orderBy: { createdAt: "desc" },
+    take: 300,
+    select: {
+      createdAt: true,
+      debugTrace: true
+    }
+  });
+  const calls = rows.flatMap((row) =>
+    extractTraceLlmCalls(row.debugTrace).map((call) => ({
+      ...call,
+      createdAt: row.createdAt
+    }))
+  );
+
+  if (!calls.length) {
+    return "Пока нет llmCalls в trace.";
+  }
+
+  const latest = calls
+    .slice(0, 5)
+    .map((call) => `${call.purpose}:${call.model} ${call.promptTokens}/${call.completionTokens}`)
+    .join("\n");
+  const day = summarizeTraceCalls(calls.filter((call) => call.createdAt.getTime() >= Date.now() - 24 * 60 * 60 * 1000));
+  const week = summarizeTraceCalls(calls);
+
+  return clipPanelText([
+    "Latest:",
+    latest,
+    "",
+    "24h:",
+    day || "нет данных",
+    "",
+    "7d:",
+    week || "нет данных"
+  ].join("\n"), 1000);
+}
+
+function extractTraceLlmCalls(debugTrace: unknown) {
+  if (!debugTrace || typeof debugTrace !== "object") {
+    return [];
+  }
+
+  const calls = (debugTrace as { llmCalls?: unknown }).llmCalls;
+  if (!Array.isArray(calls)) {
+    return [];
+  }
+
+  return calls.flatMap((call) => {
+    if (!call || typeof call !== "object") {
+      return [];
+    }
+
+    const record = call as Record<string, unknown>;
+    const purpose = typeof record.purpose === "string" ? record.purpose : "unknown";
+    const model = typeof record.model === "string" ? record.model : "unknown";
+    const promptTokens = typeof record.promptTokens === "number" ? record.promptTokens : 0;
+    const completionTokens = typeof record.completionTokens === "number" ? record.completionTokens : 0;
+    const totalTokens = typeof record.totalTokens === "number" ? record.totalTokens : promptTokens + completionTokens;
+
+    return [{ purpose, model, promptTokens, completionTokens, totalTokens }];
+  });
+}
+
+function summarizeTraceCalls(calls: Array<{ purpose: string; model: string; promptTokens: number; completionTokens: number; totalTokens: number }>) {
+  const groups = new Map<string, { calls: number; promptTokens: number; completionTokens: number; totalTokens: number }>();
+
+  for (const call of calls) {
+    const key = `${call.purpose}:${call.model}`;
+    const current = groups.get(key) ?? { calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+    current.calls += 1;
+    current.promptTokens += call.promptTokens;
+    current.completionTokens += call.completionTokens;
+    current.totalTokens += call.totalTokens;
+    groups.set(key, current);
+  }
+
+  return [...groups.entries()]
+    .sort(([, a], [, b]) => b.totalTokens - a.totalTokens)
+    .slice(0, 6)
+    .map(([key, value]) => `${key} x${value.calls} ${value.promptTokens}/${value.completionTokens}`)
+    .join("\n");
+}
+
+function clipFieldText(value: string, max = 1024) {
+  return value.length > max ? `${value.slice(0, max - 3)}...` : value || "none";
+}
+
 function buildPowerPanelResponse(content: string, activeProfile: (typeof POWER_PROFILES)[number]) {
   return {
     content: "",
@@ -2442,7 +2662,8 @@ function buildPowerPanelResponse(content: string, activeProfile: (typeof POWER_P
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:panel_home`).setLabel("Panel").setEmoji("🏠").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_brain`).setLabel("Brain").setEmoji("🧠").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_tokens`).setLabel("Tokens").setEmoji("🪙").setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_tokens`).setLabel("Tokens").setEmoji("🪙").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:llm_panel`).setLabel("LLM").setEmoji("🤖").setStyle(ButtonStyle.Secondary)
       )
     ]
   };

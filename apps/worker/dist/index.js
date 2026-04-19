@@ -18,6 +18,7 @@ var index_exports = {};
 module.exports = __toCommonJS(index_exports);
 var import_analytics = require("@hori/analytics");
 var import_config = require("@hori/config");
+var import_core = require("@hori/core");
 var import_llm4 = require("@hori/llm");
 var import_memory3 = require("@hori/memory");
 var import_search = require("@hori/search");
@@ -145,13 +146,13 @@ function createMemoryFormationJob(runtime) {
       return { skipped: true, reason: "channelId required" };
     }
     const isOpenAI = runtime.env.LLM_PROVIDER === "openai";
+    const runtimeSettings = await runtime.runtimeConfig.getRuntimeSettings();
     let formationEnv;
     let bestModelName;
     let bestModelReason;
     if (isOpenAI) {
-      const oaiEnv = runtime.env;
-      bestModelName = oaiEnv.OPENAI_SMART_MODEL ?? "gpt-4o-mini";
-      bestModelReason = "openai provider";
+      bestModelName = runtime.modelRouter.pickModelForSlot("memory", runtimeSettings.modelRouting);
+      bestModelReason = `openai ${runtimeSettings.modelRouting.preset} memory slot`;
       formationEnv = {
         ...runtime.env,
         OLLAMA_FAST_MODEL: bestModelName,
@@ -361,6 +362,7 @@ var import_shared3 = require("@hori/shared");
 function createProfileJob(runtime) {
   return async (job) => {
     const profile = (0, import_llm2.getModelProfile)("smart");
+    const runtimeSettings = await runtime.runtimeConfig.getRuntimeSettings();
     const stats = await runtime.analytics.getUserStats(job.data.guildId, job.data.userId);
     if (!stats || !runtime.profileService.isEligible(stats.totalMessages)) {
       return { skipped: true, reason: "user not eligible" };
@@ -384,7 +386,7 @@ function createProfileJob(runtime) {
     let parsed;
     try {
       const response = await runtime.llmClient.chat({
-        model: runtime.modelRouter.pickModel("profile"),
+        model: runtime.modelRouter.pickModel("profile", runtimeSettings.modelRouting),
         messages: prompt,
         format: "json",
         temperature: Math.min(profile.temperature, 0.2),
@@ -420,7 +422,13 @@ function createProfileJob(runtime) {
     const latestChannelId = messages[0]?.channelId;
     if (latestChannelId && messages.length) {
       try {
-        const formationService = new import_memory2.MemoryFormationService(runtime.prisma, runtime.retrievalService, runtime.llmClient, runtime.env, runtime.modelRouter.pickEmbedModel());
+        const memoryModel = runtime.modelRouter.pickModelForSlot("memory", runtimeSettings.modelRouting);
+        const formationEnv = {
+          ...runtime.env,
+          OLLAMA_FAST_MODEL: memoryModel,
+          OLLAMA_SMART_MODEL: memoryModel
+        };
+        const formationService = new import_memory2.MemoryFormationService(runtime.prisma, runtime.retrievalService, runtime.llmClient, formationEnv, runtime.modelRouter.pickEmbedModel());
         const priorSummaries = await runtime.summaryService.getRecentSummaries(job.data.guildId, latestChannelId, 2);
         await formationService.runFormation({
           guildId: job.data.guildId,
@@ -461,6 +469,7 @@ function createSummaryJob(runtime) {
     if (messages.length < runtime.env.SUMMARY_MIN_MESSAGES) {
       return { skipped: true, reason: "not enough messages" };
     }
+    const runtimeSettings = await runtime.runtimeConfig.getRuntimeSettings();
     const prompt = (0, import_llm3.buildSummaryPrompt)(
       messages.map((message) => `[${message.user.globalName || message.user.username || message.userId}] ${message.content}`).join("\n"),
       "\u0421\u0434\u0435\u043B\u0430\u0439 \u043A\u0440\u0430\u0442\u043A\u0443\u044E \u0438 \u0434\u043B\u0438\u043D\u043D\u0443\u044E \u0441\u0432\u043E\u0434\u043A\u0443. \u0412 \u043F\u0435\u0440\u0432\u043E\u0439 \u0441\u0442\u0440\u043E\u043A\u0435 \u043A\u043E\u0440\u043E\u0442\u043A\u043E, \u0434\u0430\u043B\u044C\u0448\u0435 \u043F\u043E\u0434\u0440\u043E\u0431\u043D\u0435\u0435."
@@ -468,7 +477,7 @@ function createSummaryJob(runtime) {
     let response;
     try {
       response = await runtime.llmClient.chat({
-        model: runtime.env.OLLAMA_SMART_MODEL,
+        model: runtime.modelRouter.pickModel("summary", runtimeSettings.modelRouting),
         messages: prompt,
         temperature: profile.temperature,
         topP: profile.topP,
@@ -561,6 +570,7 @@ async function main() {
     similarityThreshold: env.TOPIC_SIM_THRESHOLD
   });
   const searchCache = new import_search.SearchCacheService(prisma, redis);
+  const runtimeConfig = new import_core.RuntimeConfigService(prisma, env);
   const llmProvider = env.LLM_PROVIDER;
   let llmClient;
   if (llmProvider === "openai") {
@@ -584,6 +594,7 @@ async function main() {
     retrievalService,
     topicService,
     searchCache,
+    runtimeConfig,
     llmClient,
     modelRouter,
     embeddingAdapter

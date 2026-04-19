@@ -4,7 +4,7 @@
 var import_analytics2 = require("@hori/analytics");
 var import_config = require("@hori/config");
 var import_core2 = require("@hori/core");
-var import_llm = require("@hori/llm");
+var import_llm3 = require("@hori/llm");
 var import_memory2 = require("@hori/memory");
 var import_search = require("@hori/search");
 var import_shared6 = require("@hori/shared");
@@ -35,6 +35,7 @@ var panelTabChoices = [
   { name: "\u26A1 \u041F\u043E\u0432\u0435\u0434\u0435\u043D\u0438\u0435", value: "behavior" },
   { name: "\u{1F9E0} \u041F\u0430\u043C\u044F\u0442\u044C \u0438 \u043B\u044E\u0434\u0438", value: "memory" },
   { name: "\u{1F4E1} \u041A\u0430\u043D\u0430\u043B\u044B \u0438 \u043F\u043E\u0438\u0441\u043A", value: "channels" },
+  { name: "\u{1F916} LLM", value: "llm" },
   { name: "\u2699\uFE0F \u0421\u0438\u0441\u0442\u0435\u043C\u0430", value: "system" }
 ];
 var stateTabChoices = [
@@ -273,6 +274,7 @@ var contextMenuDefinitions = [
 var import_discord3 = require("discord.js");
 var import_shared3 = require("@hori/shared");
 var import_memory = require("@hori/memory");
+var import_llm2 = require("@hori/llm");
 
 // src/router/owner-lockdown.ts
 var import_shared2 = require("@hori/shared");
@@ -311,6 +313,7 @@ async function shouldIgnoreForOwnerLockdown(runtime, userId) {
 }
 
 // src/services/bot-state-service.ts
+var import_llm = require("@hori/llm");
 var HORI_STATE_TABS = ["persona", "brain", "memory", "channel", "search", "queue", "media", "features", "trace", "tokens"];
 var BotStateService = class {
   constructor(runtime) {
@@ -360,23 +363,25 @@ var BotStateService = class {
     };
   }
   async brain(guildId, channelId) {
-    const [routing, power, lockdown] = await Promise.all([
+    const [routing, power, lockdown, modelRouting] = await Promise.all([
       this.runtime.runtimeConfig.getRoutingConfig(guildId, channelId),
       this.runtime.slashAdmin.powerStatus(),
-      getOwnerLockdownState(this.runtime, true)
+      getOwnerLockdownState(this.runtime, true),
+      this.runtime.runtimeConfig.getModelRoutingStatus()
     ]);
+    const llm = modelRouting.provider === "openai" ? [
+      `provider=openai preset=${modelRouting.preset}`,
+      ...import_llm.MODEL_ROUTING_SLOTS.map((slot) => `${slot}=${modelRouting.slots[slot]}`),
+      `embed=${modelRouting.embeddingModel}`
+    ].join("\n") : `provider=ollama
+url=${this.runtime.env.OLLAMA_BASE_URL ?? "missing"}
+fast=${this.runtime.env.OLLAMA_FAST_MODEL}
+smart=${this.runtime.env.OLLAMA_SMART_MODEL}`;
     return {
       title: "\u0421\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435: \u043C\u043E\u0437\u0433\u0438",
       description: "\u041C\u043E\u0434\u0435\u043B\u0438, \u043B\u0438\u043C\u0438\u0442\u044B \u0438 \u0440\u0435\u0436\u0438\u043C\u044B \u0432\u044B\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u044F",
       fields: [
-        { name: "LLM", value: clip(
-          this.runtime.env.LLM_PROVIDER === "openai" ? `provider=openai
-chat=${this.runtime.env.OPENAI_CHAT_MODEL ?? "gpt-4o-mini"}
-smart=${this.runtime.env.OPENAI_SMART_MODEL ?? "gpt-4o-mini"}` : `provider=ollama
-url=${this.runtime.env.OLLAMA_BASE_URL ?? "missing"}
-fast=${this.runtime.env.OLLAMA_FAST_MODEL}
-smart=${this.runtime.env.OLLAMA_SMART_MODEL}`
-        ) },
+        { name: "LLM", value: clip(llm) },
         { name: "Power", value: clip(power) },
         { name: "Runtime", value: clip(`ctx=${routing.runtimeSettings.ollamaNumCtx}, batch=${routing.runtimeSettings.ollamaNumBatch}, replyTokens=${routing.runtimeSettings.llmReplyMaxTokens}`), inline: true },
         { name: "Lockdown", value: lockdown.enabled ? `on, updatedBy=${lockdown.updatedBy ?? "unknown"}` : "off", inline: true }
@@ -606,14 +611,16 @@ var HORI_PANEL_PREFIX = "hori-panel";
 var HORI_ACTION_PREFIX = "hori-action";
 var HORI_STATE_PANEL_PREFIX = "hori-state";
 var POWER_PANEL_PREFIX = "power-panel";
+var LLM_PANEL_PREFIX = "llm-panel";
 var POWER_PROFILES = ["economy", "balanced", "expanded", "max"];
-var HORI_PANEL_TABS = ["main", "persona", "behavior", "memory", "channels", "system"];
+var HORI_PANEL_TABS = ["main", "persona", "behavior", "memory", "channels", "llm", "system"];
 var TAB_EMOJI = {
   main: "\u{1F3E0}",
   persona: "\u{1F3AD}",
   behavior: "\u26A1",
   memory: "\u{1F9E0}",
   channels: "\u{1F4E1}",
+  llm: "\u{1F916}",
   system: "\u2699\uFE0F"
 };
 var TAB_COLOR = {
@@ -622,6 +629,7 @@ var TAB_COLOR = {
   behavior: 16705372,
   memory: 5763719,
   channels: 5793266,
+  llm: 5763719,
   system: 15418782
 };
 var PANEL_FEATURE_LABELS = {
@@ -1561,6 +1569,10 @@ async function handleHoriImportCommand(runtime, interaction, isOwner) {
   }
 }
 async function routeStringSelectInteraction(runtime, interaction, isOwner) {
+  if (interaction.customId.startsWith(`${LLM_PANEL_PREFIX}:`)) {
+    await handleLlmPanelSelect(runtime, interaction, isOwner);
+    return;
+  }
   if (interaction.customId === `${HORI_STATE_PANEL_PREFIX}:tab`) {
     if (!interaction.guildId) {
       await interaction.reply({ content: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043D\u0443\u0442\u0440\u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
@@ -1581,6 +1593,41 @@ async function routeStringSelectInteraction(runtime, interaction, isOwner) {
     }
     const tab = parseHoriPanelTab(interaction.values[0]) ?? "main";
     await interaction.update(buildHoriPanelResponse(tab, isOwner, hasManageGuild(interaction)));
+  }
+}
+async function handleLlmPanelSelect(runtime, interaction, isOwner) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043D\u0443\u0442\u0440\u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  if (!isOwner) {
+    await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  const [, action, selectedSlot] = interaction.customId.split(":");
+  const value = interaction.values[0];
+  if (action === "preset") {
+    if (!(0, import_llm2.isModelRoutingPresetName)(value)) {
+      await interaction.reply({ content: "\u041D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u044B\u0439 LLM preset.", flags: import_discord3.MessageFlags.Ephemeral });
+      return;
+    }
+    await runtime.runtimeConfig.setModelPreset(value, interaction.user.id);
+    await interaction.update(await buildLlmPanelResponse(runtime, "chat", interaction.guildId));
+    return;
+  }
+  if (action === "slot") {
+    const slot = (0, import_llm2.isModelRoutingSlot)(value) ? value : "chat";
+    await interaction.update(await buildLlmPanelResponse(runtime, slot, interaction.guildId));
+    return;
+  }
+  if (action === "model") {
+    const slot = (0, import_llm2.isModelRoutingSlot)(selectedSlot ?? "") ? selectedSlot : null;
+    if (!slot || !(0, import_llm2.isModelRoutingModelId)(value)) {
+      await interaction.reply({ content: "\u041D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u044B\u0439 LLM slot/model.", flags: import_discord3.MessageFlags.Ephemeral });
+      return;
+    }
+    await runtime.runtimeConfig.setModelSlot(slot, value, interaction.user.id);
+    await interaction.update(await buildLlmPanelResponse(runtime, slot, interaction.guildId));
   }
 }
 async function handleOwnerLockdownCommand(runtime, interaction, isOwner) {
@@ -1832,6 +1879,10 @@ async function routeButtonInteraction(runtime, interaction, isOwner) {
     await handleHoriPanelAction(runtime, interaction, isOwner, hasManageGuild(interaction));
     return;
   }
+  if (interaction.customId.startsWith(`${LLM_PANEL_PREFIX}:`)) {
+    await handleLlmPanelButton(runtime, interaction, isOwner);
+    return;
+  }
   if (!interaction.customId.startsWith(`${POWER_PANEL_PREFIX}:`)) {
     return;
   }
@@ -1847,6 +1898,29 @@ async function routeButtonInteraction(runtime, interaction, isOwner) {
   const content = await runtime.slashAdmin.powerApply(profile, interaction.user.id);
   const status = await runtime.runtimeConfig.getPowerProfileStatus();
   await interaction.update(buildPowerPanelResponse(content, status.activeProfile));
+}
+async function handleLlmPanelButton(runtime, interaction, isOwner) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043D\u0443\u0442\u0440\u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  if (!isOwner) {
+    await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  const [, action, selectedSlot] = interaction.customId.split(":");
+  const slot = (0, import_llm2.isModelRoutingSlot)(selectedSlot ?? "") ? selectedSlot : "chat";
+  if (action === "reset-slot") {
+    await runtime.runtimeConfig.resetModelSlot(slot, interaction.user.id);
+    await interaction.update(await buildLlmPanelResponse(runtime, slot, interaction.guildId));
+    return;
+  }
+  if (action === "reset-all") {
+    await runtime.runtimeConfig.resetModelRouting(interaction.user.id);
+    await interaction.update(await buildLlmPanelResponse(runtime, slot, interaction.guildId));
+    return;
+  }
+  await interaction.reply({ content: "\u041D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u0430\u044F \u043A\u043D\u043E\u043F\u043A\u0430 LLM panel.", flags: import_discord3.MessageFlags.Ephemeral });
 }
 async function handleHoriPanelAction(runtime, interaction, isOwner, isModerator) {
   if (!interaction.guildId) {
@@ -1868,6 +1942,10 @@ async function handleHoriPanelAction(runtime, interaction, isOwner, isModerator)
   }
   if (action === "panel_home") {
     await interaction.update(buildHoriPanelResponse("main", isOwner, isModerator));
+    return;
+  }
+  if (action === "llm_panel") {
+    await interaction.update(await buildLlmPanelResponse(runtime, "chat", interaction.guildId));
     return;
   }
   if (action.startsWith("state_")) {
@@ -2137,6 +2215,7 @@ function buildHoriPanelEmbed(tab, isOwner, isModerator) {
     behavior: "\u0410\u043A\u0442\u0438\u0432\u043D\u043E\u0441\u0442\u044C \u0431\u043E\u0442\u0430: \u0447\u0442\u0435\u043D\u0438\u0435 \u0447\u0430\u0442\u0430, auto-interject, reply queue, natural message splitting, media reactions.",
     memory: "\u0412\u0441\u0451 \u043F\u0440\u043E \u043F\u0430\u043C\u044F\u0442\u044C: Active Memory, hybrid recall, memory-build, topic engine, album, reflection, \u043F\u0440\u043E\u0444\u0438\u043B\u0438 \u043B\u044E\u0434\u0435\u0439 \u0438 \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u044F.",
     channels: "\u041A\u0430\u043D\u0430\u043B\u044B: policy, mute, reply length override, topic tags, \u043F\u043E\u0438\u0441\u043A, summary. Web search \u0438 link understanding \u0442\u043E\u0436\u0435 \u0442\u0443\u0442.",
+    llm: "LLM routing: preset, \u043C\u043E\u0434\u0435\u043B\u0438 \u043F\u043E \u0444\u0443\u043D\u043A\u0446\u0438\u044F\u043C, legacy fallback \u0438 \u0434\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430 \u0442\u043E\u043A\u0435\u043D\u043E\u0432 \u0431\u0435\u0437 \u0440\u043E\u0441\u0441\u044B\u043F\u0438 env.",
     system: "\u0421\u0438\u0441\u0442\u0435\u043C\u0430: State panel, Power profile, lockdown, AI URL, debug trace, feature flags, context/safety diagnostics \u0438 \u044D\u043A\u0441\u043F\u0435\u0440\u0438\u043C\u0435\u043D\u0442\u044B."
   };
   const actions = getHoriTabActions(tab, isOwner, isModerator).map((a) => a.label).join(" \xB7 ") || "\u2014";
@@ -2209,7 +2288,8 @@ function buildHoriStatePanelRows(tab) {
       new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:debug_latest`).setLabel("Latest trace").setEmoji("\u{1F52C}").setStyle(import_discord3.ButtonStyle.Secondary),
       new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:search_diagnose`).setLabel("Search diag").setEmoji("\u{1FA7A}").setStyle(import_discord3.ButtonStyle.Secondary),
       new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_search`).setLabel("Search state").setEmoji("\u{1F50E}").setStyle(tab === "search" ? import_discord3.ButtonStyle.Primary : import_discord3.ButtonStyle.Secondary),
-      new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_features`).setLabel("Features").setEmoji("\u{1F3F7}\uFE0F").setStyle(tab === "features" ? import_discord3.ButtonStyle.Primary : import_discord3.ButtonStyle.Secondary)
+      new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_features`).setLabel("Features").setEmoji("\u{1F3F7}\uFE0F").setStyle(tab === "features" ? import_discord3.ButtonStyle.Primary : import_discord3.ButtonStyle.Secondary),
+      new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:llm_panel`).setLabel("LLM").setEmoji("\u{1F916}").setStyle(import_discord3.ButtonStyle.Secondary)
     )
   ];
 }
@@ -2288,8 +2368,16 @@ function getHoriTabActions(tab, isOwner, isModerator) {
       featureAction("link_understanding_enabled", true, "Links ON", { emoji: "\u2705", modOnly: true }),
       featureAction("link_understanding_enabled", false, "Links OFF", { emoji: "\u274C", modOnly: true })
     ],
+    llm: [
+      { id: "llm_panel", label: "LLM models", emoji: "\u{1F916}", ownerOnly: true, style: import_discord3.ButtonStyle.Primary },
+      { id: "state_brain", label: "Brain", emoji: "\u{1F9E0}", ownerOnly: true },
+      { id: "state_tokens", label: "Tokens", emoji: "\u{1FA99}", ownerOnly: true },
+      { id: "debug_latest", label: "Latest trace", emoji: "\u{1F52C}", ownerOnly: true },
+      { id: "power_panel", label: "Power", emoji: "\u26A1", ownerOnly: true }
+    ],
     system: [
       { id: "state_panel", label: "State", emoji: "\u{1F4E1}", ownerOnly: true, style: import_discord3.ButtonStyle.Primary },
+      { id: "llm_panel", label: "LLM models", emoji: "\u{1F916}", ownerOnly: true, style: import_discord3.ButtonStyle.Primary },
       { id: "power_panel", label: "Power", emoji: "\u26A1", ownerOnly: true, style: import_discord3.ButtonStyle.Primary },
       { id: "ai_url_modal", label: "AI URL", emoji: "\u{1F517}", ownerOnly: true },
       { id: "lockdown_status", label: "Lockdown?", emoji: "\u{1F512}", ownerOnly: true },
@@ -2333,6 +2421,7 @@ function horiTabLabel(tab) {
     behavior: "\u26A1 \u041F\u043E\u0432\u0435\u0434\u0435\u043D\u0438\u0435",
     memory: "\u{1F9E0} \u041F\u0430\u043C\u044F\u0442\u044C \u0438 \u043B\u044E\u0434\u0438",
     channels: "\u{1F4E1} \u041A\u0430\u043D\u0430\u043B\u044B \u0438 \u043F\u043E\u0438\u0441\u043A",
+    llm: "\u{1F916} LLM",
     system: "\u2699\uFE0F \u0421\u0438\u0441\u0442\u0435\u043C\u0430"
   };
   return labels[tab];
@@ -2344,6 +2433,7 @@ function inferTabForHoriAction(action) {
   }
   if (action.startsWith("memory") || action.startsWith("reflection") || action.startsWith("profile") || action.startsWith("relationship") || action === "dossier_modal") return "memory";
   if (action.startsWith("search") || action.startsWith("channel") || action === "read_chat_on" || action === "read_chat_off" || action.startsWith("topic") || action.startsWith("queue") || action === "summary_current") return "channels";
+  if (action.startsWith("llm")) return "llm";
   if (action.startsWith("lockdown") || action === "power_panel" || action === "state_panel" || action === "ai_url_modal" || action.startsWith("debug") || action === "feature_status" || action === "stats_week" || action.startsWith("state_")) return "system";
   if (action.startsWith("style") || action.startsWith("mood")) return "persona";
   if (action.startsWith("natural") || action === "media_list" || action === "media_sync") return "behavior";
@@ -2385,6 +2475,7 @@ function horiActionTitle(action) {
     search_diagnose: "Search diagnostics",
     feature_status: "Feature flags",
     channel_policy: "Channel policy",
+    llm_panel: "LLM models",
     debug_latest: "Latest trace"
   };
   return titles[action] ?? "Panel action";
@@ -2448,6 +2539,161 @@ async function applyPanelFeatureToggle(runtime, guildId, key, enabled) {
 function buildHoriDetailEmbed(title, body) {
   return new import_discord3.EmbedBuilder().setTitle(title).setColor(2829617).setDescription(clipPanelText(body));
 }
+async function buildLlmPanelResponse(runtime, selectedSlot = "chat", guildId) {
+  const status = await runtime.runtimeConfig.getModelRoutingStatus();
+  const activeSlot = import_llm2.MODEL_ROUTING_SLOTS.includes(selectedSlot) ? selectedSlot : "chat";
+  const activeModel = status.slots[activeSlot];
+  const preset = import_llm2.MODEL_ROUTING_PRESETS[status.preset];
+  const telemetry = guildId ? await buildLlmTelemetry(runtime, guildId) : "\u041E\u0442\u043A\u0440\u043E\u0439 \u043F\u0430\u043D\u0435\u043B\u044C \u0432\u043D\u0443\u0442\u0440\u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430, \u0447\u0442\u043E\u0431\u044B \u0443\u0432\u0438\u0434\u0435\u0442\u044C telemetry.";
+  const updated = status.updatedAt ? `
+updated=${status.updatedAt.toISOString()}${status.updatedBy ? ` by ${status.updatedBy}` : ""}` : "";
+  const parseWarning = status.parseError ? `
+
+Routing JSON \u0431\u044B\u043B \u043F\u0440\u043E\u0438\u0433\u043D\u043E\u0440\u0438\u0440\u043E\u0432\u0430\u043D: ${status.parseError}` : "";
+  return {
+    content: "",
+    embeds: [
+      new import_discord3.EmbedBuilder().setTitle("\u{1F916} Hori LLM Models").setColor(5763719).setDescription([
+        `Preset: **${status.preset}** (${preset.label})`,
+        `Provider: **${status.provider}** \xB7 source=${status.source}${updated}`,
+        `Selected slot: **${activeSlot}** -> \`${activeModel}\``,
+        "",
+        "Embeddings locked here: `text-embedding-3-small` by default. Changing embedding dimensions needs a separate reindex.",
+        parseWarning
+      ].filter(Boolean).join("\n")).addFields(
+        { name: "Slots", value: clipFieldText(formatLlmSlots(status.slots, status.overrides, activeSlot)) },
+        {
+          name: "Legacy fallback",
+          value: clipFieldText(`chat=${status.legacyFallback.chat}
+smart=${status.legacyFallback.smart}
+embed=${status.embeddingModel}`),
+          inline: true
+        },
+        { name: "Telemetry", value: clipFieldText(telemetry) }
+      )
+    ],
+    components: buildLlmPanelRows(status.preset, activeSlot, activeModel)
+  };
+}
+function buildLlmPanelRows(activePreset, activeSlot, activeModel) {
+  return [
+    new import_discord3.ActionRowBuilder().addComponents(
+      new import_discord3.StringSelectMenuBuilder().setCustomId(`${LLM_PANEL_PREFIX}:preset`).setPlaceholder("LLM preset").addOptions(
+        ...Object.entries(import_llm2.MODEL_ROUTING_PRESETS).map(([value, preset]) => ({
+          label: preset.label,
+          value,
+          description: preset.description.slice(0, 100),
+          default: value === activePreset
+        }))
+      )
+    ),
+    new import_discord3.ActionRowBuilder().addComponents(
+      new import_discord3.StringSelectMenuBuilder().setCustomId(`${LLM_PANEL_PREFIX}:slot`).setPlaceholder("LLM slot").addOptions(
+        ...import_llm2.MODEL_ROUTING_SLOTS.map((slot) => ({
+          label: slot,
+          value: slot,
+          default: slot === activeSlot
+        }))
+      )
+    ),
+    new import_discord3.ActionRowBuilder().addComponents(
+      new import_discord3.StringSelectMenuBuilder().setCustomId(`${LLM_PANEL_PREFIX}:model:${activeSlot}`).setPlaceholder(`Model for ${activeSlot}`).addOptions(
+        ...import_llm2.MODEL_ROUTING_MODEL_IDS.map((model) => ({
+          label: model,
+          value: model,
+          default: model === activeModel
+        }))
+      )
+    ),
+    new import_discord3.ActionRowBuilder().addComponents(
+      new import_discord3.ButtonBuilder().setCustomId(`${LLM_PANEL_PREFIX}:reset-slot:${activeSlot}`).setLabel("Reset slot").setStyle(import_discord3.ButtonStyle.Secondary),
+      new import_discord3.ButtonBuilder().setCustomId(`${LLM_PANEL_PREFIX}:reset-all:${activeSlot}`).setLabel("Reset all").setStyle(import_discord3.ButtonStyle.Danger),
+      new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:panel_home`).setLabel("Panel").setEmoji("\u{1F3E0}").setStyle(import_discord3.ButtonStyle.Secondary),
+      new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_brain`).setLabel("Brain").setEmoji("\u{1F9E0}").setStyle(import_discord3.ButtonStyle.Secondary),
+      new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_tokens`).setLabel("Tokens").setEmoji("\u{1FA99}").setStyle(import_discord3.ButtonStyle.Secondary)
+    )
+  ];
+}
+function formatLlmSlots(slots, overrides, activeSlot) {
+  return import_llm2.MODEL_ROUTING_SLOTS.map((slot) => {
+    const active = slot === activeSlot ? ">" : " ";
+    const override = overrides[slot] ? "*" : " ";
+    return `${active}${override} ${slot}: ${slots[slot]}`;
+  }).join("\n");
+}
+async function buildLlmTelemetry(runtime, guildId) {
+  const rows = await runtime.prisma.botEventLog.findMany({
+    where: {
+      guildId,
+      createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1e3) }
+    },
+    orderBy: { createdAt: "desc" },
+    take: 300,
+    select: {
+      createdAt: true,
+      debugTrace: true
+    }
+  });
+  const calls = rows.flatMap(
+    (row) => extractTraceLlmCalls(row.debugTrace).map((call) => ({
+      ...call,
+      createdAt: row.createdAt
+    }))
+  );
+  if (!calls.length) {
+    return "\u041F\u043E\u043A\u0430 \u043D\u0435\u0442 llmCalls \u0432 trace.";
+  }
+  const latest = calls.slice(0, 5).map((call) => `${call.purpose}:${call.model} ${call.promptTokens}/${call.completionTokens}`).join("\n");
+  const day = summarizeTraceCalls(calls.filter((call) => call.createdAt.getTime() >= Date.now() - 24 * 60 * 60 * 1e3));
+  const week = summarizeTraceCalls(calls);
+  return clipPanelText([
+    "Latest:",
+    latest,
+    "",
+    "24h:",
+    day || "\u043D\u0435\u0442 \u0434\u0430\u043D\u043D\u044B\u0445",
+    "",
+    "7d:",
+    week || "\u043D\u0435\u0442 \u0434\u0430\u043D\u043D\u044B\u0445"
+  ].join("\n"), 1e3);
+}
+function extractTraceLlmCalls(debugTrace) {
+  if (!debugTrace || typeof debugTrace !== "object") {
+    return [];
+  }
+  const calls = debugTrace.llmCalls;
+  if (!Array.isArray(calls)) {
+    return [];
+  }
+  return calls.flatMap((call) => {
+    if (!call || typeof call !== "object") {
+      return [];
+    }
+    const record = call;
+    const purpose = typeof record.purpose === "string" ? record.purpose : "unknown";
+    const model = typeof record.model === "string" ? record.model : "unknown";
+    const promptTokens = typeof record.promptTokens === "number" ? record.promptTokens : 0;
+    const completionTokens = typeof record.completionTokens === "number" ? record.completionTokens : 0;
+    const totalTokens = typeof record.totalTokens === "number" ? record.totalTokens : promptTokens + completionTokens;
+    return [{ purpose, model, promptTokens, completionTokens, totalTokens }];
+  });
+}
+function summarizeTraceCalls(calls) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const call of calls) {
+    const key = `${call.purpose}:${call.model}`;
+    const current = groups.get(key) ?? { calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+    current.calls += 1;
+    current.promptTokens += call.promptTokens;
+    current.completionTokens += call.completionTokens;
+    current.totalTokens += call.totalTokens;
+    groups.set(key, current);
+  }
+  return [...groups.entries()].sort(([, a], [, b]) => b.totalTokens - a.totalTokens).slice(0, 6).map(([key, value]) => `${key} x${value.calls} ${value.promptTokens}/${value.completionTokens}`).join("\n");
+}
+function clipFieldText(value, max = 1024) {
+  return value.length > max ? `${value.slice(0, max - 3)}...` : value || "none";
+}
 function buildPowerPanelResponse(content, activeProfile) {
   return {
     content: "",
@@ -2457,7 +2703,8 @@ function buildPowerPanelResponse(content, activeProfile) {
       new import_discord3.ActionRowBuilder().addComponents(
         new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:panel_home`).setLabel("Panel").setEmoji("\u{1F3E0}").setStyle(import_discord3.ButtonStyle.Secondary),
         new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_brain`).setLabel("Brain").setEmoji("\u{1F9E0}").setStyle(import_discord3.ButtonStyle.Secondary),
-        new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_tokens`).setLabel("Tokens").setEmoji("\u{1FA99}").setStyle(import_discord3.ButtonStyle.Secondary)
+        new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:state_tokens`).setLabel("Tokens").setEmoji("\u{1FA99}").setStyle(import_discord3.ButtonStyle.Secondary),
+        new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:llm_panel`).setLabel("LLM").setEmoji("\u{1F916}").setStyle(import_discord3.ButtonStyle.Secondary)
       )
     ]
   };
@@ -3331,10 +3578,10 @@ async function bootstrapBot() {
   const llmProvider = env.LLM_PROVIDER;
   let llmClient;
   if (llmProvider === "openai") {
-    llmClient = new import_llm.OpenAIClient(env, logger);
+    llmClient = new import_llm3.OpenAIClient(env, logger);
     logger.info("LLM provider: OpenAI");
   } else {
-    llmClient = new import_llm.OllamaClient(env, logger);
+    llmClient = new import_llm3.OllamaClient(env, logger);
     if (env.OLLAMA_BASE_URL) {
       try {
         const probe = await fetch(new URL("/api/tags", env.OLLAMA_BASE_URL), {
@@ -3355,11 +3602,11 @@ async function bootstrapBot() {
       logger.warn("OLLAMA_BASE_URL not set \u2014 bot will use fallback replies for all LLM calls");
     }
   }
-  const modelRouter = new import_llm.ModelRouter(env);
-  const embeddingAdapter = new import_llm.EmbeddingAdapter(llmClient, modelRouter);
+  const modelRouter = new import_llm3.ModelRouter(env);
+  const embeddingAdapter = new import_llm3.EmbeddingAdapter(llmClient, modelRouter);
   const searchCache = new import_search.SearchCacheService(prisma, redisReady ? redis : null, logger);
   const searchClient = new import_search.BraveSearchClient(env, logger, searchCache);
-  const toolOrchestrator = new import_llm.ToolOrchestrator(llmClient, logger);
+  const toolOrchestrator = new import_llm3.ToolOrchestrator(llmClient, logger);
   const ingestService = new import_analytics2.MessageIngestService(prisma, logger);
   const slashAdmin = new import_core2.SlashAdminService(
     prisma,

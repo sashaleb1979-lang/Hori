@@ -5,6 +5,7 @@
       "/apps/worker/**",
       "/packages/analytics/**",
       "/packages/config/**",
+      "/packages/core/**",
       "/packages/llm/**",
       "/packages/memory/**",
       "/packages/search/**",

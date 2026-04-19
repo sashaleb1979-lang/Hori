@@ -13,6 +13,7 @@ const panelTabChoices = [
   { name: "⚡ Поведение", value: "behavior" },
   { name: "🧠 Память и люди", value: "memory" },
   { name: "📡 Каналы и поиск", value: "channels" },
+  { name: "🤖 LLM", value: "llm" },
   { name: "⚙️ Система", value: "system" }
 ] as const;
 

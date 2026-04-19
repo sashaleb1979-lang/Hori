@@ -50,7 +50,7 @@ export const FEATURE_KEY_MAP = {
 
 export const POWER_PROFILE_SETTING_KEY = "power.profile";
 
-const RUNTIME_OVERRIDE_DEFINITIONS: Record<string, { field: keyof Omit<EffectiveRuntimeSettings, "powerProfile">; parse: (value: string) => string | number | undefined }> = {
+const RUNTIME_OVERRIDE_DEFINITIONS: Record<string, { field: keyof Omit<EffectiveRuntimeSettings, "powerProfile" | "modelRouting">; parse: (value: string) => string | number | undefined }> = {
   "runtime.llm.max_context_messages": { field: "llmMaxContextMessages", parse: parsePositiveInt },
   "runtime.context.max_chars": { field: "contextMaxChars", parse: parsePositiveInt },
   "runtime.llm.reply_max_tokens": { field: "llmReplyMaxTokens", parse: parsePositiveInt },
@@ -497,7 +497,7 @@ function parseUnitFloat(value: string) {
 
 function applyRuntimeOverride(
   target: EffectiveRuntimeSettings,
-  field: keyof Omit<EffectiveRuntimeSettings, "powerProfile">,
+  field: keyof Omit<EffectiveRuntimeSettings, "powerProfile" | "modelRouting">,
   value: string | number
 ) {
   switch (field) {

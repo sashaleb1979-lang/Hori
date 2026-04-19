@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { EmotionMediaDecisionService } from "@hori/core";
 import { EmotionLabel, createNeutralState } from "@hori/core";
-import { POWER_PROFILE_PRESETS } from "@hori/config";
+import { loadEnv, POWER_PROFILE_PRESETS } from "@hori/config";
+import { resolveModelRouting } from "@hori/llm";
 
 describe("emotion media decision", () => {
   it("routes repeated questions to repeated-loop media category", () => {
@@ -26,6 +27,10 @@ describe("emotion media decision", () => {
       relationship: { closeness: 0.5, trustLevel: 0.5 },
       runtimeSettings: {
         powerProfile: "balanced",
+        modelRouting: resolveModelRouting(loadEnv({
+          DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+          REDIS_URL: "redis://localhost:6379"
+        })),
         ...POWER_PROFILE_PRESETS.balanced,
         mediaAutoGlobalCooldownSec: 7200,
         mediaAutoMinConfidence: 0.82,
