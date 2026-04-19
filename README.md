@@ -217,10 +217,8 @@ If a service logs `localhost:5432` or `127.0.0.1:6379` in Railway, it is still u
 
 Admin/debug endpoints require `Authorization: Bearer <ADMIN_KEY>` or the legacy `API_ADMIN_TOKEN`.
 
-## Known Limitations / TODO
-- Effective DB-backed feature flags are stored but not yet merged into every runtime decision path.
-- Auto-interjections are intentionally conservative and still heuristic-heavy in V1.
-- Search retries/backoff are basic; provider abstraction is ready but only Brave is implemented.
-- Semantic retrieval uses pgvector raw SQL and expects the extension to exist in PostgreSQL.
-- Context actions reuse the main orchestrator path; dedicated tone-analysis prompts can be expanded later.
-- There is no full web admin UI in V1; admin surface is slash-first plus internal read-only API.
+## Known Limitations / Design Choices
+- Auto-interjections are intentionally conservative and heuristic-heavy in V1 (by design).
+- Search provider abstraction is ready but only Brave is wired; retry logic (`fetchWithRetry`, 3 attempts) is already in place.
+- Semantic retrieval uses pgvector raw SQL and expects the extension to exist in PostgreSQL (architectural choice).
+- There is no full web admin UI in V1; admin surface is slash-first plus internal read-only API (by design).
