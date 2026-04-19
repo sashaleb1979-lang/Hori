@@ -12,19 +12,12 @@ import {
   summaryModelProfile,
   utilityFastModelProfile
 } from "./model-profiles";
-import {
-  OPENAI_EMBEDDING_DIMENSIONS,
-  OPENAI_EMBEDDING_MODEL,
-  resolveModelRouting,
-  slotForIntent,
-  type ModelRoutingSlot,
-  type ResolvedModelRouting
-} from "./model-routing";
 
 type ProviderAwareEnv = AppEnv & {
   LLM_PROVIDER?: string;
   OPENAI_CHAT_MODEL?: string;
   OPENAI_SMART_MODEL?: string;
+  OPENAI_EMBED_MODEL?: string;
 };
 
 export class ModelRouter {
@@ -47,50 +40,29 @@ export class ModelRouter {
       case "profile":
       case "memory_write":
       case "memory_forget":
-      case "chat":
         return "smart";
       default:
         return "fast";
     }
   }
 
-  pickSlot(intent: BotIntent) {
-    return slotForIntent(intent);
-  }
-
-  pickModel(intent: BotIntent, routing?: ResolvedModelRouting) {
-    return this.pickModelForSlot(slotForIntent(intent), routing);
-  }
-
-  pickModelForSlot(slot: ModelRoutingSlot, routing?: ResolvedModelRouting) {
-    const resolved = routing ?? resolveModelRouting(this.env);
-
+  pickModel(intent: BotIntent) {
     if (this.isOpenAI) {
-      return resolved.slots[slot];
+      const env = this.providerEnv;
+      return this.pickKind(intent) === "smart"
+        ? env.OPENAI_SMART_MODEL ?? "gpt-4o-mini"
+        : env.OPENAI_CHAT_MODEL ?? "gpt-4o-mini";
     }
 
-    return resolved.slots[slot] ?? (this.isSmartSlot(slot) ? this.env.OLLAMA_SMART_MODEL : this.env.OLLAMA_FAST_MODEL);
+    return this.pickKind(intent) === "smart" ? this.env.OLLAMA_SMART_MODEL : this.env.OLLAMA_FAST_MODEL;
   }
 
   pickEmbedModel(): string {
-    return this.pickEmbeddingModel().model;
-  }
-
-  pickEmbedDimensions(): number | undefined {
-    return this.pickEmbeddingModel().dimensions;
-  }
-
-  pickEmbeddingModel(): { model: string; dimensions?: number } {
     if (this.isOpenAI) {
-      return {
-        model: OPENAI_EMBEDDING_MODEL,
-        dimensions: OPENAI_EMBEDDING_DIMENSIONS
-      };
+      return this.providerEnv.OPENAI_EMBED_MODEL ?? "text-embedding-3-small";
     }
 
-    return {
-      model: this.env.OLLAMA_EMBED_MODEL
-    };
+    return this.env.OLLAMA_EMBED_MODEL;
   }
 
   pickProfile(intent: BotIntent): ModelProfile {
@@ -112,10 +84,6 @@ export class ModelRouter {
       default:
         return getModelProfile(this.pickKind(intent));
     }
-  }
-
-  private isSmartSlot(slot: ModelRoutingSlot) {
-    return slot !== "classifier";
   }
 }
 
