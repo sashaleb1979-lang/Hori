@@ -204,8 +204,27 @@ describe("composeBehaviorPrompt", () => {
 
     expect(result.trace.messageKind).toBe("meta_feedback");
     expect(result.prompt).toContain("исправь конкретный сбой");
+    expect(result.prompt).toContain("Не спорь о том, бот ли ты");
     expect(result.prompt).not.toContain("живой серверный персонаж Discord");
     expect(result.limits.maxChars).toBeLessThanOrEqual(120);
+  });
+
+  it("adds escalation guidance for provocation without turning it into a lecture", () => {
+    const result = compose("заткнись");
+
+    expect(result.trace.messageKind).toBe("provocation");
+    expect(result.prompt).toContain("Лестница реакции на грубость");
+    expect(result.prompt).toContain("Не обещай тайм-аут");
+  });
+
+  it("adds direct-message punctuation guidance when the message is a DM", () => {
+    const result = compose("ладно", {
+      message: {
+        isDirectMessage: true
+      }
+    });
+
+    expect(result.prompt).toContain("Если это личка, короткие прямые сообщения заканчивай без финальной точки вообще.");
   });
 
   it("keeps what-is-this-nonsense replies in meta-feedback when aimed at the bot", () => {
@@ -243,6 +262,7 @@ describe("composeBehaviorPrompt", () => {
     expect(political.prompt).toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
     expect(political.prompt).toContain("anarcho-capitalist");
     expect(political.prompt).toContain("anti-state");
+    expect(political.prompt).toContain("серьёзнее, суше и жёстче");
     expect(nonPoliticalOpinion.trace.ideologicalFlavour).toBe("background");
     expect(nonPoliticalOpinion.prompt).not.toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
     expect(nonPoliticalOpinion.prompt).not.toContain("strong pro-Israel bias");

@@ -256,6 +256,7 @@ export interface ComposeBehaviorPromptInput {
   contextScores?: ContextScores;
   contextTrace?: ContextTrace;
   debugOverrides?: PersonaDebugOverrides;
+  isDirectMessage?: boolean;
 }
 
 export interface ComposeBehaviorPromptOutput {

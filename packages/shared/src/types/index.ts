@@ -199,6 +199,7 @@ export interface MessageEnvelope {
   triggerSource?: TriggerSource;
   isModerator: boolean;
   explicitInvocation: boolean;
+  isDirectMessage?: boolean;
 }
 
 export interface IntentResult {

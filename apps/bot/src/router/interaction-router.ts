@@ -29,21 +29,28 @@ import {
 } from "@hori/llm";
 
 import type { BotRuntime } from "../bootstrap";
+import {
+  HORI_ACTION_PREFIX,
+  HORI_MODAL_PREFIX,
+  HORI_PANEL_OWNER_ONLY_MESSAGE,
+  HORI_PANEL_PREFIX,
+  HORI_PANEL_TABS,
+  HORI_STATE_PANEL_PREFIX,
+  LLM_PANEL_PREFIX,
+  MEMORY_ALBUM_MODAL_PREFIX,
+  PANEL_FEATURE_LABELS,
+  POWER_PANEL_PREFIX,
+  POWER_PROFILES,
+  TAB_COLOR,
+  TAB_EMOJI,
+  type HoriPanelTab,
+  type PanelFeatureKey
+} from "../panel/constants";
 import { getOwnerLockdownState, isBotOwner, setOwnerLockdownState, shouldIgnoreForOwnerLockdown } from "./owner-lockdown";
 import { BotStateService, HORI_STATE_TABS, horiStateTabLabel, parseHoriStateTab, type HoriStateTab } from "../services/bot-state-service";
 
 const PUBLIC_COMMANDS = new Set(["hori", "bot-help", "bot-album"]);
 const OWNER_COMMANDS = new Set(["bot-ai-url", "bot-import", "bot-lockdown", "bot-power"]);
-const MEMORY_ALBUM_MODAL_PREFIX = "memory-album";
-const HORI_MODAL_PREFIX = "hori-modal";
-const HORI_PANEL_PREFIX = "hori-panel";
-const HORI_ACTION_PREFIX = "hori-action";
-const HORI_STATE_PANEL_PREFIX = "hori-state";
-const POWER_PANEL_PREFIX = "power-panel";
-const LLM_PANEL_PREFIX = "llm-panel";
-const POWER_PROFILES = ["economy", "balanced", "expanded", "max"] as const;
-const HORI_PANEL_TABS = ["main", "persona", "behavior", "memory", "channels", "llm", "system"] as const;
-type HoriPanelTab = (typeof HORI_PANEL_TABS)[number];
 type HoriPanelAction = {
   id: string;
   label: string;
@@ -52,51 +59,6 @@ type HoriPanelAction = {
   ownerOnly?: boolean;
   modOnly?: boolean;
 };
-
-const TAB_EMOJI: Record<HoriPanelTab, string> = {
-  main: "🏠",
-  persona: "🎭",
-  behavior: "⚡",
-  memory: "🧠",
-  channels: "📡",
-  llm: "🤖",
-  system: "⚙️"
-};
-
-const TAB_COLOR: Record<HoriPanelTab, number> = {
-  main: 0x5865F2,
-  persona: 0xED4245,
-  behavior: 0xFEE75C,
-  memory: 0x57F287,
-  channels: 0x5865F2,
-  llm: 0x57F287,
-  system: 0xEB459E
-};
-
-const PANEL_FEATURE_LABELS = {
-  web_search: "Web search",
-  link_understanding_enabled: "Link understanding",
-  auto_interject: "Auto interject",
-  reply_queue_enabled: "Reply queue",
-  media_reactions_enabled: "Media reactions",
-  selective_engagement_enabled: "Selective engage",
-  context_actions: "Context actions",
-  self_reflection_lessons_enabled: "Reflection",
-  playful_mode_enabled: "Playful mode",
-  irritated_mode_enabled: "Irritated mode",
-  roast: "Roast",
-  memory_album_enabled: "Memory album",
-  interaction_requests_enabled: "Interaction requests",
-  topic_engine_enabled: "Topic engine",
-  anti_slop_strict_mode: "Anti-slop",
-  context_confidence_enabled: "Context confidence",
-  channel_aware_mode: "Channel-aware",
-  message_kind_aware_mode: "Kind-aware"
-} as const;
-
-const HORI_PANEL_OWNER_ONLY_MESSAGE = "Hori master panel доступна только владельцу. Для обычной работы используй прямые ветки /hori.";
-
-type PanelFeatureKey = keyof typeof PANEL_FEATURE_LABELS;
 
 function ensureModerator(interaction: ChatInputCommandInteraction | ContextMenuCommandInteraction | ModalSubmitInteraction) {
   return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;

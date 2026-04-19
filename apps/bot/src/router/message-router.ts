@@ -270,6 +270,7 @@ function buildEnvelope(
     mentionsBotByName: new RegExp(`(?:^|[^\\p{L}\\p{N}_])${escapeRegExp(botName)}(?=$|[^\\p{L}\\p{N}_])`, "iu").test(message.content),
     mentionedUserIds: [...message.mentions.users.keys()],
     triggerSource: triggerSource ?? (autoInterject ? "auto_interject" : undefined),
+    isDirectMessage: false,
     isModerator: member.permissions.has(PermissionFlagsBits.ManageGuild),
     explicitInvocation
   };
@@ -326,6 +327,8 @@ async function processInvocation(
     queueItemId = queueTrace.itemId ?? null;
   }
 
+  let replyDelivered = false;
+
   try {
     const result = await runtime.orchestrator.handleMessage(envelope, routingConfig, queueTrace);
 
@@ -381,6 +384,7 @@ async function processInvocation(
       naturalChunks: splitPlan?.chunks,
       naturalDelayMs: splitPlan?.delayMs
     });
+    replyDelivered = true;
 
     if (autoInterject) {
       await runtime.prisma.interjectionLog.create({
@@ -393,6 +397,50 @@ async function processInvocation(
           outcome: "sent"
         }
       });
+    }
+  } catch (error) {
+    runtime.logger.error(
+      {
+        error,
+        messageId: envelope.messageId,
+        channelId: envelope.channelId,
+        guildId: envelope.guildId,
+        queueAction: queueTrace.action,
+        queueItemId,
+        replyDelivered
+      },
+      "message invocation failed"
+    );
+
+    if (queueItemId) {
+      try {
+        if (replyDelivered) {
+          await runtime.replyQueue.complete(queueItemId);
+        } else {
+          await runtime.replyQueue.abandon(queueItemId);
+        }
+
+        queueItemId = null;
+        await drainReplyQueue(runtime, message);
+      } catch (cleanupError) {
+        runtime.logger.warn({ error: cleanupError, queueItemId }, "reply queue cleanup failed after invocation error");
+      }
+    }
+
+    if (!replyDelivered) {
+      try {
+        await sendReply(message, EMPTY_REPLY_FALLBACK);
+      } catch (replyError) {
+        runtime.logger.warn(
+          {
+            error: replyError,
+            messageId: envelope.messageId,
+            channelId: envelope.channelId,
+            guildId: envelope.guildId
+          },
+          "failed to deliver fallback reply after invocation error"
+        );
+      }
     }
   } finally {
     if (queueItemId) {

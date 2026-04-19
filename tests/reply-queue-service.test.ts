@@ -379,4 +379,51 @@ describe("ReplyQueueService", () => {
     expect(rows.find((row) => row.id === "queue-orphaned")?.status).toBe("dropped");
     expect(rows.find((row) => row.sourceMsgId === "msg-new")?.status).toBe("processing");
   });
+
+  it("abandons processing rows when invocation cleanup fails before a reply is delivered", async () => {
+    const rows: Array<Record<string, unknown>> = [
+      {
+        id: "queue-processing",
+        guildId: "guild-1",
+        channelId: "channel-1",
+        targetUserId: "user-old",
+        sourceMsgId: "msg-processing",
+        priority: 980,
+        status: "processing",
+        lockedUntil: new Date(Date.now() + 30_000),
+        createdAt: new Date(Date.now() - 60_000),
+        updatedAt: new Date(Date.now() - 60_000),
+      },
+    ];
+
+    const prisma = {
+      replyQueueItem: {
+        async updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }) {
+          let count = 0;
+
+          for (const row of rows) {
+            if (args.where.id && row.id !== args.where.id) {
+              continue;
+            }
+
+            if (args.where.status && row.status !== args.where.status) {
+              continue;
+            }
+
+            Object.assign(row, args.data, { updatedAt: new Date() });
+            count += 1;
+          }
+
+          return { count };
+        },
+      },
+    } as unknown as AppPrismaClient;
+
+    const service = new ReplyQueueService(prisma, 45);
+
+    await service.abandon("queue-processing");
+
+    expect(rows[0]?.status).toBe("dropped");
+    expect(rows[0]?.lockedUntil).toBeNull();
+  });
 });

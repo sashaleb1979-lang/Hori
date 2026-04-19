@@ -148,6 +148,20 @@ export class ReplyQueueService {
     return { enabled: true, action: "busy_ack", itemId: queued.id, reason: decision.reason };
   }
 
+  async abandon(itemId: string | null | undefined): Promise<void> {
+    if (!itemId) {
+      return;
+    }
+
+    await this.prisma.replyQueueItem.updateMany({
+      where: { id: itemId, status: "processing" },
+      data: {
+        status: "dropped",
+        lockedUntil: null
+      }
+    });
+  }
+
   async complete(itemId: string | null | undefined, resultMsgId?: string | null): Promise<void> {
     if (!itemId) {
       return;
