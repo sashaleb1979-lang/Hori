@@ -36,7 +36,7 @@ export interface ModelRoutingPreset {
 
 const balancedOpenAiSlots: ModelRoutingSlots = {
   classifier: "gpt-5-nano",
-  chat: "gpt-5.4-mini",
+  chat: "gpt-4o-mini",
   summary: "gpt-5-mini",
   rewrite: "gpt-5-mini",
   search: "gpt-5.4-mini",
@@ -52,7 +52,7 @@ export const MODEL_ROUTING_PRESETS = {
   },
   balanced_openai: {
     label: "Balanced OpenAI",
-    description: "Best price/quality split for Hori.",
+    description: "Cheaper default chat while keeping stronger utility slots.",
     slots: balancedOpenAiSlots
   },
   economy_openai: {

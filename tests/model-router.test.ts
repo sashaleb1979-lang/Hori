@@ -46,7 +46,7 @@ describe("ModelRouter", () => {
 
     expect(routing.preset).toBe("balanced_openai");
     expect(router.pickModelForSlot("classifier", routing)).toBe("gpt-5-nano");
-    expect(router.pickModel("chat", routing)).toBe("gpt-5.4-mini");
+  expect(router.pickModel("chat", routing)).toBe("gpt-4o-mini");
     expect(router.pickModel("summary", routing)).toBe("gpt-5-mini");
     expect(router.pickModel("rewrite", routing)).toBe("gpt-5-mini");
     expect(router.pickModel("profile", routing)).toBe("gpt-5-mini");

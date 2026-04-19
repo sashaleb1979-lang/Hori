@@ -197,7 +197,7 @@ describe("chat orchestrator quiet hours", () => {
     expect(result.trace.responseBudget).toBeDefined();
     expect(result.trace.responseBudget?.contour).toBe("B");
     expect(result.trace.responseBudget?.reason).not.toBe("quiet_hours:auto_interject");
-    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.model === "gpt-5.4-mini")).toBe(true);
+    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.model === "gpt-4o-mini")).toBe(true);
     expect(chat).toHaveBeenCalledTimes(2);
   });
 
@@ -225,6 +225,6 @@ describe("chat orchestrator quiet hours", () => {
     expect(result.reply).toBe("нормальный ответ");
     expect(result.trace.responseBudget).toBeDefined();
     expect(result.trace.responseBudget?.contour).toBe("B");
-    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.model === "gpt-5.4-mini")).toBe(true);
+    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.model === "gpt-4o-mini")).toBe(true);
   });
 });
