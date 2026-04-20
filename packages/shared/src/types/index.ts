@@ -377,6 +377,8 @@ export interface LlmCallTrace {
   totalTokens: number;
   source: "reported" | "estimated";
   durationMs?: number;
+  /** Tokens served from OpenAI prompt cache. Present only when > 0. */
+  cachedTokens?: number;
 }
 
 export interface ContextScores {

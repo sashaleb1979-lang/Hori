@@ -20,6 +20,8 @@ interface HybridRow {
   userId?: string | null;
   rank: number;
   reason: "vector" | "lexical" | "recent";
+  /** Salience weight from DB (0..1, default 0.5 = neutral). Used in RRF score boost. */
+  salience?: number;
 }
 
 interface ScoredHybridHit {
@@ -498,7 +500,7 @@ export class RetrievalService {
       ),
       this.prisma.$queryRawUnsafe<Array<Omit<HybridRow, "rank" | "reason">>>(
         `
-          SELECT 'channel' AS scope, id, key, value, type, "createdAt", NULL::TEXT AS "userId"
+          SELECT 'channel' AS scope, id, key, value, type, "createdAt", NULL::TEXT AS "userId", COALESCE(salience, 0.5) AS salience
           FROM "ChannelMemoryNote"
           WHERE "guildId" = $1
             AND "channelId" = $2
@@ -517,7 +519,7 @@ export class RetrievalService {
       ),
       this.prisma.$queryRawUnsafe<Array<Omit<HybridRow, "rank" | "reason">>>(
         `
-          SELECT 'event' AS scope, id, key, value, type, "createdAt", NULL::TEXT AS "userId"
+          SELECT 'event' AS scope, id, key, value, type, "createdAt", NULL::TEXT AS "userId", COALESCE(salience, 0.5) AS salience
           FROM "EventMemory"
           WHERE "guildId" = $1
             AND active = TRUE
@@ -601,7 +603,7 @@ export class RetrievalService {
         },
         orderBy: [{ salience: "desc" }, { updatedAt: "desc" }],
         take: perScopeLimit,
-        select: { id: true, key: true, value: true, type: true, createdAt: true }
+        select: { id: true, key: true, value: true, type: true, createdAt: true, salience: true }
       }),
       this.prisma.eventMemory.findMany({
         where: {
@@ -615,7 +617,7 @@ export class RetrievalService {
         },
         orderBy: [{ salience: "desc" }, { updatedAt: "desc" }],
         take: perScopeLimit,
-        select: { id: true, key: true, value: true, type: true, createdAt: true }
+        select: { id: true, key: true, value: true, type: true, createdAt: true, salience: true }
       }),
       this.prisma.message.findMany({
         where: {
@@ -633,8 +635,8 @@ export class RetrievalService {
       [
         ...server.map((row) => ({ scope: "server" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null })),
         ...user.map((row) => ({ scope: "user" as const, id: row.id, key: row.key, value: row.value, type: "user_note", createdAt: row.createdAt, userId: row.userId })),
-        ...channel.map((row) => ({ scope: "channel" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null })),
-        ...events.map((row) => ({ scope: "event" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null })),
+        ...channel.map((row) => ({ scope: "channel" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null, salience: row.salience ?? 0.5 })),
+        ...events.map((row) => ({ scope: "event" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null, salience: row.salience ?? 0.5 })),
         ...messages.map((row) => ({ scope: "message" as const, id: row.id, key: row.id, value: row.content, type: "message", createdAt: row.createdAt, userId: row.userId }))
       ],
       "lexical"
@@ -653,8 +655,8 @@ export class RetrievalService {
       [
         ...server.map((row) => ({ scope: "server" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null })),
         ...user.map((row) => ({ scope: "user" as const, id: row.id, key: row.key, value: row.value, type: "user_note", createdAt: row.createdAt, userId: input.userId })),
-        ...channel.map((row) => ({ scope: "channel" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null })),
-        ...events.map((row) => ({ scope: "event" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null }))
+        ...channel.map((row) => ({ scope: "channel" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null, salience: row.salience })),
+        ...events.map((row) => ({ scope: "event" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null, salience: row.salience }))
       ],
       "recent"
     );
@@ -722,7 +724,9 @@ function mergeHybridRows(rows: HybridRow[], limit: number): ActiveMemoryEntry[] 
   for (const row of rows) {
     const key = `${row.scope}:${row.id}`;
     const current = scored.get(key);
-    const score = 1 / (60 + row.rank);
+    // RRF base score * salience multiplier: salience=0.5 → ×1.0 (neutral), salience=0.9 → ×1.4, salience=0.1 → ×0.6
+    const rrfScore = 1 / (60 + row.rank);
+    const score = rrfScore * (0.5 + (row.salience ?? 0.5));
 
     if (!current) {
       scored.set(key, { row, score, reasons: new Set([row.reason]) });

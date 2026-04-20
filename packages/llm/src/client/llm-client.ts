@@ -34,6 +34,8 @@ export interface LlmChatResponse {
     totalDurationMs?: number;
     promptEvalDurationMs?: number;
     evalDurationMs?: number;
+    /** Tokens served from OpenAI's prompt cache (50% cost discount). */
+    cachedTokens?: number;
   };
 }
 

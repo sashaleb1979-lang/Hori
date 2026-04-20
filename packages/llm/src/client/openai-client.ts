@@ -49,6 +49,10 @@ interface OpenAIChatResponse {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+    prompt_tokens_details?: {
+      cached_tokens?: number;
+      audio_tokens?: number;
+    };
   };
 }
 
@@ -188,13 +192,18 @@ export class OpenAIClient implements LlmClient {
       const truncated = content.length > this.logMaxChars
         ? `${content.slice(0, this.logMaxChars)}...`
         : content;
+      const cachedTokens = data.usage?.prompt_tokens_details?.cached_tokens ?? 0;
+      const cacheHitPct = data.usage?.prompt_tokens && cachedTokens
+        ? Math.round((cachedTokens / data.usage.prompt_tokens) * 100)
+        : 0;
 
       this.logger.debug(
         {
           model: options.model,
           durationMs,
           promptTokens: data.usage?.prompt_tokens,
-          completionTokens: data.usage?.completion_tokens
+          completionTokens: data.usage?.completion_tokens,
+          ...(cachedTokens > 0 ? { cachedTokens, cacheHitPct } : {})
         },
         `openai chat response: ${truncated}`
       );
@@ -211,7 +220,8 @@ export class OpenAIClient implements LlmClient {
             promptTokens: data.usage.prompt_tokens,
             completionTokens: data.usage.completion_tokens,
             totalTokens: data.usage.total_tokens,
-            totalDurationMs: durationMs
+            totalDurationMs: durationMs,
+            cachedTokens: data.usage.prompt_tokens_details?.cached_tokens
           }
         : undefined
     };

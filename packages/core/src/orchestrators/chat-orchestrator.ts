@@ -1362,7 +1362,8 @@ export class ChatOrchestrator {
       completionTokens,
       totalTokens: response.usage?.totalTokens ?? promptTokens + completionTokens,
       source: response.usage?.promptTokens !== undefined || response.usage?.completionTokens !== undefined ? "reported" : "estimated",
-      durationMs: response.usage?.totalDurationMs
+      durationMs: response.usage?.totalDurationMs,
+      ...(response.usage?.cachedTokens ? { cachedTokens: response.usage.cachedTokens } : {})
     });
   }
 
@@ -1541,6 +1542,9 @@ function summarizeLlmTokenTrace(llmCalls?: LlmCallTrace[]) {
     costUsd += callCost;
     llmTokensCounter.inc({ model: call.model, type: "prompt" }, call.promptTokens);
     llmTokensCounter.inc({ model: call.model, type: "completion" }, call.completionTokens);
+    if (call.cachedTokens) {
+      llmTokensCounter.inc({ model: call.model, type: "cached" }, call.cachedTokens);
+    }
     llmCostCounter.inc({ model: call.model }, callCost);
   }
 
