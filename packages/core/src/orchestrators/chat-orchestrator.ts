@@ -1538,7 +1538,7 @@ function summarizeLlmTokenTrace(llmCalls?: LlmCallTrace[]) {
 
   let costUsd = 0;
   for (const call of llmCalls) {
-    const callCost = calculateCostUsd(call.model, call.promptTokens, call.completionTokens);
+    const callCost = calculateCostUsd(call.model, call.promptTokens, call.completionTokens, call.cachedTokens ?? 0);
     costUsd += callCost;
     llmTokensCounter.inc({ model: call.model, type: "prompt" }, call.promptTokens);
     llmTokensCounter.inc({ model: call.model, type: "completion" }, call.completionTokens);

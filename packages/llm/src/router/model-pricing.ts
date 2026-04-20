@@ -27,9 +27,16 @@ export function calculateCostUsd(
   model: string,
   promptTokens: number,
   completionTokens: number,
+  /** Tokens served from prompt cache; billed at 50% of input rate by OpenAI. */
+  cachedTokens = 0,
 ): number {
   const pricing = getModelPricing(model);
-  return (promptTokens * pricing.inputPerMillion + completionTokens * pricing.outputPerMillion) / 1_000_000;
+  const nonCachedPrompt = promptTokens - cachedTokens;
+  return (
+    nonCachedPrompt * pricing.inputPerMillion +
+    cachedTokens   * pricing.inputPerMillion * 0.5 +
+    completionTokens * pricing.outputPerMillion
+  ) / 1_000_000;
 }
 
 export interface LlmCostSummary {

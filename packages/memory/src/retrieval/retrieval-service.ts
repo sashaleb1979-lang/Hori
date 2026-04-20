@@ -655,8 +655,8 @@ export class RetrievalService {
       [
         ...server.map((row) => ({ scope: "server" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null })),
         ...user.map((row) => ({ scope: "user" as const, id: row.id, key: row.key, value: row.value, type: "user_note", createdAt: row.createdAt, userId: input.userId })),
-        ...channel.map((row) => ({ scope: "channel" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null, salience: row.salience })),
-        ...events.map((row) => ({ scope: "event" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null, salience: row.salience }))
+        ...channel.map((row) => ({ scope: "channel" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null, salience: row.salience ?? 0.5 })),
+        ...events.map((row) => ({ scope: "event" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null, salience: row.salience ?? 0.5 }))
       ],
       "recent"
     );
