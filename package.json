@@ -21,6 +21,7 @@
     "lint": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "reembed:openai": "tsx scripts/reembed-openai.ts",
     "prisma:generate": "node scripts/run-with-env-aliases.mjs \"corepack pnpm exec prisma generate\"",
     "prisma:migrate": "node scripts/run-with-env-aliases.mjs \"corepack pnpm exec prisma migrate dev\"",
     "prisma:deploy": "node scripts/run-with-env-aliases.mjs \"corepack pnpm exec prisma migrate deploy\"",

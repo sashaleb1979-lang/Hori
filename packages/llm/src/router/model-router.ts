@@ -77,11 +77,11 @@ export class ModelRouter {
     return this.pickKind(intent) === "smart" ? this.env.OLLAMA_SMART_MODEL : this.env.OLLAMA_FAST_MODEL;
   }
 
-  pickEmbeddingModel(): { model: string; dimensions?: number } {
+  pickEmbeddingModel(overrides?: { dimensions?: number }): { model: string; dimensions?: number } {
     if (this.isOpenAI) {
       return {
         model: OPENAI_EMBEDDING_MODEL,
-        dimensions: resolveOpenAIEmbeddingDimensions(this.providerEnv)
+        dimensions: resolveOpenAIEmbeddingDimensions({ OPENAI_EMBED_DIMENSIONS: overrides?.dimensions ?? this.providerEnv.OPENAI_EMBED_DIMENSIONS })
       };
     }
 

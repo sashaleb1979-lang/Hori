@@ -60,11 +60,13 @@ export class BotStateService {
   }
 
   private async brain(guildId: string, channelId: string): Promise<BotStatePanel> {
-    const [routing, power, lockdown, modelRouting] = await Promise.all([
+    const [routing, power, lockdown, modelRouting, hydeStatus, embedStatus] = await Promise.all([
       this.runtime.runtimeConfig.getRoutingConfig(guildId, channelId),
       this.runtime.slashAdmin.powerStatus(),
       getOwnerLockdownState(this.runtime, true),
-      this.runtime.runtimeConfig.getModelRoutingStatus()
+      this.runtime.runtimeConfig.getModelRoutingStatus(),
+      this.runtime.runtimeConfig.getMemoryHydeStatus(),
+      this.runtime.runtimeConfig.getOpenAIEmbeddingDimensionsStatus()
     ]);
     const embeddingStatus = modelRouting.embeddingDimensions
       ? `${modelRouting.embeddingModel} @ ${modelRouting.embeddingDimensions} dims`
@@ -83,7 +85,17 @@ export class BotStateService {
       fields: [
         { name: "LLM", value: clip(llm) },
         { name: "Power", value: clip(power) },
-        { name: "Runtime", value: clip(`ctx=${routing.runtimeSettings.ollamaNumCtx}, batch=${routing.runtimeSettings.ollamaNumBatch}, replyTokens=${routing.runtimeSettings.llmReplyMaxTokens}`), inline: true },
+        {
+          name: "Runtime",
+          value: clip([
+            `ctx=${routing.runtimeSettings.ollamaNumCtx}, batch=${routing.runtimeSettings.ollamaNumBatch}, replyTokens=${routing.runtimeSettings.llmReplyMaxTokens}`,
+            `hyde=${hydeStatus.value ? "on" : "off"} (${hydeStatus.source})`,
+            embedStatus.source === "unsupported"
+              ? "embedDims=native"
+              : `embedDims=${embedStatus.value ?? "n/a"} (${embedStatus.source})`
+          ].join("\n")),
+          inline: true
+        },
         { name: "Lockdown", value: lockdown.enabled ? `on, updatedBy=${lockdown.updatedBy ?? "unknown"}` : "off", inline: true }
       ]
     };

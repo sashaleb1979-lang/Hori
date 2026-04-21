@@ -139,6 +139,7 @@ Notes:
 
 ## Slash Commands
 - Main command surface now lives under `/hori`. Detailed panel guides: [docs/hori-panel-guide.md](./docs/hori-panel-guide.md) and [docs/hori-panel-step-by-step-ru.md](./docs/hori-panel-step-by-step-ru.md)
+- Owner LLM runtime controls now live in `/hori panel` -> `LLM`: model preset/slot, live HyDE toggle and OpenAI embedding dimensions.
 - `/bot-help`
 - `/bot-style`
 - `/bot-memory remember|forget`
@@ -222,3 +223,30 @@ Admin/debug endpoints require `Authorization: Bearer <ADMIN_KEY>` or the legacy 
 - Search provider abstraction is ready but only Brave is wired; retry logic (`fetchWithRetry`, 3 attempts) is already in place.
 - Semantic retrieval uses pgvector raw SQL and expects the extension to exist in PostgreSQL (architectural choice).
 - There is no full web admin UI in V1; admin surface is slash-first plus internal read-only API (by design).
+
+## OpenAI Re-Embed Backfill
+Use the dedicated script when you lower OpenAI embedding dimensions for retrieval, for example `768 -> 512`.
+
+Dry-run first:
+```bash
+pnpm reembed:openai --target-dimensions 512
+```
+
+Apply batched rewrite:
+```bash
+pnpm reembed:openai --target-dimensions 512 --apply
+```
+
+Useful flags:
+- `--source-dimensions 768`
+- `--batch-size 25`
+- `--limit 200`
+- `--guild-id <guildId>`
+- `--entity-types message,server_memory,channel_memory,user_memory,event_memory`
+
+Recommended rollout:
+1. Keep live runtime dimensions unchanged while you estimate the rewrite with a dry-run.
+2. Run the apply pass in a low-traffic window.
+3. After the rewrite completes, switch runtime dimensions in `/hori panel -> LLM`.
+
+Note: this script rewrites existing vectors in place. During the migration window, mixed vector sizes can temporarily reduce semantic recall coverage for rows that have already been rewritten. Lexical fallback remains available.

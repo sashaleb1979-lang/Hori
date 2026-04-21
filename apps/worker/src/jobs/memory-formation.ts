@@ -82,7 +82,9 @@ export function createMemoryFormationJob(runtime: WorkerRuntime) {
       };
     }
 
-    const embedding = runtime.modelRouter.pickEmbeddingModel();
+    const embedding = runtime.modelRouter.pickEmbeddingModel({
+      dimensions: runtimeSettings.openaiEmbedDimensions
+    });
     const formationService = new MemoryFormationService(
       runtime.prisma,
       runtime.retrievalService,

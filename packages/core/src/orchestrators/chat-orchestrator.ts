@@ -373,7 +373,7 @@ export class ChatOrchestrator {
           break;
         }
         case "memory_write":
-          reply = await this.handleMemoryWrite(message, intent.cleanedContent);
+          reply = await this.handleMemoryWrite(message, intent.cleanedContent, runtimeSettings);
           break;
         case "memory_forget":
           reply = await this.handleMemoryForget(message, intent.cleanedContent);
@@ -931,7 +931,7 @@ export class ChatOrchestrator {
     }
   }
 
-  private async handleMemoryWrite(message: MessageEnvelope, cleanedContent: string) {
+  private async handleMemoryWrite(message: MessageEnvelope, cleanedContent: string, runtimeSettings: EffectiveRuntimeSettings) {
     if (!message.isModerator) {
       return "Не. Это только для модератора.";
     }
@@ -952,7 +952,7 @@ export class ChatOrchestrator {
       source: "message"
     });
 
-    const embedding = await this.safeEmbed(memory.value);
+    const embedding = await this.safeEmbed(memory.value, runtimeSettings);
     if (embedding?.length) {
       await this.deps.retrieval.setEmbedding("server_memory", memory.id, `[${embedding.join(",")}]`);
     }
@@ -1062,9 +1062,11 @@ export class ChatOrchestrator {
     };
   }
 
-  private async safeEmbed(text: string) {
+  private async safeEmbed(text: string, runtimeSettings?: Pick<EffectiveRuntimeSettings, "openaiEmbedDimensions">) {
     const key = normalizeWhitespace(text).toLowerCase();
-    const embeddingTarget = this.deps.modelRouter.pickEmbeddingModel();
+    const embeddingTarget = this.deps.modelRouter.pickEmbeddingModel({
+      dimensions: runtimeSettings?.openaiEmbedDimensions
+    });
     const cacheKey = `${embeddingTarget.model}:${embeddingTarget.dimensions ?? "native"}:${key}`;
 
     if (!key) {
@@ -1078,7 +1080,9 @@ export class ChatOrchestrator {
     }
 
     try {
-      const value = await this.deps.embeddingAdapter.embedOne(text);
+      const value = await this.deps.embeddingAdapter.embedOne(text, {
+        dimensions: runtimeSettings?.openaiEmbedDimensions
+      });
       if (this.deps.env.FEATURE_EMBEDDING_CACHE_ENABLED && value.length) {
         this.embeddingCache.set(cacheKey, {
           value,
@@ -1099,9 +1103,9 @@ export class ChatOrchestrator {
     runtimeSettings: EffectiveRuntimeSettings,
     llmCalls?: LlmCallTrace[]
   ) {
-    const primaryEmbedding = await this.safeEmbed(cleanedContent);
+    const primaryEmbedding = await this.safeEmbed(cleanedContent, runtimeSettings);
 
-    if (!shouldUseMemoryHyde(this.deps.env, intent, cleanedContent)) {
+    if (!shouldUseMemoryHyde(runtimeSettings, intent, cleanedContent)) {
       return primaryEmbedding;
     }
 
@@ -1110,7 +1114,7 @@ export class ChatOrchestrator {
       return primaryEmbedding;
     }
 
-    const hydeEmbedding = await this.safeEmbed(hydeText);
+    const hydeEmbedding = await this.safeEmbed(hydeText, runtimeSettings);
     return mergeEmbeddings(primaryEmbedding, hydeEmbedding);
   }
 
@@ -1633,8 +1637,8 @@ export function createChatOrchestrator(deps: OrchestratorDeps) {
   return new ChatOrchestrator(deps);
 }
 
-function shouldUseMemoryHyde(env: Pick<AppEnv, "FEATURE_MEMORY_HYDE_ENABLED">, intent: BotIntent, content: string) {
-  if (!env.FEATURE_MEMORY_HYDE_ENABLED || intent !== "chat") {
+function shouldUseMemoryHyde(runtimeSettings: Pick<EffectiveRuntimeSettings, "memoryHydeEnabled">, intent: BotIntent, content: string) {
+  if (!runtimeSettings.memoryHydeEnabled || intent !== "chat") {
     return false;
   }
 

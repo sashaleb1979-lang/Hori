@@ -7,8 +7,8 @@ export class EmbeddingAdapter {
     private readonly modelRouter: ModelRouter
   ) {}
 
-  async embedOne(text: string): Promise<number[]> {
-    const embedding = this.modelRouter.pickEmbeddingModel();
+  async embedOne(text: string, options: { dimensions?: number } = {}): Promise<number[]> {
+    const embedding = this.modelRouter.pickEmbeddingModel({ dimensions: options.dimensions });
     const [vector] = await this.client.embed(embedding.model, text, {
       dimensions: embedding.dimensions
     });

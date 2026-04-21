@@ -98,6 +98,32 @@ function createLlmPanelModelSelectInteraction(userId: string) {
   };
 }
 
+function createLlmPanelRuntimeSelectInteraction(userId: string, value: string) {
+  const update = vi.fn();
+
+  return {
+    guildId: "guild-1",
+    channelId: "channel-1",
+    customId: "llm-panel:runtime",
+    values: [value],
+    user: {
+      id: userId,
+      username: "tester",
+      globalName: "Tester"
+    },
+    memberPermissions: {
+      has: vi.fn().mockReturnValue(false)
+    },
+    update,
+    reply: vi.fn(),
+    isButton: () => false,
+    isStringSelectMenu: () => true,
+    isModalSubmit: () => false,
+    isChatInputCommand: () => false,
+    isMessageContextMenuCommand: () => false
+  };
+}
+
 function createLlmPanelRuntime(ownerIds: string[], storedRouting?: string): BotRuntime {
   const env = loadEnv({
     DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
@@ -115,7 +141,13 @@ function createLlmPanelRuntime(ownerIds: string[], storedRouting?: string): BotR
     },
     runtimeConfig: {
       getModelRoutingStatus: vi.fn().mockResolvedValue(resolveModelRouting(env, storedRouting)),
-      setModelSlot: vi.fn().mockResolvedValue(resolveModelRouting(env, storedRouting))
+      getMemoryHydeStatus: vi.fn().mockResolvedValue({ value: true, source: "default" }),
+      getOpenAIEmbeddingDimensionsStatus: vi.fn().mockResolvedValue({ value: 768, source: "default" }),
+      setModelSlot: vi.fn().mockResolvedValue(resolveModelRouting(env, storedRouting)),
+      setMemoryHydeEnabled: vi.fn().mockResolvedValue({ value: false, source: "runtime_setting" }),
+      setOpenAIEmbeddingDimensions: vi.fn().mockResolvedValue({ value: 512, source: "runtime_setting" }),
+      resetMemoryHydeEnabled: vi.fn().mockResolvedValue({ value: true, source: "default" }),
+      resetOpenAIEmbeddingDimensions: vi.fn().mockResolvedValue({ value: 768, source: "default" })
     },
     prisma: {
       botEventLog: {
@@ -174,6 +206,36 @@ describe("/hori panel access", () => {
     await routeInteraction(runtime, interaction as never);
 
     expect(runtime.runtimeConfig.setModelSlot).toHaveBeenCalledWith("chat", "gpt-5.4-mini", "owner-1");
+    expect(interaction.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        embeds: expect.any(Array),
+        components: expect.any(Array)
+      })
+    );
+  });
+
+  it("lets the owner toggle HyDE from the panel", async () => {
+    const interaction = createLlmPanelRuntimeSelectInteraction("owner-1", "hyde:off");
+    const runtime = createLlmPanelRuntime(["owner-1"]);
+
+    await routeInteraction(runtime, interaction as never);
+
+    expect(runtime.runtimeConfig.setMemoryHydeEnabled).toHaveBeenCalledWith(false, "owner-1");
+    expect(interaction.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        embeds: expect.any(Array),
+        components: expect.any(Array)
+      })
+    );
+  });
+
+  it("lets the owner change embedding dimensions from the panel", async () => {
+    const interaction = createLlmPanelRuntimeSelectInteraction("owner-1", "embed:512");
+    const runtime = createLlmPanelRuntime(["owner-1"]);
+
+    await routeInteraction(runtime, interaction as never);
+
+    expect(runtime.runtimeConfig.setOpenAIEmbeddingDimensions).toHaveBeenCalledWith(512, "owner-1");
     expect(interaction.update).toHaveBeenCalledWith(
       expect.objectContaining({
         embeds: expect.any(Array),

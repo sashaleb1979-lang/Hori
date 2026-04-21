@@ -80,7 +80,7 @@ describe("ModelRouter", () => {
     const routing = resolveModelRouting(env, serializeModelRouting("balanced_openai", { chat: "gpt-5.4-mini" }));
 
     expect(routing.slots.chat).toBe("gpt-5.4-mini");
-    expect(routing.slots.summary).toBe("gpt-5-mini");
+    expect(routing.slots.summary).toBe("gpt-5.4-nano");
   });
 
   it("drops unknown slot override model ids", () => {
@@ -128,6 +128,29 @@ describe("ModelRouter", () => {
 
     await expect(adapter.embedOne("хори привет")).resolves.toEqual([0.1, 0.2, 0.3]);
     expect(router.pickEmbeddingModel()).toEqual({
+      model: "text-embedding-3-small",
+      dimensions: 512
+    });
+    expect(embed).toHaveBeenCalledWith("text-embedding-3-small", "хори привет", { dimensions: 512 });
+  });
+
+  it("lets runtime override embedding dimensions per call without changing env defaults", async () => {
+    const env = loadEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      LLM_PROVIDER: "openai",
+      OPENAI_EMBED_DIMENSIONS: "768"
+    });
+    const router = new ModelRouter(env);
+    const embed = vi.fn().mockResolvedValue([[0.1, 0.2, 0.3]]);
+    const adapter = new EmbeddingAdapter({ embed } as never, router);
+
+    await expect(adapter.embedOne("хори привет", { dimensions: 512 })).resolves.toEqual([0.1, 0.2, 0.3]);
+    expect(router.pickEmbeddingModel()).toEqual({
+      model: "text-embedding-3-small",
+      dimensions: 768
+    });
+    expect(router.pickEmbeddingModel({ dimensions: 512 })).toEqual({
       model: "text-embedding-3-small",
       dimensions: 512
     });

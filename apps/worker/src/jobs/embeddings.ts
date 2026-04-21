@@ -6,6 +6,8 @@ import type { WorkerRuntime } from "../index";
 
 export function createEmbeddingJob(runtime: WorkerRuntime) {
   return async (job: Job<EmbeddingJobPayload>) => {
+    const runtimeSettings = await runtime.runtimeConfig.getRuntimeSettings();
+
     if (job.data.entityType === "message") {
       const message = await runtime.prisma.message.findUnique({
         where: { id: job.data.entityId }
@@ -18,7 +20,9 @@ export function createEmbeddingJob(runtime: WorkerRuntime) {
       let vector: number[];
 
       try {
-        vector = await runtime.embeddingAdapter.embedOne(message.content);
+        vector = await runtime.embeddingAdapter.embedOne(message.content, {
+          dimensions: runtimeSettings.openaiEmbedDimensions
+        });
       } catch (error) {
         runtime.logger.warn({ entityId: message.id, error: asErrorMessage(error), jobId: job.id }, "embedding skipped because ollama is unavailable");
         return { skipped: true, reason: "ollama unavailable" };
@@ -70,7 +74,9 @@ export function createEmbeddingJob(runtime: WorkerRuntime) {
     let vector: number[];
 
     try {
-      vector = await runtime.embeddingAdapter.embedOne(value);
+      vector = await runtime.embeddingAdapter.embedOne(value, {
+        dimensions: runtimeSettings.openaiEmbedDimensions
+      });
     } catch (error) {
       runtime.logger.warn({ entityId: job.data.entityId, error: asErrorMessage(error), jobId: job.id }, "embedding skipped because ollama is unavailable");
       return { skipped: true, reason: "ollama unavailable" };

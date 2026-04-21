@@ -25,6 +25,7 @@ import {
   MODEL_ROUTING_MODEL_IDS,
   MODEL_ROUTING_PRESETS,
   MODEL_ROUTING_SLOTS,
+  SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS,
   type ModelRoutingSlot
 } from "@hori/llm";
 
@@ -1274,6 +1275,48 @@ async function handleLlmPanelSelect(
 
     await runtime.runtimeConfig.setModelSlot(slot, value, interaction.user.id);
     await interaction.update(await buildLlmPanelResponse(runtime, slot, interaction.guildId));
+    return;
+  }
+
+  if (action === "runtime") {
+    if (value === "hyde:on") {
+      await runtime.runtimeConfig.setMemoryHydeEnabled(true, interaction.user.id);
+      await interaction.update(await buildLlmPanelResponse(runtime, "chat", interaction.guildId));
+      return;
+    }
+
+    if (value === "hyde:off") {
+      await runtime.runtimeConfig.setMemoryHydeEnabled(false, interaction.user.id);
+      await interaction.update(await buildLlmPanelResponse(runtime, "chat", interaction.guildId));
+      return;
+    }
+
+    if (value === "hyde:reset") {
+      await runtime.runtimeConfig.resetMemoryHydeEnabled();
+      await interaction.update(await buildLlmPanelResponse(runtime, "chat", interaction.guildId));
+      return;
+    }
+
+    if (value === "embed:reset") {
+      await runtime.runtimeConfig.resetOpenAIEmbeddingDimensions();
+      await interaction.update(await buildLlmPanelResponse(runtime, "chat", interaction.guildId));
+      return;
+    }
+
+    if (value.startsWith("embed:")) {
+      const dimensions = Number(value.slice("embed:".length));
+
+      if (!Number.isInteger(dimensions)) {
+        await interaction.reply({ content: "Неизвестный embedding preset.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      await runtime.runtimeConfig.setOpenAIEmbeddingDimensions(dimensions, interaction.user.id);
+      await interaction.update(await buildLlmPanelResponse(runtime, "chat", interaction.guildId));
+      return;
+    }
+
+    await interaction.reply({ content: "Неизвестный runtime control.", flags: MessageFlags.Ephemeral });
   }
 }
 
@@ -2403,7 +2446,11 @@ function buildHoriDetailEmbed(title: string, body: string) {
 }
 
 async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRoutingSlot = "chat", guildId?: string) {
-  const status = await runtime.runtimeConfig.getModelRoutingStatus();
+  const [status, hydeStatus, embedStatus] = await Promise.all([
+    runtime.runtimeConfig.getModelRoutingStatus(),
+    runtime.runtimeConfig.getMemoryHydeStatus(),
+    runtime.runtimeConfig.getOpenAIEmbeddingDimensionsStatus()
+  ]);
   const activeSlot = MODEL_ROUTING_SLOTS.includes(selectedSlot) ? selectedSlot : "chat";
   const activeModel = status.slots[activeSlot];
   const preset = MODEL_ROUTING_PRESETS[status.preset];
@@ -2425,7 +2472,12 @@ async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRou
           `Provider: **${status.provider}** · source=${status.source}${updated}`,
           `Selected slot: **${activeSlot}** -> \`${activeModel}\``,
           "",
-          `Embeddings locked here: \`${embeddingStatus}\`. Changing embedding dimensions needs a separate reindex.`,
+          `Embeddings: \`${embeddingStatus}\``,
+          `HyDE retrieval: **${hydeStatus.value ? "on" : "off"}** (${hydeStatus.source})`,
+          embedStatus.source === "unsupported"
+            ? "OpenAI embedding dimensions: n/a for Ollama"
+            : `OpenAI embedding dimensions: **${embedStatus.value}** (${embedStatus.source})`,
+          "Backfill before a real dim cutover: `pnpm reembed:openai --target-dimensions 512 --apply`.",
           parseWarning
         ].filter(Boolean).join("\n"))
         .addFields(
@@ -2435,14 +2487,58 @@ async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRou
             value: clipFieldText(`chat=${status.legacyFallback.chat}\nsmart=${status.legacyFallback.smart}\nembed=${embeddingStatus}`),
             inline: true
           },
+          {
+            name: "Runtime controls",
+            value: clipFieldText([
+              `HyDE=${hydeStatus.value ? "on" : "off"} (${hydeStatus.source})`,
+              embedStatus.source === "unsupported"
+                ? "embedDims=native"
+                : `embedDims=${embedStatus.value} (${embedStatus.source})`
+            ].join("\n")),
+            inline: true
+          },
           { name: "Telemetry", value: clipFieldText(telemetry) }
         )
     ],
-    components: buildLlmPanelRows(status.preset, activeSlot, activeModel)
+    components: buildLlmPanelRows(status.preset, activeSlot, activeModel, {
+      provider: status.provider,
+      hydeEnabled: hydeStatus.value,
+      embedDimensions: embedStatus.source === "unsupported" ? undefined : embedStatus.value
+    })
   };
 }
 
-function buildLlmPanelRows(activePreset: string, activeSlot: ModelRoutingSlot, activeModel: string) {
+function buildLlmPanelRows(
+  activePreset: string,
+  activeSlot: ModelRoutingSlot,
+  activeModel: string,
+  runtime: { provider: "openai" | "ollama"; hydeEnabled: boolean; embedDimensions?: number }
+) {
+  const runtimeOptions = [
+    {
+      label: runtime.hydeEnabled ? "HyDE: OFF" : "HyDE: ON",
+      value: runtime.hydeEnabled ? "hyde:off" : "hyde:on",
+      description: runtime.hydeEnabled ? "Disable HyDE retrieval expansion" : "Enable HyDE retrieval expansion"
+    },
+    {
+      label: "HyDE: reset",
+      value: "hyde:reset",
+      description: "Return HyDE to env default"
+    },
+    ...(runtime.provider === "openai"
+      ? SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS.map((dimensions) => ({
+          label: `Embeddings: ${dimensions} dims`,
+          value: `embed:${dimensions}`,
+          description: runtime.embedDimensions === dimensions ? "Current runtime value" : "Set live OpenAI embedding dimensions",
+          default: runtime.embedDimensions === dimensions
+        })).concat({
+          label: "Embeddings: reset",
+          value: "embed:reset",
+          description: "Return embedding dimensions to env default"
+        })
+      : [])
+  ];
+
   return [
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
@@ -2480,6 +2576,12 @@ function buildLlmPanelRows(activePreset: string, activeSlot: ModelRoutingSlot, a
             default: model === activeModel
           }))
         )
+    ),
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`${LLM_PANEL_PREFIX}:runtime`)
+        .setPlaceholder("Runtime controls")
+        .addOptions(...runtimeOptions)
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()

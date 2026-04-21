@@ -3,7 +3,8 @@ import type { AppEnv } from "@hori/config";
 export const MODEL_ROUTING_SETTING_KEY = "llm.model_routing";
 export const OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
 export const OPENAI_EMBEDDING_DIMENSIONS = 768;
-const SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS = new Set([512, 768, 1536]);
+export const SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS = [512, 768, 1536] as const;
+const SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS_SET = new Set<number>(SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS);
 
 export const MODEL_ROUTING_SLOTS = [
   "classifier",
@@ -117,9 +118,9 @@ type ProviderAwareEnv = AppEnv & {
   OPENAI_EMBED_DIMENSIONS?: number;
 };
 
-export function resolveOpenAIEmbeddingDimensions(env: Pick<ProviderAwareEnv, "OPENAI_EMBED_DIMENSIONS">) {
+export function resolveOpenAIEmbeddingDimensions(env: Pick<ProviderAwareEnv, "OPENAI_EMBED_DIMENSIONS"> | { OPENAI_EMBED_DIMENSIONS?: number | null }) {
   const dimensions = Number(env.OPENAI_EMBED_DIMENSIONS ?? OPENAI_EMBEDDING_DIMENSIONS);
-  return SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS.has(dimensions) ? dimensions : OPENAI_EMBEDDING_DIMENSIONS;
+  return SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS_SET.has(dimensions) ? dimensions : OPENAI_EMBEDDING_DIMENSIONS;
 }
 
 export function isModelRoutingSlot(value: string): value is ModelRoutingSlot {
@@ -158,7 +159,11 @@ export function defaultModelRoutingPresetForEnv(env: AppEnv): ModelRoutingPreset
   return getProvider(env) === "openai" ? "balanced_openai" : "legacy_env";
 }
 
-export function resolveModelRouting(env: AppEnv, rawStoredValue?: string | null): ResolvedModelRouting {
+export function resolveModelRouting(
+  env: AppEnv,
+  rawStoredValue?: string | null,
+  overrides?: { openaiEmbedDimensions?: number | null }
+): ResolvedModelRouting {
   const provider = getProvider(env);
   const legacyFallback = buildLegacyFallback(env);
   const defaultPreset = defaultModelRoutingPresetForEnv(env);
@@ -178,7 +183,9 @@ export function resolveModelRouting(env: AppEnv, rawStoredValue?: string | null)
     embeddingModel: provider === "openai"
       ? OPENAI_EMBEDDING_MODEL
       : env.OLLAMA_EMBED_MODEL,
-    embeddingDimensions: provider === "openai" ? resolveOpenAIEmbeddingDimensions(env as ProviderAwareEnv) : undefined,
+    embeddingDimensions: provider === "openai"
+      ? resolveOpenAIEmbeddingDimensions({ OPENAI_EMBED_DIMENSIONS: overrides?.openaiEmbedDimensions ?? (env as ProviderAwareEnv).OPENAI_EMBED_DIMENSIONS })
+      : undefined,
     parseError: parsed.error
   };
 }

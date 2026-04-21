@@ -7,6 +7,7 @@ import {
   MODEL_ROUTING_SETTING_KEY,
   parseStoredModelRouting,
   resolveModelRouting,
+  SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS,
   sanitizeOverrides,
   serializeModelRouting,
   type ModelRoutingModelId,
@@ -49,8 +50,10 @@ export const FEATURE_KEY_MAP = {
 } as const satisfies Record<string, keyof FeatureFlags>;
 
 export const POWER_PROFILE_SETTING_KEY = "power.profile";
+export const OPENAI_EMBED_DIMENSIONS_SETTING_KEY = "llm.openai_embed_dimensions";
+export const MEMORY_HYDE_SETTING_KEY = "memory.hyde_enabled";
 
-const RUNTIME_OVERRIDE_DEFINITIONS: Record<string, { field: keyof Omit<EffectiveRuntimeSettings, "powerProfile" | "modelRouting">; parse: (value: string) => string | number | undefined }> = {
+const RUNTIME_OVERRIDE_DEFINITIONS: Record<string, { field: keyof Omit<EffectiveRuntimeSettings, "powerProfile" | "modelRouting">; parse: (value: string) => string | number | boolean | undefined }> = {
   "runtime.llm.max_context_messages": { field: "llmMaxContextMessages", parse: parsePositiveInt },
   "runtime.context.max_chars": { field: "contextMaxChars", parse: parsePositiveInt },
   "runtime.llm.reply_max_tokens": { field: "llmReplyMaxTokens", parse: parsePositiveInt },
@@ -60,7 +63,9 @@ const RUNTIME_OVERRIDE_DEFINITIONS: Record<string, { field: keyof Omit<Effective
   "runtime.ollama.num_batch": { field: "ollamaNumBatch", parse: parsePositiveInt },
   "runtime.media.auto_global_cooldown_sec": { field: "mediaAutoGlobalCooldownSec", parse: parseNonNegativeInt },
   "runtime.media.auto_min_confidence": { field: "mediaAutoMinConfidence", parse: parseUnitFloat },
-  "runtime.media.auto_min_intensity": { field: "mediaAutoMinIntensity", parse: parseUnitFloat }
+  "runtime.media.auto_min_intensity": { field: "mediaAutoMinIntensity", parse: parseUnitFloat },
+  [OPENAI_EMBED_DIMENSIONS_SETTING_KEY]: { field: "openaiEmbedDimensions", parse: parseOpenAIEmbeddingDimensions },
+  [MEMORY_HYDE_SETTING_KEY]: { field: "memoryHydeEnabled", parse: parseBooleanValue }
 };
 
 export interface EffectiveChannelPolicy {
@@ -74,6 +79,8 @@ export interface EffectiveChannelPolicy {
 export interface EffectiveRuntimeSettings {
   powerProfile: PowerProfileName;
   modelRouting: ResolvedModelRouting;
+  openaiEmbedDimensions?: number;
+  memoryHydeEnabled: boolean;
   llmMaxContextMessages: number;
   contextMaxChars: number;
   llmReplyMaxTokens: number;
@@ -90,6 +97,13 @@ export interface PowerProfileStatus {
   activeProfile: PowerProfileName;
   effective: EffectiveRuntimeSettings;
   source: "default" | "runtime_setting";
+  updatedBy?: string | null;
+  updatedAt?: Date | null;
+}
+
+export interface RuntimeOverrideStatus<T> {
+  value: T;
+  source: "default" | "runtime_setting" | "unsupported";
   updatedBy?: string | null;
   updatedAt?: Date | null;
 }
@@ -217,14 +231,79 @@ export class RuntimeConfigService {
   }
 
   async getModelRoutingStatus(): Promise<ModelRoutingStatus> {
-    const row = await this.getRuntimeSettingRow(MODEL_ROUTING_SETTING_KEY);
-    const routing = resolveModelRouting(this.env, row?.value);
+    const [row, embeddingDimensions] = await Promise.all([
+      this.getRuntimeSettingRow(MODEL_ROUTING_SETTING_KEY),
+      this.getOpenAIEmbeddingDimensionsStatus()
+    ]);
+    const routing = resolveModelRouting(this.env, row?.value, {
+      openaiEmbedDimensions: embeddingDimensions.source === "unsupported" ? undefined : embeddingDimensions.value
+    });
 
     return {
       ...routing,
       updatedBy: row?.updatedBy,
       updatedAt: row?.updatedAt
     };
+  }
+
+  async getOpenAIEmbeddingDimensionsStatus(): Promise<RuntimeOverrideStatus<number | undefined>> {
+    if ((this.env as { LLM_PROVIDER?: string }).LLM_PROVIDER !== "openai") {
+      return {
+        value: undefined,
+        source: "unsupported"
+      };
+    }
+
+    const row = await this.getRuntimeSettingRow(OPENAI_EMBED_DIMENSIONS_SETTING_KEY);
+    const value = row ? parseOpenAIEmbeddingDimensions(row.value) : undefined;
+
+    return {
+      value: value ?? this.buildBaseRuntimeSettings().openaiEmbedDimensions,
+      source: value !== undefined ? "runtime_setting" : "default",
+      updatedBy: value !== undefined ? row?.updatedBy : null,
+      updatedAt: value !== undefined ? row?.updatedAt : null
+    };
+  }
+
+  async setOpenAIEmbeddingDimensions(dimensions: number, updatedBy?: string) {
+    if ((this.env as { LLM_PROVIDER?: string }).LLM_PROVIDER !== "openai") {
+      throw new Error("OpenAI embedding dimensions are only available when LLM_PROVIDER=openai");
+    }
+
+    const parsedValue = parseOpenAIEmbeddingDimensions(String(dimensions));
+    if (parsedValue === undefined) {
+      throw new Error(`Unsupported embedding dimensions: ${dimensions}`);
+    }
+
+    await this.writeRuntimeSetting(OPENAI_EMBED_DIMENSIONS_SETTING_KEY, String(parsedValue), updatedBy);
+    return this.getOpenAIEmbeddingDimensionsStatus();
+  }
+
+  async resetOpenAIEmbeddingDimensions() {
+    await this.deleteRuntimeSetting(OPENAI_EMBED_DIMENSIONS_SETTING_KEY);
+    return this.getOpenAIEmbeddingDimensionsStatus();
+  }
+
+  async getMemoryHydeStatus(): Promise<RuntimeOverrideStatus<boolean>> {
+    const row = await this.getRuntimeSettingRow(MEMORY_HYDE_SETTING_KEY);
+    const value = row ? parseBooleanValue(row.value) : undefined;
+
+    return {
+      value: value ?? this.buildBaseRuntimeSettings().memoryHydeEnabled,
+      source: value !== undefined ? "runtime_setting" : "default",
+      updatedBy: value !== undefined ? row?.updatedBy : null,
+      updatedAt: value !== undefined ? row?.updatedAt : null
+    };
+  }
+
+  async setMemoryHydeEnabled(enabled: boolean, updatedBy?: string) {
+    await this.writeRuntimeSetting(MEMORY_HYDE_SETTING_KEY, enabled ? "true" : "false", updatedBy);
+    return this.getMemoryHydeStatus();
+  }
+
+  async resetMemoryHydeEnabled() {
+    await this.deleteRuntimeSetting(MEMORY_HYDE_SETTING_KEY);
+    return this.getMemoryHydeStatus();
   }
 
   async setModelPreset(preset: ModelRoutingPresetName, updatedBy?: string) {
@@ -366,7 +445,6 @@ export class RuntimeConfigService {
     const modelRoutingRow = rows.find((row) => row.key === MODEL_ROUTING_SETTING_KEY);
     const activeProfile = profileRow && isPowerProfileName(profileRow.value) ? profileRow.value : "balanced";
     const effective = applyPowerProfilePreset(this.buildBaseRuntimeSettings(), activeProfile);
-    effective.modelRouting = resolveModelRouting(this.env, modelRoutingRow?.value);
 
     for (const row of rows) {
       const definition = RUNTIME_OVERRIDE_DEFINITIONS[row.key];
@@ -382,6 +460,10 @@ export class RuntimeConfigService {
       }
     }
 
+    effective.modelRouting = resolveModelRouting(this.env, modelRoutingRow?.value, {
+      openaiEmbedDimensions: effective.openaiEmbedDimensions
+    });
+
     return {
       effective,
       source: profileRow ? "runtime_setting" : "default",
@@ -391,9 +473,13 @@ export class RuntimeConfigService {
   }
 
   private buildBaseRuntimeSettings(): EffectiveRuntimeSettings {
+    const modelRouting = resolveModelRouting(this.env);
+
     return {
       powerProfile: "balanced",
-      modelRouting: resolveModelRouting(this.env),
+      modelRouting,
+      openaiEmbedDimensions: modelRouting.embeddingDimensions,
+      memoryHydeEnabled: this.env.FEATURE_MEMORY_HYDE_ENABLED,
       llmMaxContextMessages: this.env.LLM_MAX_CONTEXT_MESSAGES,
       contextMaxChars: this.env.CONTEXT_V2_MAX_CHARS,
       llmReplyMaxTokens: this.env.LLM_REPLY_MAX_TOKENS,
@@ -417,6 +503,32 @@ export class RuntimeConfigService {
     });
 
     return rows[0] ?? null;
+  }
+
+  private async writeRuntimeSetting(key: string, value: string, updatedBy?: string) {
+    await this.prisma.runtimeSetting.upsert({
+      where: { key },
+      update: {
+        value,
+        updatedBy: updatedBy ?? null,
+        updatedAt: new Date()
+      },
+      create: {
+        key,
+        value,
+        updatedBy: updatedBy ?? null
+      }
+    });
+
+    this.invalidate();
+  }
+
+  private async deleteRuntimeSetting(key: string) {
+    await this.prisma.runtimeSetting.deleteMany({
+      where: { key }
+    });
+
+    this.invalidate();
   }
 
   private async getStoredModelRoutingValue() {
@@ -495,12 +607,39 @@ function parseUnitFloat(value: string) {
   return Math.max(0, Math.min(1, parsed));
 }
 
+function parseBooleanValue(value: string) {
+  const normalized = value.trim().toLowerCase();
+
+  if (["true", "1", "yes", "on", "enabled"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "0", "no", "off", "disabled"].includes(normalized)) {
+    return false;
+  }
+
+  return undefined;
+}
+
+function parseOpenAIEmbeddingDimensions(value: string) {
+  const parsed = Number(value);
+  return SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS.includes(parsed as (typeof SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS)[number])
+    ? parsed
+    : undefined;
+}
+
 function applyRuntimeOverride(
   target: EffectiveRuntimeSettings,
   field: keyof Omit<EffectiveRuntimeSettings, "powerProfile" | "modelRouting">,
-  value: string | number
+  value: string | number | boolean
 ) {
   switch (field) {
+    case "memoryHydeEnabled":
+      target.memoryHydeEnabled = Boolean(value);
+      return;
+    case "openaiEmbedDimensions":
+      target.openaiEmbedDimensions = Number(value);
+      return;
     case "ollamaKeepAlive":
       target.ollamaKeepAlive = String(value);
       return;
