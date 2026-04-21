@@ -305,13 +305,45 @@ describe("/hori panel access", () => {
     const rows = payload.components.map((row: { toJSON: () => { components: Array<{ disabled?: boolean; options?: Array<{ value: string }> }> } }) => row.toJSON());
     const description = payload.embeds[0].data.description as string;
 
+    expect(description).toContain("Routing: **deterministic router**");
     expect(description).toContain("Model controls: **informational-only**");
     expect(description).toContain("Ignored stored preset: `quality_openai`");
+    expect(description).not.toContain("Preset: **legacy_env**");
     expect(rows[0].components[0].disabled).toBe(true);
+    expect(rows[1].components[0].disabled).toBe(true);
     expect(rows[2].components[0].disabled).toBe(true);
     expect(rows[3].components[0].options?.some((option) => option.value === "embed:512")).toBe(true);
     expect(rows[4].components[0].disabled).toBe(true);
     expect(rows[4].components[1].disabled).toBe(true);
+  });
+
+  it("shows ollama env models instead of fake preset routing", async () => {
+    const interaction = createLlmPanelButtonInteraction("owner-1");
+    const runtime = createLlmPanelRuntime(
+      ["owner-1"],
+      serializeModelRouting("quality_openai", { chat: "gpt-5.4-mini" }),
+      {
+        provider: "ollama",
+        embedStatus: { source: "unsupported" }
+      }
+    );
+
+    await routeInteraction(runtime, interaction as never);
+
+    const payload = interaction.update.mock.calls[0][0];
+    const rows = payload.components.map((row: { toJSON: () => { components: Array<{ disabled?: boolean; options?: Array<{ value: string }> }> } }) => row.toJSON());
+    const description = payload.embeds[0].data.description as string;
+    const firstField = payload.embeds[0].data.fields[0];
+
+    expect(description).toContain("Routing: **ollama env models**");
+    expect(description).toContain("Model controls: **informational-only**");
+    expect(description).not.toContain("Preset: **legacy_env**");
+    expect(firstField.name).toBe("Ollama env");
+    expect(String(firstField.value)).toContain("fast=");
+    expect(rows[0].components[0].disabled).toBe(true);
+    expect(rows[1].components[0].disabled).toBe(true);
+    expect(rows[2].components[0].disabled).toBe(true);
+    expect(rows[3].components[0].options?.some((option) => option.value === "embed:512")).toBe(false);
   });
 
   it("rejects stale router-mode model select interactions without mutating runtime config", async () => {

@@ -2505,6 +2505,46 @@ async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRou
     ? Object.entries(status.storedOverrides).map(([slot, model]) => `${slot}=${model}`).join(", ")
     : null;
   const controlsStatus = status.controlsEditable ? "editable" : "informational-only";
+  const headingLines = status.provider === "openai"
+    ? [
+        `Preset: **${status.preset}** (${preset.label})`,
+        `Selected slot: **${activeSlot}** -> \`${activeModel}\``
+      ]
+    : status.provider === "router"
+      ? [
+          "Routing: **deterministic router**",
+          `OpenAI fallback only: chat=\`${status.legacyFallback.chat}\`, smart=\`${status.legacyFallback.smart}\``
+        ]
+      : [
+          "Routing: **ollama env models**",
+          `Fast / smart: \`${runtime.env.OLLAMA_FAST_MODEL}\` / \`${runtime.env.OLLAMA_SMART_MODEL}\``
+        ];
+  const modelField = status.provider === "openai"
+    ? {
+        name: "Slots",
+        value: clipFieldText(formatLlmSlots(status.slots, status.overrides, activeSlot))
+      }
+    : status.provider === "router"
+      ? {
+          name: "Provider models",
+          value: clipFieldText([
+            `geminiFlash=${runtime.env.GEMINI_FLASH_MODEL}`,
+            `geminiPro=${runtime.env.GEMINI_PRO_MODEL}`,
+            `cloudflare=${runtime.env.CF_MODEL}`,
+            `github=${runtime.env.GITHUB_MODEL_PRIMARY}`,
+            `openaiFallback.chat=${status.legacyFallback.chat}`,
+            `openaiFallback.smart=${status.legacyFallback.smart}`
+          ].join("\n"))
+        }
+      : {
+          name: "Ollama env",
+          value: clipFieldText([
+            `url=${runtime.env.OLLAMA_BASE_URL ?? "missing"}`,
+            `fast=${runtime.env.OLLAMA_FAST_MODEL}`,
+            `smart=${runtime.env.OLLAMA_SMART_MODEL}`,
+            `embed=${embeddingStatus}`
+          ].join("\n"))
+        };
   const telemetry = guildId ? await buildLlmTelemetry(runtime, guildId) : "Открой панель внутри сервера, чтобы увидеть telemetry.";
   const updated = status.updatedAt
     ? `\nupdated=${status.updatedAt.toISOString()}${status.updatedBy ? ` by ${status.updatedBy}` : ""}`
@@ -2518,10 +2558,9 @@ async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRou
         .setTitle("🤖 Hori LLM Models")
         .setColor(0x57F287)
         .setDescription([
-          `Preset: **${status.preset}** (${preset.label})`,
           `Provider: **${status.provider}** · source=${status.source}${updated}`,
+          ...headingLines,
           `Model controls: **${controlsStatus}**`,
-          `Selected slot: **${activeSlot}** -> \`${activeModel}\``,
           ...(status.storedPreset ? [`Ignored stored preset: \`${status.storedPreset}\``] : []),
           ...(ignoredOverrides ? [`Ignored stored overrides: \`${ignoredOverrides}\``] : []),
           ...(status.controlsNote ? [status.controlsNote] : []),
@@ -2535,7 +2574,7 @@ async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRou
           parseWarning
         ].filter(Boolean).join("\n"))
         .addFields(
-          { name: "Slots", value: clipFieldText(formatLlmSlots(status.slots, status.overrides, activeSlot)) },
+          modelField,
           {
             name: "Legacy fallback",
             value: clipFieldText(`chat=${status.legacyFallback.chat}\nsmart=${status.legacyFallback.smart}\nembed=${embeddingStatus}`),
@@ -2620,6 +2659,7 @@ function buildLlmPanelRows(
       new StringSelectMenuBuilder()
         .setCustomId(`${LLM_PANEL_PREFIX}:slot`)
         .setPlaceholder(runtime.controlsEditable ? "LLM slot" : "Inspect slot (read-only)")
+        .setDisabled(!runtime.controlsEditable)
         .addOptions(
           ...MODEL_ROUTING_SLOTS.map((slot) => ({
             label: slot,
