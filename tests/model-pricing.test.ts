@@ -22,13 +22,24 @@ describe("model-pricing", () => {
     expect(cost).toBeCloseTo(0.0001 + 0.0002, 8);
   });
 
+  it("applies 50% discount to cached prompt tokens", () => {
+    const cost = calculateCostUsd("gpt-5-nano", 1000, 500, 400);
+    expect(cost).toBeCloseTo(0.00028, 8);
+  });
+
+  it("clamps cached tokens to prompt token count", () => {
+    const cost = calculateCostUsd("gpt-5-nano", 1000, 0, 5000);
+    expect(cost).toBeCloseTo(0.00005, 8);
+  });
+
   it("summarizes costs across multiple calls", () => {
     const result = summarizeLlmCosts([
-      { model: "gpt-5-nano", promptTokens: 1000, completionTokens: 500 },
+      { model: "gpt-5-nano", promptTokens: 1000, completionTokens: 500, cachedTokens: 400 },
       { model: "gpt-5.4-mini", promptTokens: 2000, completionTokens: 1000 },
     ]);
 
     expect(result.breakdown).toHaveLength(2);
+    expect(result.breakdown[0]).toEqual(expect.objectContaining({ cachedTokens: 400 }));
     expect(result.totalCostUsd).toBeGreaterThan(0);
     expect(result.totalCostUsd).toBe(result.breakdown.reduce((s, b) => s + b.costUsd, 0));
   });

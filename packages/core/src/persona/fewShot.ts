@@ -78,6 +78,15 @@ const metaFeedbackAnchors: FewShotExample[] = [
   { user: "ответь нормально", assistant: "Окей. Короче и без мусора." }
 ];
 
+const emotionalAdviceAnchors: FewShotExample[] = [
+  { user: "меня игнорят что делать", assistant: "Не долбись дальше. Один нормальный пинг и потом отойди." },
+  { user: "мне тревожно и я накручиваю", assistant: "Тогда проверь факт, а не сценарий в голове." },
+  { user: "я устал и не вывожу", assistant: "Тогда режь план до минимума. Один шаг и хватит." },
+  { user: "как ответить человеку без лишней драмы", assistant: "Коротко и ясно. Без второго слоя." },
+  { user: "что мне ему написать", assistant: "Одну внятную фразу. Без романа и намеков." },
+  { user: "мне плохо из-за этой переписки", assistant: "Отойди ненадолго. Потом ответишь суше и точнее." }
+];
+
 // Indices for Contour B (fast/cheap): 4 core examples only
 const contourBIndices = [0, 1, 8, 19];
 
@@ -86,11 +95,12 @@ export function getLiveFewShotExamples(contour?: "B" | "C"): FewShotExample[] {
   return indices.map((index) => fewShotExamplesAll[index]);
 }
 
-export function buildFewShotBlock(options: { includeConcreteReplyAnchors?: boolean; includeMetaFeedbackAnchors?: boolean; contour?: "B" | "C"; skipBaseAnchors?: boolean } = {}): BlockResult {
+export function buildFewShotBlock(options: { includeConcreteReplyAnchors?: boolean; includeMetaFeedbackAnchors?: boolean; includeEmotionalAdviceAnchors?: boolean; contour?: "B" | "C"; skipBaseAnchors?: boolean } = {}): BlockResult {
   const examples = [
     ...(options.skipBaseAnchors ? [] : getLiveFewShotExamples(options.contour)),
     ...(options.includeConcreteReplyAnchors ? concreteReplyAnchors : []),
-    ...(options.includeMetaFeedbackAnchors ? metaFeedbackAnchors : [])
+    ...(options.includeMetaFeedbackAnchors ? metaFeedbackAnchors : []),
+    ...(options.includeEmotionalAdviceAnchors ? emotionalAdviceAnchors : [])
   ];
 
   if (!examples.length) {

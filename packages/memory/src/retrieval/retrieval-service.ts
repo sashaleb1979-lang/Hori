@@ -10,6 +10,9 @@ export interface HybridRecallInput {
   limit?: number;
 }
 
+const temporalDecayHalfLifeDays = 30;
+const temporalDecayFloor = 0.65;
+
 interface HybridRow {
   scope: ActiveMemoryEntry["scope"];
   id: string;
@@ -17,11 +20,14 @@ interface HybridRow {
   value: string;
   type: string;
   createdAt?: Date;
+  updatedAt?: Date;
   userId?: string | null;
   rank: number;
   reason: "vector" | "lexical" | "recent";
   /** Salience weight from DB (0..1, default 0.5 = neutral). Used in RRF score boost. */
   salience?: number;
+  /** Internal score used only to order rows before assigning RRF ranks. */
+  sortScore?: number;
 }
 
 interface ScoredHybridHit {
@@ -465,7 +471,7 @@ export class RetrievalService {
     const [server, user, channel, events, messages] = await Promise.all([
       this.prisma.$queryRawUnsafe<Array<Omit<HybridRow, "rank" | "reason">>>(
         `
-          SELECT 'server' AS scope, id, key, value, type, "createdAt", NULL::TEXT AS "userId"
+          SELECT 'server' AS scope, id, key, value, type, "createdAt", NULL::TEXT AS "userId", embedding <=> $2::vector AS "sortScore"
           FROM "ServerMemory"
           WHERE "guildId" = $1
             AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
@@ -481,7 +487,7 @@ export class RetrievalService {
       ),
       this.prisma.$queryRawUnsafe<Array<Omit<HybridRow, "rank" | "reason">>>(
         `
-          SELECT 'user' AS scope, id, key, value, 'user_note' AS type, "createdAt", "userId"
+          SELECT 'user' AS scope, id, key, value, 'user_note' AS type, "createdAt", "userId", embedding <=> $3::vector AS "sortScore"
           FROM "UserMemoryNote"
           WHERE "guildId" = $1
             AND "userId" = $2
@@ -500,7 +506,7 @@ export class RetrievalService {
       ),
       this.prisma.$queryRawUnsafe<Array<Omit<HybridRow, "rank" | "reason">>>(
         `
-          SELECT 'channel' AS scope, id, key, value, type, "createdAt", NULL::TEXT AS "userId", COALESCE(salience, 0.5) AS salience
+          SELECT 'channel' AS scope, id, key, value, type, "createdAt", NULL::TEXT AS "userId", COALESCE(salience, 0.5) AS salience, embedding <=> $3::vector AS "sortScore"
           FROM "ChannelMemoryNote"
           WHERE "guildId" = $1
             AND "channelId" = $2
@@ -519,7 +525,7 @@ export class RetrievalService {
       ),
       this.prisma.$queryRawUnsafe<Array<Omit<HybridRow, "rank" | "reason">>>(
         `
-          SELECT 'event' AS scope, id, key, value, type, "createdAt", NULL::TEXT AS "userId", COALESCE(salience, 0.5) AS salience
+          SELECT 'event' AS scope, id, key, value, type, "createdAt", NULL::TEXT AS "userId", COALESCE(salience, 0.5) AS salience, embedding <=> $3::vector AS "sortScore"
           FROM "EventMemory"
           WHERE "guildId" = $1
             AND active = TRUE
@@ -538,7 +544,7 @@ export class RetrievalService {
       ),
       this.prisma.$queryRawUnsafe<Array<Omit<HybridRow, "rank" | "reason">>>(
         `
-          SELECT 'message' AS scope, m.id, m.id AS key, m.content AS value, 'message' AS type, m."createdAt", m."userId"
+          SELECT 'message' AS scope, m.id, m.id AS key, m.content AS value, 'message' AS type, m."createdAt", m."userId", e.embedding <=> $3::vector AS "sortScore"
           FROM "MessageEmbedding" e
           INNER JOIN "Message" m ON m.id = e."messageId"
           WHERE e."guildId" = $1
@@ -556,7 +562,7 @@ export class RetrievalService {
       )
     ]);
 
-    return rankRows([...server, ...user, ...channel, ...events, ...messages], "vector");
+    return rankRows([...server, ...user, ...channel, ...events, ...messages], "vector", compareVectorRows);
   }
 
   private async getLexicalHybridRows(input: HybridRecallInput, limit: number): Promise<HybridRow[]> {
@@ -579,7 +585,7 @@ export class RetrievalService {
         },
         orderBy: { updatedAt: "desc" },
         take: perScopeLimit,
-        select: { id: true, key: true, value: true, type: true, createdAt: true }
+        select: { id: true, key: true, value: true, type: true, createdAt: true, updatedAt: true }
       }),
       this.prisma.userMemoryNote.findMany({
         where: {
@@ -603,7 +609,7 @@ export class RetrievalService {
         },
         orderBy: [{ salience: "desc" }, { updatedAt: "desc" }],
         take: perScopeLimit,
-        select: { id: true, key: true, value: true, type: true, createdAt: true, salience: true }
+        select: { id: true, key: true, value: true, type: true, createdAt: true, updatedAt: true, salience: true }
       }),
       this.prisma.eventMemory.findMany({
         where: {
@@ -617,7 +623,7 @@ export class RetrievalService {
         },
         orderBy: [{ salience: "desc" }, { updatedAt: "desc" }],
         take: perScopeLimit,
-        select: { id: true, key: true, value: true, type: true, createdAt: true, salience: true }
+        select: { id: true, key: true, value: true, type: true, createdAt: true, updatedAt: true, salience: true }
       }),
       this.prisma.message.findMany({
         where: {
@@ -633,13 +639,64 @@ export class RetrievalService {
 
     return rankRows(
       [
-        ...server.map((row) => ({ scope: "server" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null })),
-        ...user.map((row) => ({ scope: "user" as const, id: row.id, key: row.key, value: row.value, type: "user_note", createdAt: row.createdAt, userId: row.userId })),
-        ...channel.map((row) => ({ scope: "channel" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null, salience: row.salience ?? 0.5 })),
-        ...events.map((row) => ({ scope: "event" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null, salience: row.salience ?? 0.5 })),
-        ...messages.map((row) => ({ scope: "message" as const, id: row.id, key: row.id, value: row.content, type: "message", createdAt: row.createdAt, userId: row.userId }))
+        ...server.map((row) => ({
+          scope: "server" as const,
+          id: row.id,
+          key: row.key,
+          value: row.value,
+          type: row.type,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          userId: null,
+          sortScore: computeLexicalScore([row.key, row.value], terms)
+        })),
+        ...user.map((row) => ({
+          scope: "user" as const,
+          id: row.id,
+          key: row.key,
+          value: row.value,
+          type: "user_note",
+          createdAt: row.createdAt,
+          userId: row.userId,
+          sortScore: computeLexicalScore([row.key, row.value], terms)
+        })),
+        ...channel.map((row) => ({
+          scope: "channel" as const,
+          id: row.id,
+          key: row.key,
+          value: row.value,
+          type: row.type,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          userId: null,
+          salience: row.salience ?? 0.5,
+          sortScore: computeLexicalScore([row.key, row.value], terms)
+        })),
+        ...events.map((row) => ({
+          scope: "event" as const,
+          id: row.id,
+          key: row.key,
+          value: row.value,
+          type: row.type,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          userId: null,
+          salience: row.salience ?? 0.5,
+          sortScore: computeLexicalScore([row.key, row.value], terms)
+        })),
+        ...messages.map((row) => ({
+          scope: "message" as const,
+          id: row.id,
+          key: row.id,
+          value: row.content,
+          type: "message",
+          createdAt: row.createdAt,
+          userId: row.userId,
+          sortScore: computeLexicalScore([row.content], terms)
+        }))
       ],
-      "lexical"
+      "lexical",
+      compareLexicalRows
     );
   }
 
@@ -653,12 +710,13 @@ export class RetrievalService {
 
     return rankRows(
       [
-        ...server.map((row) => ({ scope: "server" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null })),
+        ...server.map((row) => ({ scope: "server" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, updatedAt: row.updatedAt, userId: null })),
         ...user.map((row) => ({ scope: "user" as const, id: row.id, key: row.key, value: row.value, type: "user_note", createdAt: row.createdAt, userId: input.userId })),
-        ...channel.map((row) => ({ scope: "channel" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null, salience: row.salience ?? 0.5 })),
-        ...events.map((row) => ({ scope: "event" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, userId: null, salience: row.salience ?? 0.5 }))
+        ...channel.map((row) => ({ scope: "channel" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, updatedAt: row.updatedAt, userId: null, salience: row.salience ?? 0.5 })),
+        ...events.map((row) => ({ scope: "event" as const, id: row.id, key: row.key, value: row.value, type: row.type, createdAt: row.createdAt, updatedAt: row.updatedAt, userId: null, salience: row.salience ?? 0.5 }))
       ],
-      "recent"
+      "recent",
+      compareRecentRows
     );
   }
 
@@ -714,8 +772,13 @@ function extractLexicalTerms(query: string) {
   ].slice(0, 6);
 }
 
-function rankRows(rows: Array<Omit<HybridRow, "rank" | "reason">>, reason: HybridRow["reason"]): HybridRow[] {
-  return rows.map((row, index) => ({ ...row, rank: index + 1, reason }));
+function rankRows(
+  rows: Array<Omit<HybridRow, "rank" | "reason">>,
+  reason: HybridRow["reason"],
+  compare?: (left: Omit<HybridRow, "rank" | "reason">, right: Omit<HybridRow, "rank" | "reason">) => number
+): HybridRow[] {
+  const ordered = compare ? [...rows].sort(compare) : rows;
+  return ordered.map((row, index) => ({ ...row, rank: index + 1, reason }));
 }
 
 function mergeHybridRows(rows: HybridRow[], limit: number): ActiveMemoryEntry[] {
@@ -726,7 +789,8 @@ function mergeHybridRows(rows: HybridRow[], limit: number): ActiveMemoryEntry[] 
     const current = scored.get(key);
     // RRF base score * salience multiplier: salience=0.5 → ×1.0 (neutral), salience=0.9 → ×1.4, salience=0.1 → ×0.6
     const rrfScore = 1 / (60 + row.rank);
-    const score = rrfScore * (0.5 + (row.salience ?? 0.5));
+    const temporalMultiplier = computeTemporalDecayMultiplier(row.updatedAt ?? row.createdAt);
+    const score = rrfScore * (0.5 + (row.salience ?? 0.5)) * temporalMultiplier;
 
     if (!current) {
       scored.set(key, { row, score, reasons: new Set([row.reason]) });
@@ -751,4 +815,73 @@ function mergeHybridRows(rows: HybridRow[], limit: number): ActiveMemoryEntry[] 
       sourceUserId: row.userId ?? null,
       createdAt: row.createdAt
     }));
+}
+
+function computeLexicalScore(parts: Array<string | undefined>, terms: string[]) {
+  const normalizedParts = parts
+    .filter((part): part is string => Boolean(part))
+    .map((part) => part.toLowerCase().replace(/ё/g, "е"));
+
+  let score = 0;
+  for (const term of terms) {
+    for (const part of normalizedParts) {
+      let fromIndex = 0;
+      while (true) {
+        const matchIndex = part.indexOf(term, fromIndex);
+        if (matchIndex === -1) {
+          break;
+        }
+        score += 1;
+        fromIndex = matchIndex + term.length;
+      }
+    }
+  }
+
+  return score;
+}
+
+function compareVectorRows(left: Omit<HybridRow, "rank" | "reason">, right: Omit<HybridRow, "rank" | "reason">) {
+  return compareNumberAsc(left.sortScore, right.sortScore)
+    || compareNumberDesc(left.salience ?? 0.5, right.salience ?? 0.5)
+    || compareDateDesc(left.updatedAt ?? left.createdAt, right.updatedAt ?? right.createdAt);
+}
+
+function compareLexicalRows(left: Omit<HybridRow, "rank" | "reason">, right: Omit<HybridRow, "rank" | "reason">) {
+  return compareNumberDesc(left.sortScore, right.sortScore)
+    || compareNumberDesc(left.salience ?? 0.5, right.salience ?? 0.5)
+    || compareDateDesc(left.updatedAt ?? left.createdAt, right.updatedAt ?? right.createdAt);
+}
+
+function compareRecentRows(left: Omit<HybridRow, "rank" | "reason">, right: Omit<HybridRow, "rank" | "reason">) {
+  return compareDateDesc(left.updatedAt ?? left.createdAt, right.updatedAt ?? right.createdAt)
+    || compareNumberDesc(left.salience ?? 0.5, right.salience ?? 0.5);
+}
+
+function computeTemporalDecayMultiplier(referenceDate?: Date) {
+  const timestamp = referenceDate?.getTime();
+  if (!timestamp) {
+    return 1;
+  }
+
+  const ageMs = Math.max(0, Date.now() - timestamp);
+  const ageDays = ageMs / (24 * 60 * 60 * 1000);
+  return temporalDecayFloor + (1 - temporalDecayFloor) * Math.exp(-ageDays / temporalDecayHalfLifeDays);
+}
+
+function compareNumberAsc(left?: number, right?: number) {
+  const safeLeft = Number.isFinite(left) ? (left as number) : Number.POSITIVE_INFINITY;
+  const safeRight = Number.isFinite(right) ? (right as number) : Number.POSITIVE_INFINITY;
+  return safeLeft - safeRight;
+}
+
+function compareNumberDesc(left?: number, right?: number) {
+  const safeLeft = Number.isFinite(left) ? (left as number) : Number.NEGATIVE_INFINITY;
+  const safeRight = Number.isFinite(right) ? (right as number) : Number.NEGATIVE_INFINITY;
+  return safeRight - safeLeft;
+}
+
+function compareDateDesc(left?: Date, right?: Date) {
+  const safeLeft = left?.getTime() ?? 0;
+  const safeRight = right?.getTime() ?? 0;
+  return safeRight - safeLeft;
 }

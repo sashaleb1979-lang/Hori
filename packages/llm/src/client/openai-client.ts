@@ -2,7 +2,7 @@ import type { AppEnv } from "@hori/config";
 import type { AppLogger } from "@hori/shared";
 import { asErrorMessage, llmRetriesCounter } from "@hori/shared";
 
-import { OPENAI_EMBEDDING_DIMENSIONS } from "../router/model-routing";
+import { resolveOpenAIEmbeddingDimensions } from "../router/model-routing";
 import type { LlmChatOptions, LlmChatResponse, LlmClient, LlmToolCall, LlmEmbedOptions } from "./llm-client";
 
 /* ------------------------------------------------------------------ */
@@ -69,10 +69,12 @@ interface OpenAIEmbeddingResponse {
 
 type OpenAIClientEnv = AppEnv & {
   OPENAI_API_KEY?: string;
+  OPENAI_EMBED_DIMENSIONS?: number;
 };
 
 export class OpenAIClient implements LlmClient {
   private readonly apiKey: string;
+  private readonly defaultEmbeddingDimensions: number;
   private readonly timeoutMs: number;
   private readonly logger: AppLogger;
   private readonly logTraffic: boolean;
@@ -88,6 +90,7 @@ export class OpenAIClient implements LlmClient {
     }
 
     this.apiKey = key;
+    this.defaultEmbeddingDimensions = resolveOpenAIEmbeddingDimensions(env as OpenAIClientEnv);
     this.timeoutMs = env.OLLAMA_TIMEOUT_MS ?? DEFAULT_OPENAI_TIMEOUT_MS;
     this.logger = logger;
     this.logTraffic = env.OLLAMA_LOG_TRAFFIC;
@@ -291,7 +294,7 @@ export class OpenAIClient implements LlmClient {
     const body = {
       model,
       input: inputArray,
-      dimensions: options.dimensions ?? OPENAI_EMBEDDING_DIMENSIONS
+      dimensions: options.dimensions ?? this.defaultEmbeddingDimensions
     };
 
     const response = await this.fetchWithRetry(`${OPENAI_BASE_URL}/embeddings`, {

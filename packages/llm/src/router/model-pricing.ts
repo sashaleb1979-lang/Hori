@@ -31,32 +31,34 @@ export function calculateCostUsd(
   cachedTokens = 0,
 ): number {
   const pricing = getModelPricing(model);
-  const nonCachedPrompt = promptTokens - cachedTokens;
+  const safeCachedTokens = Math.max(0, Math.min(cachedTokens, promptTokens));
+  const nonCachedPrompt = Math.max(0, promptTokens - safeCachedTokens);
   return (
     nonCachedPrompt * pricing.inputPerMillion +
-    cachedTokens   * pricing.inputPerMillion * 0.5 +
+    safeCachedTokens * pricing.inputPerMillion * 0.5 +
     completionTokens * pricing.outputPerMillion
   ) / 1_000_000;
 }
 
 export interface LlmCostSummary {
   totalCostUsd: number;
-  breakdown: Array<{ model: string; promptTokens: number; completionTokens: number; costUsd: number }>;
+  breakdown: Array<{ model: string; promptTokens: number; completionTokens: number; cachedTokens?: number; costUsd: number }>;
 }
 
 export function summarizeLlmCosts(
-  calls: Array<{ model: string; promptTokens: number; completionTokens: number }>,
+  calls: Array<{ model: string; promptTokens: number; completionTokens: number; cachedTokens?: number }>,
 ): LlmCostSummary {
   let totalCostUsd = 0;
   const breakdown: LlmCostSummary["breakdown"] = [];
 
   for (const call of calls) {
-    const costUsd = calculateCostUsd(call.model, call.promptTokens, call.completionTokens);
+    const costUsd = calculateCostUsd(call.model, call.promptTokens, call.completionTokens, call.cachedTokens ?? 0);
     totalCostUsd += costUsd;
     breakdown.push({
       model: call.model,
       promptTokens: call.promptTokens,
       completionTokens: call.completionTokens,
+      ...(call.cachedTokens ? { cachedTokens: call.cachedTokens } : {}),
       costUsd,
     });
   }

@@ -129,7 +129,7 @@ function baseMessage(overrides: Partial<MessageEnvelope> = {}): MessageEnvelope 
   };
 }
 
-function createOrchestrator() {
+function createOrchestrator(overrides: Partial<ChatOrchestratorDeps> = {}) {
   const chat = vi.fn(async (options: { format?: "json" }) => {
     if (options.format === "json") {
       return {
@@ -170,9 +170,12 @@ function createOrchestrator() {
     runtimeConfig: {}
   };
 
+  Object.assign(deps, overrides);
+
   return {
     orchestrator: new ChatOrchestrator(deps as unknown as ChatOrchestratorDeps),
-    chat
+    chat,
+    deps
   };
 }
 
@@ -226,5 +229,63 @@ describe("chat orchestrator quiet hours", () => {
     expect(result.trace.responseBudget).toBeDefined();
     expect(result.trace.responseBudget?.contour).toBe("B");
     expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.model === "gpt-5.4-nano")).toBe(true);
+  });
+
+  it("blends HyDE retrieval embedding into context lookup for substantial chat turns", async () => {
+    const contextService = { buildContext: vi.fn(async () => emptyContext) };
+    const chat = vi.fn(async (options: { format?: "json"; messages?: Array<{ content: string }> }) => {
+      if (options.format === "json") {
+        return {
+          message: {
+            role: "assistant" as const,
+            content: JSON.stringify({ intent: "chat", confidence: 0.95, reason: "test classifier" })
+          },
+          usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
+        };
+      }
+
+      const combined = options.messages?.map((message) => message.content).join("\n") ?? "";
+      if (combined.includes("memory retrieval")) {
+        return {
+          message: { role: "assistant" as const, content: "Игнор в переписке, тревога, нужен короткий ясный ответ" },
+          usage: { promptTokens: 12, completionTokens: 8, totalTokens: 20 }
+        };
+      }
+
+      return {
+        message: { role: "assistant" as const, content: "нормальный ответ" },
+        usage: { promptTokens: 20, completionTokens: 7, totalTokens: 27 }
+      };
+    });
+    const embeddingAdapter = {
+      embedOne: vi.fn(async (text: string) => text.includes("Игнор в переписке") ? [3, 3, 3] : [1, 1, 1])
+    };
+    const { orchestrator, deps } = createOrchestrator({
+      contextService,
+      llmClient: { chat, embed: vi.fn() } as never,
+      embeddingAdapter: embeddingAdapter as never,
+    });
+
+    await orchestrator.handleMessage(baseMessage({
+      content: "меня игнорят и я не понимаю что ответить человеку",
+      createdAt: new Date("2026-04-19T10:22:00.000Z")
+    }), {
+      guildSettings,
+      featureFlags,
+      channelPolicy: {
+        allowBotReplies: true,
+        allowInterjections: false,
+        isMuted: false,
+        topicInterestTags: [],
+        responseLengthOverride: null
+      },
+      runtimeSettings
+    });
+
+    expect(contextService.buildContext).toHaveBeenCalledWith(expect.objectContaining({
+      queryEmbedding: [2, 2, 2]
+    }));
+    expect(deps.llmClient.chat).toHaveBeenCalledTimes(3);
+    expect(embeddingAdapter.embedOne).toHaveBeenCalledTimes(2);
   });
 });

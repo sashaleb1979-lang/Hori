@@ -268,6 +268,22 @@ function detectConstraintFollowUp(input: ComposeBehaviorPromptInput, messageKind
   return /^(?:(?:не|без|только|лучше|можно)(?:\s|$)|а\s+не(?:\s|$))/u.test(normalized);
 }
 
+function detectEmotionalAdviceContext(input: ComposeBehaviorPromptInput, messageKind: MessageKind) {
+  if (messageKind === "meta_feedback" || messageKind === "low_signal_noise" || messageKind === "meme_bait") {
+    return false;
+  }
+
+  const normalized = normalizeHookText(input.cleanedContent);
+  if (!normalized || normalized.length > 280) {
+    return false;
+  }
+
+  const emotionalPattern = /(мне\s+(?:плохо|тяжело|страшно|тревожно|стыдно|херово)|я\s+(?:устал|устала|выгорел|выгорела|не\s+вывожу|запутался|запуталась)|игнорят|накручиваю|паник|обидно|больно)/iu;
+  const advicePattern = /(что\s+делать|как\s+ответить|как\s+лучше|стоит\s+ли|что\s+мне\s+написать|как\s+поступить|как\s+сказать|что\s+ему\s+ответить)/iu;
+
+  return emotionalPattern.test(normalized) || advicePattern.test(normalized);
+}
+
 function resolveRequestedDepth(options: {
   input: ComposeBehaviorPromptInput;
   channelKind: ChannelKind;
@@ -882,6 +898,7 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   const rhetoricalQuestion = detectRhetoricalQuestion(input.cleanedContent, messageKind);
   const smalltalkContextHook = detectSmalltalkContextHook(input, messageKind);
   const constraintFollowUp = detectConstraintFollowUp(input, messageKind);
+  const emotionalAdviceContext = detectEmotionalAdviceContext(input, messageKind);
   const requestedDepth = resolveRequestedDepth({ input, channelKind, messageKind, smalltalkContextHook, staleTakeDetected, persona });
   const mode = resolveMode({ input, persona, channelKind, messageKind, requestedDepth, staleTakeDetected });
   const staleTakeStyleOverride =
@@ -978,6 +995,9 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   add(buildReplyModeBlock(replyMode));
   add(buildMetaFeedbackBlock(messageKind));
   add(buildConcreteGroundingBlock({ messageKind, constraintFollowUp }));
+  if (emotionalAdviceContext) {
+    add(buildFewShotBlock({ includeEmotionalAdviceAnchors: true, skipBaseAnchors: true }));
+  }
   if (constraintFollowUp || messageKind === "reply_to_bot") {
     add(buildFewShotBlock({ includeConcreteReplyAnchors: true, skipBaseAnchors: true }));
   }

@@ -17,7 +17,7 @@ import {
   type ModelRoutingSlot,
   type ResolvedModelRouting,
   OPENAI_EMBEDDING_MODEL,
-  OPENAI_EMBEDDING_DIMENSIONS,
+  resolveOpenAIEmbeddingDimensions,
   slotForIntent
 } from "./model-routing";
 
@@ -81,7 +81,7 @@ export class ModelRouter {
     if (this.isOpenAI) {
       return {
         model: OPENAI_EMBEDDING_MODEL,
-        dimensions: OPENAI_EMBEDDING_DIMENSIONS
+        dimensions: resolveOpenAIEmbeddingDimensions(this.providerEnv)
       };
     }
 

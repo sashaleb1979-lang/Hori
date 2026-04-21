@@ -8,6 +8,9 @@ const candidateSearchLimit = 20;
 const candidateGetAllLimit = 50;
 const maxCandidatesPerDecision = 30;
 const maxFactsPerRun = 12;
+const semanticDedupSearchLimit = 5;
+const semanticDedupMinScore = 0.82;
+const semanticDedupRewriteDeltaChars = 18;
 
 export type MemoryScope = "server" | "user" | "channel" | "event";
 export type FormationActionEvent = "ADD" | "UPDATE" | "DELETE" | "NOOP";
@@ -64,7 +67,7 @@ export interface MemoryFormationLlm {
     temperature?: number;
     maxTokens?: number;
   }): Promise<{ message: { role: "assistant"; content: string } }>;
-  embed(model: string, input: string | string[]): Promise<number[][]>;
+  embed(model: string, input: string | string[], options?: { dimensions?: number }): Promise<number[][]>;
 }
 
 export interface MemoryFormationRetrieval {
@@ -127,6 +130,7 @@ export interface MemoryFormationRetrieval {
 
 export class MemoryFormationService {
   private readonly embedModel: string;
+  private readonly embedDimensions?: number;
 
   constructor(
     private readonly prisma: AppPrismaClient,
@@ -134,8 +138,10 @@ export class MemoryFormationService {
     private readonly llm: MemoryFormationLlm,
     private readonly env: AppEnv,
     embedModel?: string,
+    embedDimensions?: number,
   ) {
     this.embedModel = embedModel ?? env.OLLAMA_EMBED_MODEL;
+    this.embedDimensions = embedDimensions;
   }
 
   async runFormation(request: MemoryFormationRequest): Promise<MemoryFormationResult> {
@@ -178,6 +184,7 @@ export class MemoryFormationService {
       return result;
     }
 
+    actions = await this.semanticDeduplicateActions(request, actions);
     result.actions = actions;
 
     await this.applyActions(request, actions, result);
@@ -253,7 +260,9 @@ export class MemoryFormationService {
     let embeddings: number[][] = [];
     if (facts.length > 0) {
       try {
-        embeddings = await this.llm.embed(this.embedModel, facts);
+        embeddings = await this.llm.embed(this.embedModel, facts, {
+          dimensions: this.embedDimensions,
+        });
       } catch {
         embeddings = [];
       }
@@ -681,9 +690,124 @@ export class MemoryFormationService {
     }
   }
 
+  private async semanticDeduplicateActions(
+    request: MemoryFormationRequest,
+    actions: FormationAction[],
+  ): Promise<FormationAction[]> {
+    const normalized: FormationAction[] = [];
+
+    for (const action of actions) {
+      const text = action.text?.trim();
+      if (!text || (action.event !== "ADD" && action.event !== "UPDATE")) {
+        normalized.push(action);
+        continue;
+      }
+
+      if (action.event === "UPDATE" && action.id) {
+        normalized.push(action);
+        continue;
+      }
+
+      const duplicate = await this.findSemanticDuplicate(request, action.scope, text);
+      if (!duplicate || duplicate.score < semanticDedupMinScore) {
+        normalized.push(action);
+        continue;
+      }
+
+      if (action.event === "UPDATE") {
+        normalized.push({
+          ...action,
+          id: duplicate.id,
+          key: duplicate.key,
+          eventKey: duplicate.eventKey ?? action.eventKey,
+          reason: appendReason(action.reason, `semantic_dedup:${duplicate.score.toFixed(2)}`),
+        });
+        continue;
+      }
+
+      if (shouldRewriteDuplicate(text, duplicate.text)) {
+        normalized.push({
+          ...action,
+          event: "UPDATE",
+          id: duplicate.id,
+          key: duplicate.key,
+          eventKey: duplicate.eventKey ?? action.eventKey,
+          reason: appendReason(action.reason, `semantic_dedup_promoted_update:${duplicate.score.toFixed(2)}`),
+        });
+        continue;
+      }
+
+      normalized.push({
+        ...action,
+        event: "NOOP",
+        id: duplicate.id,
+        key: duplicate.key,
+        eventKey: duplicate.eventKey ?? action.eventKey,
+        reason: appendReason(action.reason, `semantic_duplicate:${duplicate.score.toFixed(2)}`),
+      });
+    }
+
+    return normalized;
+  }
+
+  private async findSemanticDuplicate(
+    request: MemoryFormationRequest,
+    scope: MemoryScope,
+    text: string,
+  ): Promise<{ id: string; key: string; text: string; eventKey?: string; score: number } | null> {
+    const embedding = await this.embedForSemanticLookup(text);
+    const candidates = scope === "server"
+      ? (await this.retrieval.findRelevantServerMemory(request.guildId, embedding, semanticDedupSearchLimit)).map((item) => ({
+          id: item.id,
+          key: item.key,
+          text: item.value,
+          score: computeSemanticDuplicateScore(text, item.value),
+        }))
+      : scope === "channel"
+        ? (await this.retrieval.findRelevantChannelMemory(request.guildId, request.channelId, embedding, semanticDedupSearchLimit)).map((item) => ({
+            id: item.id,
+            key: item.key,
+            text: item.value,
+            score: computeSemanticDuplicateScore(text, item.value),
+          }))
+        : scope === "event"
+          ? (await this.retrieval.findRelevantEventMemory(request.guildId, request.channelId, embedding, semanticDedupSearchLimit)).map((item) => ({
+              id: item.id,
+              key: item.key,
+              text: item.value,
+              eventKey: item.eventKey,
+              score: computeSemanticDuplicateScore(text, item.value),
+            }))
+          : (await this.retrieval.findRelevantUserMemory(request.guildId, request.userId, embedding, semanticDedupSearchLimit)).map((item) => ({
+              id: item.id,
+              key: item.key,
+              text: item.value,
+              score: computeSemanticDuplicateScore(text, item.value),
+            }));
+
+    const best = candidates
+      .filter((candidate) => candidate.score >= semanticDedupMinScore)
+      .sort((left, right) => right.score - left.score || right.text.length - left.text.length)[0];
+
+    return best ?? null;
+  }
+
+  private async embedForSemanticLookup(text: string) {
+    try {
+      const [embedding] = await this.llm.embed(this.embedModel, text, {
+        dimensions: this.embedDimensions,
+      });
+      return embedding?.length ? embedding : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async updateEmbedding(entityType: "server_memory" | "user_memory" | "channel_memory" | "event_memory", entityId: string, text: string) {
     try {
-      const [embedding] = await this.llm.embed(this.embedModel, text);
+      const [embedding] = await this.llm.embed(this.embedModel, text, {
+        dimensions: this.embedDimensions,
+      });
       if (!embedding?.length) {
         return;
       }
@@ -892,7 +1016,94 @@ function normalizeMemoryKey(value: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 64);
 
+
+function appendReason(current: string | undefined, suffix: string) {
+  return current ? `${current}; ${suffix}` : suffix;
+}
+
+function shouldRewriteDuplicate(nextText: string, existingText: string) {
+  const nextNormalized = normalizeSemanticText(nextText);
+  const existingNormalized = normalizeSemanticText(existingText);
+
+  if (!nextNormalized || !existingNormalized || nextNormalized === existingNormalized) {
+    return false;
+  }
+
+  if (nextNormalized.includes(existingNormalized) && nextText.length >= existingText.length + semanticDedupRewriteDeltaChars) {
+    return true;
+  }
+
+  const nextTokens = toSemanticTokenSet(nextNormalized);
+  const existingTokens = toSemanticTokenSet(existingNormalized);
+  const shared = countSharedTokens(nextTokens, existingTokens);
+
+  return nextText.length >= existingText.length + semanticDedupRewriteDeltaChars
+    && existingTokens.size > 0
+    && shared / existingTokens.size >= 0.85;
+}
+
+function computeSemanticDuplicateScore(left: string, right: string) {
+  const normalizedLeft = normalizeSemanticText(left);
+  const normalizedRight = normalizeSemanticText(right);
+
+  if (!normalizedLeft || !normalizedRight) {
+    return 0;
+  }
+
+  if (normalizedLeft === normalizedRight) {
+    return 1;
+  }
+
+  if (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)) {
+    return 0.92;
+  }
+
+  const leftTokens = toSemanticTokenSet(normalizedLeft);
+  const rightTokens = toSemanticTokenSet(normalizedRight);
+  if (!leftTokens.size || !rightTokens.size) {
+    return 0;
+  }
+
+  const shared = countSharedTokens(leftTokens, rightTokens);
+  if (!shared) {
+    return 0;
+  }
+
+  const union = new Set([...leftTokens, ...rightTokens]).size;
+  const jaccard = union ? shared / union : 0;
+  const containment = Math.max(shared / leftTokens.size, shared / rightTokens.size);
+
+  return containment * 0.7 + jaccard * 0.3;
+}
+
+function normalizeSemanticText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/[^
   return key || "memory-note";
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function toSemanticTokenSet(value: string) {
+  return new Set(
+    value
+      .split(" ")
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 3)
+  );
+}
+
+function countSharedTokens(left: Set<string>, right: Set<string>) {
+  let shared = 0;
+  for (const token of left) {
+    if (right.has(token)) {
+      shared += 1;
+    }
+  }
+  return shared;
+}
 }
 
 function fallbackCompaction(messages: readonly FormationMessage[]): string {

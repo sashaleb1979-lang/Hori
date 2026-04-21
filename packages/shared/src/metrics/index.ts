@@ -39,6 +39,13 @@ export const llmTokensCounter = new Counter({
   registers: [metricsRegistry]
 });
 
+export const llmCachedTokensCounter = new Counter({
+  name: "hori_llm_cached_tokens_total",
+  help: "Total LLM prompt tokens served from provider cache",
+  labelNames: ["model"],
+  registers: [metricsRegistry]
+});
+
 export const llmCostCounter = new Counter({
   name: "hori_llm_cost_usd_total",
   help: "Cumulative LLM cost in USD",

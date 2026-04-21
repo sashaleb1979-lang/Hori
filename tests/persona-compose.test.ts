@@ -217,6 +217,14 @@ describe("composeBehaviorPrompt", () => {
     expect(result.prompt).toContain("Не обещай тайм-аут");
   });
 
+  it("adds anti-drift anchors for emotional or advice-heavy turns", () => {
+    const result = compose("меня игнорят и я не понимаю что ему ответить");
+
+    expect(result.prompt).toContain("Не долбись дальше. Один нормальный пинг и потом отойди.");
+    expect(result.prompt).toContain("Одну внятную фразу. Без романа и намеков.");
+    expect(result.prompt).toContain("[CONCRETE CHAT GROUNDING BLOCK]");
+  });
+
   it("adds direct-message punctuation guidance when the message is a DM", () => {
     const result = compose("ладно", {
       message: {

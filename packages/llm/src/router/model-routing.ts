@@ -3,6 +3,7 @@ import type { AppEnv } from "@hori/config";
 export const MODEL_ROUTING_SETTING_KEY = "llm.model_routing";
 export const OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
 export const OPENAI_EMBEDDING_DIMENSIONS = 768;
+const SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS = new Set([512, 768, 1536]);
 
 export const MODEL_ROUTING_SLOTS = [
   "classifier",
@@ -113,7 +114,13 @@ type ProviderAwareEnv = AppEnv & {
   OPENAI_CHAT_MODEL?: string;
   OPENAI_SMART_MODEL?: string;
   OPENAI_EMBED_MODEL?: string;
+  OPENAI_EMBED_DIMENSIONS?: number;
 };
+
+export function resolveOpenAIEmbeddingDimensions(env: Pick<ProviderAwareEnv, "OPENAI_EMBED_DIMENSIONS">) {
+  const dimensions = Number(env.OPENAI_EMBED_DIMENSIONS ?? OPENAI_EMBEDDING_DIMENSIONS);
+  return SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS.has(dimensions) ? dimensions : OPENAI_EMBEDDING_DIMENSIONS;
+}
 
 export function isModelRoutingSlot(value: string): value is ModelRoutingSlot {
   return MODEL_ROUTING_SLOTS.includes(value as ModelRoutingSlot);
@@ -171,7 +178,7 @@ export function resolveModelRouting(env: AppEnv, rawStoredValue?: string | null)
     embeddingModel: provider === "openai"
       ? OPENAI_EMBEDDING_MODEL
       : env.OLLAMA_EMBED_MODEL,
-    embeddingDimensions: provider === "openai" ? OPENAI_EMBEDDING_DIMENSIONS : undefined,
+    embeddingDimensions: provider === "openai" ? resolveOpenAIEmbeddingDimensions(env as ProviderAwareEnv) : undefined,
     parseError: parsed.error
   };
 }

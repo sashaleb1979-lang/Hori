@@ -82,12 +82,14 @@ export function createMemoryFormationJob(runtime: WorkerRuntime) {
       };
     }
 
+    const embedding = runtime.modelRouter.pickEmbeddingModel();
     const formationService = new MemoryFormationService(
       runtime.prisma,
       runtime.retrievalService,
       runtime.llmClient,
       formationEnv,
-      runtime.modelRouter.pickEmbedModel()
+      embedding.model,
+      embedding.dimensions
     );
 
     await runtime.prisma.memoryBuildRun.update({

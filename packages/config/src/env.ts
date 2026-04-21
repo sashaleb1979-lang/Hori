@@ -128,6 +128,7 @@ const coreEnvSchema = z.object({
   OPENAI_CHAT_MODEL: z.string().default("gpt-5.4-nano"),
   OPENAI_SMART_MODEL: z.string().default("gpt-5.4-nano"),
   OPENAI_EMBED_MODEL: z.string().default("text-embedding-3-small"),
+  OPENAI_EMBED_DIMENSIONS: intish.default(768),
 
   BRAVE_SEARCH_API_KEY: z.string().optional(),
 
@@ -140,6 +141,7 @@ const compactConfigSchema = z
       .object({
         webSearch: z.boolean().optional(),
         autoInterject: z.boolean().optional(),
+        memoryHydeEnabled: z.boolean().optional(),
         userProfiles: z.boolean().optional(),
         contextActions: z.boolean().optional(),
         roast: z.boolean().optional(),
@@ -276,6 +278,7 @@ const legacyAdvancedSchema = z
   .object({
     FEATURE_WEB_SEARCH: boolish.optional(),
     FEATURE_AUTOINTERJECT: boolish.optional(),
+    FEATURE_MEMORY_HYDE_ENABLED: boolish.optional(),
     FEATURE_USER_PROFILES: boolish.optional(),
     FEATURE_CONTEXT_ACTIONS: boolish.optional(),
     FEATURE_ROAST: boolish.optional(),
@@ -380,7 +383,8 @@ const envAliasMap = {
   OAI_KEY: "OPENAI_API_KEY",
   OAI_CHAT: "OPENAI_CHAT_MODEL",
   OAI_SMART: "OPENAI_SMART_MODEL",
-  OAI_EMBED: "OPENAI_EMBED_MODEL"
+  OAI_EMBED: "OPENAI_EMBED_MODEL",
+  OAI_EMBED_DIMS: "OPENAI_EMBED_DIMENSIONS"
 } as const satisfies Record<string, string>;
 
 const canonicalEnvHints = {
@@ -430,7 +434,8 @@ function mapCoreAliases(raw: NodeJS.ProcessEnv) {
     OPENAI_API_KEY: raw.OAI_KEY ?? raw.OPENAI_API_KEY,
     OPENAI_CHAT_MODEL: raw.OAI_CHAT ?? raw.OPENAI_CHAT_MODEL,
     OPENAI_SMART_MODEL: raw.OAI_SMART ?? raw.OPENAI_SMART_MODEL,
-    OPENAI_EMBED_MODEL: raw.OAI_EMBED ?? raw.OPENAI_EMBED_MODEL
+    OPENAI_EMBED_MODEL: raw.OAI_EMBED ?? raw.OPENAI_EMBED_MODEL,
+    OPENAI_EMBED_DIMENSIONS: raw.OAI_EMBED_DIMS ?? raw.OPENAI_EMBED_DIMENSIONS
   };
 }
 
@@ -452,6 +457,7 @@ function parseCompactConfig(cfg?: string): Partial<RuntimeTuning> {
   return {
     FEATURE_WEB_SEARCH: parsed.features?.webSearch,
     FEATURE_AUTOINTERJECT: parsed.features?.autoInterject,
+    FEATURE_MEMORY_HYDE_ENABLED: parsed.features?.memoryHydeEnabled,
     FEATURE_USER_PROFILES: parsed.features?.userProfiles,
     FEATURE_CONTEXT_ACTIONS: parsed.features?.contextActions,
     FEATURE_ROAST: parsed.features?.roast,

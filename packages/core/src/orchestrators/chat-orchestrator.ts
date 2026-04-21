@@ -1,6 +1,6 @@
 import type { AppEnv } from "@hori/config";
-import type { AppLogger, AppPrismaClient, BotReplyPayload, BotTrace, LlmCallTrace, LlmChatMessage, MessageEnvelope, SearchHit } from "@hori/shared";
-import { asErrorMessage, botLatencyHistogram, botRepliesCounter, buildMemoryKey, clamp, llmCostCounter, llmTokensCounter, normalizeWhitespace } from "@hori/shared";
+import type { AppLogger, AppPrismaClient, BotIntent, BotReplyPayload, BotTrace, LlmCallTrace, LlmChatMessage, MessageEnvelope, SearchHit } from "@hori/shared";
+import { asErrorMessage, botLatencyHistogram, botRepliesCounter, buildMemoryKey, clamp, llmCachedTokensCounter, llmCostCounter, llmTokensCounter, normalizeWhitespace } from "@hori/shared";
 
 import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, calculateCostUsd, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet, getModelProfile } from "@hori/llm";
 import type { LlmChatResponse, LlmClient, ModelRoutingSlot } from "@hori/llm";
@@ -78,6 +78,7 @@ export class ChatOrchestrator {
   private readonly emotionMediaDecision = new EmotionMediaDecisionService();
   private readonly microReactions = new MicroReactionService();
   private readonly embeddingCache = new Map<string, { expiresAt: number; value: number[] }>();
+  private readonly memoryHydeCache = new Map<string, { expiresAt: number; value: string }>();
   private readonly emotionStateByScope = new Map<string, ReturnType<typeof createEngineState>>();
 
   constructor(private readonly deps: OrchestratorDeps) {}
@@ -140,7 +141,9 @@ export class ChatOrchestrator {
     }
 
     const intent = initialIntent.confidence < 0.7 ? await this.classifyWithLlm(initialIntent.cleanedContent, initialIntent, runtimeSettings, llmCalls) : initialIntent;
-    const queryEmbedding = intent.intent !== "help" ? await this.safeEmbed(intent.cleanedContent) : undefined;
+    const queryEmbedding = intent.intent !== "help"
+      ? await this.buildContextQueryEmbedding(intent.cleanedContent, intent.intent, runtimeSettings, llmCalls)
+      : undefined;
     const contextBundle = await this.deps.contextService.buildContext({
       guildId: message.guildId,
       channelId: message.channelId,
@@ -1061,12 +1064,14 @@ export class ChatOrchestrator {
 
   private async safeEmbed(text: string) {
     const key = normalizeWhitespace(text).toLowerCase();
+    const embeddingTarget = this.deps.modelRouter.pickEmbeddingModel();
+    const cacheKey = `${embeddingTarget.model}:${embeddingTarget.dimensions ?? "native"}:${key}`;
 
     if (!key) {
       return undefined;
     }
 
-    const cached = this.embeddingCache.get(key);
+    const cached = this.embeddingCache.get(cacheKey);
 
     if (this.deps.env.FEATURE_EMBEDDING_CACHE_ENABLED && cached && cached.expiresAt > Date.now()) {
       return cached.value;
@@ -1075,7 +1080,7 @@ export class ChatOrchestrator {
     try {
       const value = await this.deps.embeddingAdapter.embedOne(text);
       if (this.deps.env.FEATURE_EMBEDDING_CACHE_ENABLED && value.length) {
-        this.embeddingCache.set(key, {
+        this.embeddingCache.set(cacheKey, {
           value,
           expiresAt: Date.now() + this.deps.env.EMBEDDING_CACHE_TTL_SEC * 1000
         });
@@ -1084,6 +1089,73 @@ export class ChatOrchestrator {
       return value;
     } catch (error) {
       this.deps.logger.warn({ error }, "failed to build embedding");
+      return undefined;
+    }
+  }
+
+  private async buildContextQueryEmbedding(
+    cleanedContent: string,
+    intent: BotIntent,
+    runtimeSettings: EffectiveRuntimeSettings,
+    llmCalls?: LlmCallTrace[]
+  ) {
+    const primaryEmbedding = await this.safeEmbed(cleanedContent);
+
+    if (!shouldUseMemoryHyde(this.deps.env, intent, cleanedContent)) {
+      return primaryEmbedding;
+    }
+
+    const hydeText = await this.buildMemoryHydeText(cleanedContent, runtimeSettings, llmCalls);
+    if (!hydeText) {
+      return primaryEmbedding;
+    }
+
+    const hydeEmbedding = await this.safeEmbed(hydeText);
+    return mergeEmbeddings(primaryEmbedding, hydeEmbedding);
+  }
+
+  private async buildMemoryHydeText(
+    cleanedContent: string,
+    runtimeSettings: EffectiveRuntimeSettings,
+    llmCalls?: LlmCallTrace[]
+  ) {
+    const normalized = normalizeWhitespace(cleanedContent);
+    const cacheKey = `${runtimeSettings.modelRouting.slots.classifier}:${normalized.toLowerCase()}`;
+    const cached = this.memoryHydeCache.get(cacheKey);
+
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+
+    const llm = this.getLlmSettingsForSlot("classifier", "chat", runtimeSettings, 96, { temperature: 0 });
+    const messages = buildMemoryHydePrompt(normalized);
+
+    try {
+      const response = await this.deps.llmClient.chat({
+        model: llm.model,
+        messages,
+        temperature: llm.temperature,
+        topP: llm.topP,
+        maxTokens: llm.maxTokens,
+        keepAlive: llm.keepAlive,
+        numCtx: llm.numCtx,
+        numBatch: llm.numBatch
+      });
+      this.recordLlmCall(llmCalls, "memory_hyde", llm.model, messages, response);
+
+      const value = normalizeWhitespace(response.message.content).slice(0, 400);
+      if (!value) {
+        return undefined;
+      }
+
+      this.memoryHydeCache.set(cacheKey, {
+        value,
+        expiresAt: Date.now() + this.deps.env.EMBEDDING_CACHE_TTL_SEC * 1000
+      });
+
+      return value;
+    } catch (error) {
+      this.deps.logger.warn({ error }, "memory HyDE generation failed");
       return undefined;
     }
   }
@@ -1543,7 +1615,7 @@ function summarizeLlmTokenTrace(llmCalls?: LlmCallTrace[]) {
     llmTokensCounter.inc({ model: call.model, type: "prompt" }, call.promptTokens);
     llmTokensCounter.inc({ model: call.model, type: "completion" }, call.completionTokens);
     if (call.cachedTokens) {
-      llmTokensCounter.inc({ model: call.model, type: "cached" }, call.cachedTokens);
+      llmCachedTokensCounter.inc({ model: call.model }, call.cachedTokens);
     }
     llmCostCounter.inc({ model: call.model }, callCost);
   }
@@ -1559,4 +1631,42 @@ function summarizeLlmTokenTrace(llmCalls?: LlmCallTrace[]) {
 
 export function createChatOrchestrator(deps: OrchestratorDeps) {
   return new ChatOrchestrator(deps);
+}
+
+function shouldUseMemoryHyde(env: Pick<AppEnv, "FEATURE_MEMORY_HYDE_ENABLED">, intent: BotIntent, content: string) {
+  if (!env.FEATURE_MEMORY_HYDE_ENABLED || intent !== "chat") {
+    return false;
+  }
+
+  const normalized = normalizeWhitespace(content).toLowerCase();
+  if (normalized.length < 24) {
+    return false;
+  }
+
+  if (/^(?:ага|угу|ок(?:ей)?|хм|лол|спасибо|ясно|понятно|ну ок)$/iu.test(normalized)) {
+    return false;
+  }
+
+  return /(\?|как|что\s+делать|как\s+ответить|как\s+лучше|стоит\s+ли|объясни|поясни|мне\s+(?:плохо|тяжело|страшно|тревожно|стыдно)|я\s+(?:устал|устала|не\s+вывожу|запутался|запуталась)|игнорят|переписк|отношени)/iu.test(normalized);
+}
+
+function buildMemoryHydePrompt(content: string): LlmChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: "Ты помогаешь memory retrieval. Сожми запрос пользователя в 1-2 короткие фразы так, будто это уже хороший ответ/summary для поиска памяти. Оставь только сущности, факты, цели, эмоцию, контекст ситуации и временные привязки. Без советов, без риторики, без воды."
+    },
+    {
+      role: "user",
+      content
+    }
+  ];
+}
+
+function mergeEmbeddings(primary?: number[], secondary?: number[]) {
+  if (primary?.length && secondary?.length && primary.length === secondary.length) {
+    return primary.map((value, index) => Number(((value + secondary[index]!) / 2).toFixed(6)));
+  }
+
+  return primary?.length ? primary : secondary;
 }

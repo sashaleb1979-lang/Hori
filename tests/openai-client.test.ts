@@ -167,17 +167,48 @@ describe("OpenAIClient", () => {
 
     await expect(client.embed("text-embedding-3-small", "хори привет")).resolves.toEqual([[0.1, 0.2, 0.3]]);
   });
+
+  it("uses configured default embedding dimensions when set in env", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as {
+        model: string;
+        input: string[];
+        dimensions?: number;
+      };
+
+      expect(payload).toEqual({
+        model: "text-embedding-3-small",
+        input: ["хори привет"],
+        dimensions: 512
+      });
+
+      return new Response(
+        JSON.stringify({
+          data: [{ index: 0, embedding: [0.1, 0.2, 0.3] }]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createClient({ OPENAI_EMBED_DIMENSIONS: 512 });
+
+    await expect(client.embed("text-embedding-3-small", "хори привет")).resolves.toEqual([[0.1, 0.2, 0.3]]);
+  });
 });
 
-function createClient() {
+function createClient(overrides: Record<string, unknown> = {}) {
   return new OpenAIClient(
     {
       OPENAI_API_KEY: "test-key",
+      OPENAI_EMBED_DIMENSIONS: 768,
       OLLAMA_TIMEOUT_MS: 5_000,
       OLLAMA_LOG_TRAFFIC: false,
       OLLAMA_LOG_PROMPTS: false,
       OLLAMA_LOG_RESPONSES: false,
-      OLLAMA_LOG_MAX_CHARS: 4000
+      OLLAMA_LOG_MAX_CHARS: 4000,
+      ...overrides
     } as never,
     {
       error: vi.fn(),

@@ -96,7 +96,7 @@ describe("ModelRouter", () => {
     expect(parsed.value?.overrides?.search).toBe("gpt-5.4-mini");
   });
 
-  it("locks OpenAI embeddings to text-embedding-3-small at 768 dimensions", async () => {
+  it("defaults OpenAI embeddings to text-embedding-3-small at 768 dimensions", async () => {
     const env = loadEnv({
       DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
       REDIS_URL: "redis://localhost:6379",
@@ -113,5 +113,24 @@ describe("ModelRouter", () => {
       dimensions: 768
     });
     expect(embed).toHaveBeenCalledWith("text-embedding-3-small", "хори привет", { dimensions: 768 });
+  });
+
+  it("allows lower OpenAI embedding dimensions for cheaper retrieval", async () => {
+    const env = loadEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      LLM_PROVIDER: "openai",
+      OPENAI_EMBED_DIMENSIONS: "512"
+    });
+    const router = new ModelRouter(env);
+    const embed = vi.fn().mockResolvedValue([[0.1, 0.2, 0.3]]);
+    const adapter = new EmbeddingAdapter({ embed } as never, router);
+
+    await expect(adapter.embedOne("хори привет")).resolves.toEqual([0.1, 0.2, 0.3]);
+    expect(router.pickEmbeddingModel()).toEqual({
+      model: "text-embedding-3-small",
+      dimensions: 512
+    });
+    expect(embed).toHaveBeenCalledWith("text-embedding-3-small", "хори привет", { dimensions: 512 });
   });
 });

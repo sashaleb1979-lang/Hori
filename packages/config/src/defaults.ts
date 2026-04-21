@@ -58,6 +58,7 @@ export const defaultPersonaSettings: PersonaSettings = {
 export const defaultRuntimeTuning = {
   FEATURE_WEB_SEARCH: true,
   FEATURE_AUTOINTERJECT: false,
+  FEATURE_MEMORY_HYDE_ENABLED: true,
   FEATURE_USER_PROFILES: true,
   FEATURE_CONTEXT_ACTIONS: true,
   FEATURE_ROAST: true,
