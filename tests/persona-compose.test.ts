@@ -6,6 +6,7 @@ import type { BotIntent, ContextBundleV2, ContextTrace, FeatureFlags, MessageEnv
 const featureFlags: FeatureFlags = {
   webSearch: true,
   autoInterject: false,
+  emotionalAdviceAnchorsEnabled: true,
   userProfiles: true,
   contextActions: true,
   roast: true,
@@ -220,9 +221,27 @@ describe("composeBehaviorPrompt", () => {
   it("adds anti-drift anchors for emotional or advice-heavy turns", () => {
     const result = compose("меня игнорят и я не понимаю что ему ответить");
 
+    expect(result.prompt).toContain("[EMOTIONAL ADVICE ANCHORS]");
     expect(result.prompt).toContain("Не долбись дальше. Один нормальный пинг и потом отойди.");
     expect(result.prompt).toContain("Одну внятную фразу. Без романа и намеков.");
     expect(result.prompt).toContain("[CONCRETE CHAT GROUNDING BLOCK]");
+    expect(result.trace.blocksUsed).toContain("EMOTIONAL ADVICE ANCHORS");
+  });
+
+  it("skips emotional advice anchors for technical advice questions", () => {
+    const result = compose("как лучше настроить индекс в postgres");
+
+    expect(result.prompt).not.toContain("[EMOTIONAL ADVICE ANCHORS]");
+    expect(result.prompt).not.toContain("Не долбись дальше. Один нормальный пинг и потом отойди.");
+  });
+
+  it("can disable emotional advice anchors via dedicated feature flag", () => {
+    const result = compose("меня игнорят и я не понимаю что ему ответить", {
+      featureFlags: { ...featureFlags, emotionalAdviceAnchorsEnabled: false }
+    });
+
+    expect(result.prompt).not.toContain("[EMOTIONAL ADVICE ANCHORS]");
+    expect(result.prompt).not.toContain("Не долбись дальше. Один нормальный пинг и потом отойди.");
   });
 
   it("adds direct-message punctuation guidance when the message is a DM", () => {

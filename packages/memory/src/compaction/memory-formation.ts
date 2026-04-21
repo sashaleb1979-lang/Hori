@@ -747,7 +747,41 @@ export class MemoryFormationService {
       });
     }
 
-    return normalized;
+    const batchDeduplicated: FormationAction[] = [];
+
+    for (const action of normalized) {
+      const text = action.text?.trim();
+      if (!text || (action.event !== "ADD" && action.event !== "UPDATE")) {
+        batchDeduplicated.push(action);
+        continue;
+      }
+
+      const duplicate = findBatchLocalDuplicate(batchDeduplicated, action.scope, text);
+      if (!duplicate || duplicate.score < semanticDedupMinScore) {
+        batchDeduplicated.push(action);
+        continue;
+      }
+
+      const existing = batchDeduplicated[duplicate.index]!;
+      if (shouldPreferBatchCandidate(action, existing)) {
+        batchDeduplicated[duplicate.index] = {
+          ...action,
+          reason: appendReason(action.reason, `batch_semantic_dedup_replaced:${duplicate.score.toFixed(2)}`),
+        };
+        continue;
+      }
+
+      batchDeduplicated.push({
+        ...action,
+        event: "NOOP",
+        id: action.id ?? existing.id,
+        key: action.key ?? existing.key,
+        eventKey: action.eventKey ?? existing.eventKey,
+        reason: appendReason(action.reason, `batch_semantic_duplicate:${duplicate.score.toFixed(2)}`),
+      });
+    }
+
+    return batchDeduplicated;
   }
 
   private async findSemanticDuplicate(
@@ -817,6 +851,36 @@ export class MemoryFormationService {
       return;
     }
   }
+}
+
+function findBatchLocalDuplicate(actions: FormationAction[], scope: MemoryScope, text: string) {
+  let bestMatch: { index: number; score: number } | null = null;
+
+  for (const [index, action] of actions.entries()) {
+    if (action.scope !== scope || (action.event !== "ADD" && action.event !== "UPDATE") || !action.text?.trim()) {
+      continue;
+    }
+
+    const score = computeSemanticDuplicateScore(text, action.text);
+    if (!bestMatch || score > bestMatch.score) {
+      bestMatch = { index, score };
+    }
+  }
+
+  return bestMatch;
+}
+
+function shouldPreferBatchCandidate(next: FormationAction, current: FormationAction) {
+  const nextPriority = scoreBatchCandidate(next);
+  const currentPriority = scoreBatchCandidate(current);
+
+  return nextPriority > currentPriority;
+}
+
+function scoreBatchCandidate(action: FormationAction) {
+  return (action.id ? 1000 : 0)
+    + (action.event === "UPDATE" ? 100 : 0)
+    + Math.min(action.text?.trim().length ?? 0, 99);
 }
 
 function pushServerCandidates(

@@ -6,6 +6,7 @@ export function buildFeatureFlags(env: AppEnv): FeatureFlags {
   return {
     webSearch: env.FEATURE_WEB_SEARCH,
     autoInterject: env.FEATURE_AUTOINTERJECT,
+    emotionalAdviceAnchorsEnabled: env.FEATURE_EMOTIONAL_ADVICE_ANCHORS_ENABLED,
     userProfiles: env.FEATURE_USER_PROFILES,
     contextActions: env.FEATURE_CONTEXT_ACTIONS,
     roast: env.FEATURE_ROAST,

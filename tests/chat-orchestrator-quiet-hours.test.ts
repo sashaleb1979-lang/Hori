@@ -41,6 +41,7 @@ const env = {
 const featureFlags: FeatureFlags = {
   webSearch: false,
   autoInterject: false,
+  emotionalAdviceAnchorsEnabled: true,
   userProfiles: false,
   contextActions: false,
   roast: true,
@@ -335,6 +336,56 @@ describe("chat orchestrator quiet hours", () => {
         ...runtimeSettings,
         memoryHydeEnabled: false
       }
+    });
+
+    expect(contextService.buildContext).toHaveBeenCalledWith(expect.objectContaining({
+      queryEmbedding: [1, 1, 1]
+    }));
+    expect(deps.llmClient.chat).toHaveBeenCalledTimes(2);
+    expect(embeddingAdapter.embedOne).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips HyDE expansion for short advice-like messages", async () => {
+    const contextService = { buildContext: vi.fn(async () => emptyContext) };
+    const chat = vi.fn(async (options: { format?: "json" }) => {
+      if (options.format === "json") {
+        return {
+          message: {
+            role: "assistant" as const,
+            content: JSON.stringify({ intent: "chat", confidence: 0.95, reason: "test classifier" })
+          },
+          usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
+        };
+      }
+
+      return {
+        message: { role: "assistant" as const, content: "нормальный ответ" },
+        usage: { promptTokens: 20, completionTokens: 7, totalTokens: 27 }
+      };
+    });
+    const embeddingAdapter = {
+      embedOne: vi.fn(async () => [1, 1, 1])
+    };
+    const { orchestrator, deps } = createOrchestrator({
+      contextService,
+      llmClient: { chat, embed: vi.fn() } as never,
+      embeddingAdapter: embeddingAdapter as never,
+    });
+
+    await orchestrator.handleMessage(baseMessage({
+      content: "что делать?",
+      createdAt: new Date("2026-04-19T10:22:00.000Z")
+    }), {
+      guildSettings,
+      featureFlags,
+      channelPolicy: {
+        allowBotReplies: true,
+        allowInterjections: false,
+        isMuted: false,
+        topicInterestTags: [],
+        responseLengthOverride: null
+      },
+      runtimeSettings
     });
 
     expect(contextService.buildContext).toHaveBeenCalledWith(expect.objectContaining({

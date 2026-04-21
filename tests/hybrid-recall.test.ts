@@ -147,6 +147,9 @@ describe("hybrid recall", () => {
     expect(result[0].reason).toBe("vector+lexical");
     expect(result.map((entry) => entry.scope)).toContain("user");
     expect(result.map((entry) => entry.scope)).toContain("channel");
+    expect(rawQueries.some((query) => query.sql.includes('FROM "ServerMemory"') && query.sql.includes('"updatedAt"'))).toBe(true);
+    expect(rawQueries.some((query) => query.sql.includes('FROM "ChannelMemoryNote"') && query.sql.includes('"updatedAt"'))).toBe(true);
+    expect(rawQueries.some((query) => query.sql.includes('FROM "EventMemory"') && query.sql.includes('"updatedAt"'))).toBe(true);
     expect(rawQueries.some((query) => query.sql.includes("vector_dims(embedding) = $3"))).toBe(true);
     expect(rawQueries.some((query) => query.sql.includes("e.dimensions = $4"))).toBe(true);
     expect(rawQueries.some((query) => query.params.includes(3))).toBe(true);

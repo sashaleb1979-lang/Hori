@@ -27,6 +27,7 @@ const defaultBehaviorFeatureFlags: FeatureFlags = {
   analogyBanEnabled: true,
   slangLayerEnabled: true,
   selfInterjectionConstraintsEnabled: true,
+  emotionalAdviceAnchorsEnabled: true,
   memoryAlbumEnabled: true,
   interactionRequestsEnabled: true,
   linkUnderstandingEnabled: true,

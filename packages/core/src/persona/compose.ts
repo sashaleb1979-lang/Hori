@@ -269,7 +269,17 @@ function detectConstraintFollowUp(input: ComposeBehaviorPromptInput, messageKind
 }
 
 function detectEmotionalAdviceContext(input: ComposeBehaviorPromptInput, messageKind: MessageKind) {
-  if (messageKind === "meta_feedback" || messageKind === "low_signal_noise" || messageKind === "meme_bait") {
+  if (input.featureFlags.emotionalAdviceAnchorsEnabled === false) {
+    return false;
+  }
+
+  if (
+    messageKind === "meta_feedback"
+    || messageKind === "low_signal_noise"
+    || messageKind === "meme_bait"
+    || messageKind === "provocation"
+    || messageKind === "repeated_question"
+  ) {
     return false;
   }
 
@@ -279,9 +289,11 @@ function detectEmotionalAdviceContext(input: ComposeBehaviorPromptInput, message
   }
 
   const emotionalPattern = /(мне\s+(?:плохо|тяжело|страшно|тревожно|стыдно|херово)|я\s+(?:устал|устала|выгорел|выгорела|не\s+вывожу|запутался|запуталась)|игнорят|накручиваю|паник|обидно|больно)/iu;
-  const advicePattern = /(что\s+делать|как\s+ответить|как\s+лучше|стоит\s+ли|что\s+мне\s+написать|как\s+поступить|как\s+сказать|что\s+ему\s+ответить)/iu;
+  const interpersonalAdvicePattern = /(что\s+делать|как\s+ответить|как\s+лучше\s+(?:ответить|сказать|написать|поступить)|стоит\s+ли\s+(?:писать|отвечать|говорить)|что\s+мне\s+(?:ему\s+|ей\s+)?написать|как\s+поступить|как\s+сказать|что\s+(?:ему|ей)\s+ответить|писать\s+ли|отвечать\s+ли)/iu;
+  const interpersonalContextPattern = /(игнор|переписк|отношени|ему|ей|с\s+ним|с\s+ней|человеку|парню|девушке|драма|ссор|общени)/iu;
 
-  return emotionalPattern.test(normalized) || advicePattern.test(normalized);
+  return emotionalPattern.test(normalized)
+    || (interpersonalAdvicePattern.test(normalized) && interpersonalContextPattern.test(normalized));
 }
 
 function resolveRequestedDepth(options: {

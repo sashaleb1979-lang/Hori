@@ -156,6 +156,7 @@ export interface FeatureFlags {
   naturalMessageSplittingEnabled: boolean;
   selectiveEngagementEnabled: boolean;
   selfReflectionLessonsEnabled: boolean;
+  emotionalAdviceAnchorsEnabled: boolean;
 }
 
 export interface PersonaSettings {

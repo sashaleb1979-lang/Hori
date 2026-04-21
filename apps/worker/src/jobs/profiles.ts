@@ -92,12 +92,22 @@ export function createProfileJob(runtime: WorkerRuntime) {
     if (latestChannelId && messages.length) {
       try {
         const memoryModel = runtime.modelRouter.pickModelForSlot("memory", runtimeSettings.modelRouting);
+        const embedding = runtime.modelRouter.pickEmbeddingModel({
+          dimensions: runtimeSettings.openaiEmbedDimensions
+        });
         const formationEnv = {
           ...runtime.env,
           OLLAMA_FAST_MODEL: memoryModel,
           OLLAMA_SMART_MODEL: memoryModel
         };
-        const formationService = new MemoryFormationService(runtime.prisma, runtime.retrievalService, runtime.llmClient, formationEnv, runtime.modelRouter.pickEmbedModel());
+        const formationService = new MemoryFormationService(
+          runtime.prisma,
+          runtime.retrievalService,
+          runtime.llmClient,
+          formationEnv,
+          embedding.model,
+          embedding.dimensions
+        );
         const priorSummaries = await runtime.summaryService.getRecentSummaries(job.data.guildId, latestChannelId, 2);
 
         await formationService.runFormation({

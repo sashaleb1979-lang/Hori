@@ -95,7 +95,48 @@ export function getLiveFewShotExamples(contour?: "B" | "C"): FewShotExample[] {
   return indices.map((index) => fewShotExamplesAll[index]);
 }
 
+function resolveFewShotBlockMetadata(options: {
+  includeConcreteReplyAnchors?: boolean;
+  includeMetaFeedbackAnchors?: boolean;
+  includeEmotionalAdviceAnchors?: boolean;
+  skipBaseAnchors?: boolean;
+}) {
+  if (!options.skipBaseAnchors) {
+    return {
+      name: "FEW-SHOT TONE ANCHORS",
+      header: "[FEW-SHOT TONE ANCHORS]"
+    };
+  }
+
+  if (options.includeEmotionalAdviceAnchors && !options.includeConcreteReplyAnchors && !options.includeMetaFeedbackAnchors) {
+    return {
+      name: "EMOTIONAL ADVICE ANCHORS",
+      header: "[EMOTIONAL ADVICE ANCHORS]"
+    };
+  }
+
+  if (options.includeConcreteReplyAnchors && !options.includeMetaFeedbackAnchors) {
+    return {
+      name: "CONCRETE REPLY ANCHORS",
+      header: "[CONCRETE REPLY ANCHORS]"
+    };
+  }
+
+  if (options.includeMetaFeedbackAnchors) {
+    return {
+      name: "META-FEEDBACK ANCHORS",
+      header: "[META-FEEDBACK ANCHORS]"
+    };
+  }
+
+  return {
+    name: "ADDITIONAL TONE ANCHORS",
+    header: "[ADDITIONAL TONE ANCHORS]"
+  };
+}
+
 export function buildFewShotBlock(options: { includeConcreteReplyAnchors?: boolean; includeMetaFeedbackAnchors?: boolean; includeEmotionalAdviceAnchors?: boolean; contour?: "B" | "C"; skipBaseAnchors?: boolean } = {}): BlockResult {
+  const metadata = resolveFewShotBlockMetadata(options);
   const examples = [
     ...(options.skipBaseAnchors ? [] : getLiveFewShotExamples(options.contour)),
     ...(options.includeConcreteReplyAnchors ? concreteReplyAnchors : []),
@@ -104,13 +145,13 @@ export function buildFewShotBlock(options: { includeConcreteReplyAnchors?: boole
   ];
 
   if (!examples.length) {
-    return { name: "FEW-SHOT TONE ANCHORS", content: "" };
+    return { name: metadata.name, content: "" };
   }
 
   const lines = options.skipBaseAnchors
-    ? ["[ADDITIONAL TONE ANCHORS]", ""]
+    ? [metadata.header, ""]
     : [
-      "[FEW-SHOT TONE ANCHORS]",
+      metadata.header,
       "Эти примеры задают ритм. Не копируй их буквально.",
       "Без психотерапии и клоунады. Лучше недосказать.",
       ""
@@ -125,7 +166,7 @@ export function buildFewShotBlock(options: { includeConcreteReplyAnchors?: boole
   lines.push("Бери из них только ритм.");
 
   return {
-    name: "FEW-SHOT TONE ANCHORS",
+    name: metadata.name,
     content: lines.join("\n")
   };
 }

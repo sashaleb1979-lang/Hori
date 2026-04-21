@@ -471,7 +471,7 @@ export class RetrievalService {
     const [server, user, channel, events, messages] = await Promise.all([
       this.prisma.$queryRawUnsafe<Array<Omit<HybridRow, "rank" | "reason">>>(
         `
-          SELECT 'server' AS scope, id, key, value, type, "createdAt", NULL::TEXT AS "userId", embedding <=> $2::vector AS "sortScore"
+          SELECT 'server' AS scope, id, key, value, type, "createdAt", "updatedAt", NULL::TEXT AS "userId", embedding <=> $2::vector AS "sortScore"
           FROM "ServerMemory"
           WHERE "guildId" = $1
             AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
@@ -506,7 +506,7 @@ export class RetrievalService {
       ),
       this.prisma.$queryRawUnsafe<Array<Omit<HybridRow, "rank" | "reason">>>(
         `
-          SELECT 'channel' AS scope, id, key, value, type, "createdAt", NULL::TEXT AS "userId", COALESCE(salience, 0.5) AS salience, embedding <=> $3::vector AS "sortScore"
+          SELECT 'channel' AS scope, id, key, value, type, "createdAt", "updatedAt", NULL::TEXT AS "userId", COALESCE(salience, 0.5) AS salience, embedding <=> $3::vector AS "sortScore"
           FROM "ChannelMemoryNote"
           WHERE "guildId" = $1
             AND "channelId" = $2
@@ -525,7 +525,7 @@ export class RetrievalService {
       ),
       this.prisma.$queryRawUnsafe<Array<Omit<HybridRow, "rank" | "reason">>>(
         `
-          SELECT 'event' AS scope, id, key, value, type, "createdAt", NULL::TEXT AS "userId", COALESCE(salience, 0.5) AS salience, embedding <=> $3::vector AS "sortScore"
+          SELECT 'event' AS scope, id, key, value, type, "createdAt", "updatedAt", NULL::TEXT AS "userId", COALESCE(salience, 0.5) AS salience, embedding <=> $3::vector AS "sortScore"
           FROM "EventMemory"
           WHERE "guildId" = $1
             AND active = TRUE
