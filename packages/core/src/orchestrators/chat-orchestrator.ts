@@ -3,7 +3,7 @@ import type { AppLogger, AppPrismaClient, BotIntent, BotReplyPayload, BotTrace, 
 import { asErrorMessage, botLatencyHistogram, botRepliesCounter, buildMemoryKey, clamp, llmCachedTokensCounter, llmCostCounter, llmTokensCounter, normalizeWhitespace } from "@hori/shared";
 
 import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, calculateCostUsd, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet, getModelProfile } from "@hori/llm";
-import type { LlmChatResponse, LlmClient, ModelRoutingSlot } from "@hori/llm";
+import type { LlmChatResponse, LlmClient, LlmRequestMetadata, ModelRoutingSlot } from "@hori/llm";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
 import { ContextService, ReflectionService, RelationshipService, RetrievalService } from "@hori/memory";
 import { BraveSearchClient, buildSourceDigest, extractLinksFromMessage, fetchWebPage } from "@hori/search";
@@ -140,9 +140,9 @@ export class ChatOrchestrator {
       );
     }
 
-    const intent = initialIntent.confidence < 0.7 ? await this.classifyWithLlm(initialIntent.cleanedContent, initialIntent, runtimeSettings, llmCalls) : initialIntent;
+    const intent = initialIntent.confidence < 0.7 ? await this.classifyWithLlm(initialIntent.cleanedContent, initialIntent, runtimeSettings, llmCalls, message) : initialIntent;
     const queryEmbedding = intent.intent !== "help"
-      ? await this.buildContextQueryEmbedding(intent.cleanedContent, intent.intent, runtimeSettings, llmCalls)
+      ? await this.buildContextQueryEmbedding(intent.cleanedContent, intent.intent, runtimeSettings, llmCalls, message)
       : undefined;
     const contextBundle = await this.deps.contextService.buildContext({
       guildId: message.guildId,
@@ -357,10 +357,10 @@ export class ChatOrchestrator {
           reply = HELP_TEXT;
           break;
         case "analytics":
-          reply = await this.handleAnalytics(message.guildId, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens, llmCalls);
+          reply = await this.handleAnalytics(message, message.guildId, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens, llmCalls);
           break;
         case "summary":
-          reply = await this.handleSummary(intent.cleanedContent, systemPrompt, promptContextText, runtimeSettings, behavior.limits.maxTokens, llmCalls);
+          reply = await this.handleSummary(message, intent.cleanedContent, systemPrompt, promptContextText, runtimeSettings, behavior.limits.maxTokens, llmCalls);
           break;
         case "search": {
           const result = runtimeConfig.featureFlags.webSearch
@@ -391,7 +391,7 @@ export class ChatOrchestrator {
         default:
           reply = contour.contour === "A"
             ? pickContourAResponse()
-            : await this.handleChat(intent.cleanedContent, systemPrompt, promptContextText, runtimeSettings, behavior.limits.maxTokens, contour.contour, llmCalls, staticPrefix);
+            : await this.handleChat(message, intent.cleanedContent, systemPrompt, promptContextText, runtimeSettings, behavior.limits.maxTokens, contour.contour, llmCalls, staticPrefix);
           break;
       }
     } catch (error) {
@@ -584,7 +584,8 @@ export class ChatOrchestrator {
     cleanedContent: string,
     fallback: ReturnType<IntentRouter["route"]>,
     runtimeSettings: EffectiveRuntimeSettings,
-    llmCalls?: LlmCallTrace[]
+    llmCalls?: LlmCallTrace[],
+    message?: MessageEnvelope
   ) {
     try {
       const llm = this.getLlmSettingsForSlot("classifier", "chat", runtimeSettings, 96, { temperature: 0 });
@@ -598,7 +599,8 @@ export class ChatOrchestrator {
         maxTokens: llm.maxTokens,
         keepAlive: llm.keepAlive,
         numCtx: llm.numCtx,
-        numBatch: llm.numBatch
+        numBatch: llm.numBatch,
+        metadata: message ? this.createLlmMetadata(message, "chat", "classifier", "intent_classifier", "simple") : undefined
       });
       this.recordLlmCall(llmCalls, "intent_classifier", llm.model, messages, response);
 
@@ -631,6 +633,7 @@ export class ChatOrchestrator {
   }
 
   private async handleChat(
+    message: MessageEnvelope,
     content: string,
     systemPrompt: string,
     contextText: string,
@@ -668,7 +671,8 @@ export class ChatOrchestrator {
       maxTokens: llm.maxTokens,
       keepAlive: llm.keepAlive,
       numCtx: llm.numCtx,
-      numBatch: llm.numBatch
+      numBatch: llm.numBatch,
+      metadata: this.createLlmMetadata(message, "chat", "chat", "chat", contour === "C" ? "complex" : undefined)
     });
     this.recordLlmCall(llmCalls, "chat", llm.model, messages, response);
 
@@ -676,6 +680,7 @@ export class ChatOrchestrator {
   }
 
   private async handleSummary(
+    message: MessageEnvelope,
     content: string,
     systemPrompt: string,
     contextText: string,
@@ -695,7 +700,8 @@ export class ChatOrchestrator {
       maxTokens: llm.maxTokens,
       keepAlive: llm.keepAlive,
       numCtx: llm.numCtx,
-      numBatch: llm.numBatch
+      numBatch: llm.numBatch,
+      metadata: this.createLlmMetadata(message, "summary", "summary", "summary", "complex")
     });
     this.recordLlmCall(llmCalls, "summary", llm.model, messages, response);
 
@@ -703,6 +709,7 @@ export class ChatOrchestrator {
   }
 
   private async handleAnalytics(
+    message: MessageEnvelope,
     guildId: string,
     request: string,
     systemPrompt: string,
@@ -724,7 +731,8 @@ export class ChatOrchestrator {
       maxTokens: llm.maxTokens,
       keepAlive: llm.keepAlive,
       numCtx: llm.numCtx,
-      numBatch: llm.numBatch
+      numBatch: llm.numBatch,
+      metadata: this.createLlmMetadata(message, "analytics", "analytics", "analytics", "complex")
     });
     this.recordLlmCall(llmCalls, "analytics", llm.model, messages, response);
 
@@ -796,7 +804,8 @@ export class ChatOrchestrator {
       maxTokens: llm.maxTokens,
       keepAlive: llm.keepAlive,
       numCtx: llm.numCtx,
-      numBatch: llm.numBatch
+      numBatch: llm.numBatch,
+      metadata: this.createLlmMetadata(message, "search", "search", "search_tool_loop", "complex")
     });
 
     if (run.toolCalls.length === 0) {
@@ -841,7 +850,8 @@ export class ChatOrchestrator {
       maxTokens: llm.maxTokens,
       keepAlive: llm.keepAlive,
       numCtx: llm.numCtx,
-      numBatch: llm.numBatch
+      numBatch: llm.numBatch,
+      metadata: this.createLlmMetadata(message, "search", "search", "search_synthesis", "complex")
     });
     this.recordEstimatedLlmCall(llmCalls, "search_tool_loop", llm.model, toolMessages, run.text);
     this.recordLlmCall(llmCalls, "search_synthesis", llm.model, finalPrompt, response);
@@ -901,7 +911,8 @@ export class ChatOrchestrator {
         maxTokens: llm.maxTokens,
         keepAlive: runtimeSettings.ollamaKeepAlive,
         numCtx: runtimeSettings.ollamaNumCtx,
-        numBatch: runtimeSettings.ollamaNumBatch
+        numBatch: runtimeSettings.ollamaNumBatch,
+        metadata: this.createLlmMetadata(message, "search", "search", `search_fallback:${reason}`, "complex")
       });
       this.recordLlmCall(llmCalls, `search_fallback:${reason}`, llm.model, finalPrompt, response);
 
@@ -1001,7 +1012,8 @@ export class ChatOrchestrator {
       maxTokens: llm.maxTokens,
       keepAlive: llm.keepAlive,
       numCtx: llm.numCtx,
-      numBatch: llm.numBatch
+      numBatch: llm.numBatch,
+      metadata: this.createLlmMetadata(message, "rewrite", "rewrite", "rewrite", "complex")
     });
     this.recordLlmCall(llmCalls, "rewrite", llm.model, prompt, response);
 
@@ -1101,7 +1113,8 @@ export class ChatOrchestrator {
     cleanedContent: string,
     intent: BotIntent,
     runtimeSettings: EffectiveRuntimeSettings,
-    llmCalls?: LlmCallTrace[]
+    llmCalls?: LlmCallTrace[],
+    message?: MessageEnvelope
   ) {
     const primaryEmbedding = await this.safeEmbed(cleanedContent, runtimeSettings);
 
@@ -1109,7 +1122,7 @@ export class ChatOrchestrator {
       return primaryEmbedding;
     }
 
-    const hydeText = await this.buildMemoryHydeText(cleanedContent, runtimeSettings, llmCalls);
+    const hydeText = await this.buildMemoryHydeText(cleanedContent, runtimeSettings, llmCalls, message, intent);
     if (!hydeText) {
       return primaryEmbedding;
     }
@@ -1121,7 +1134,9 @@ export class ChatOrchestrator {
   private async buildMemoryHydeText(
     cleanedContent: string,
     runtimeSettings: EffectiveRuntimeSettings,
-    llmCalls?: LlmCallTrace[]
+    llmCalls?: LlmCallTrace[],
+    message?: MessageEnvelope,
+    intent: BotIntent = "chat"
   ) {
     const normalized = normalizeWhitespace(cleanedContent);
     const cacheKey = `${runtimeSettings.modelRouting.slots.classifier}:${normalized.toLowerCase()}`;
@@ -1143,7 +1158,8 @@ export class ChatOrchestrator {
         maxTokens: llm.maxTokens,
         keepAlive: llm.keepAlive,
         numCtx: llm.numCtx,
-        numBatch: llm.numBatch
+        numBatch: llm.numBatch,
+        metadata: message ? this.createLlmMetadata(message, intent, "classifier", "memory_hyde", "simple") : undefined
       });
       this.recordLlmCall(llmCalls, "memory_hyde", llm.model, messages, response);
 
@@ -1433,12 +1449,17 @@ export class ChatOrchestrator {
 
     target.push({
       purpose,
-      model,
+      model: response.routing?.model ?? model,
+      provider: response.routing?.provider,
       promptTokens,
       completionTokens,
       totalTokens: response.usage?.totalTokens ?? promptTokens + completionTokens,
       source: response.usage?.promptTokens !== undefined || response.usage?.completionTokens !== undefined ? "reported" : "estimated",
       durationMs: response.usage?.totalDurationMs,
+      finishReason: response.routing?.finishReason,
+      fallbackDepth: response.routing?.fallbackDepth,
+      routedFrom: response.routing?.routedFrom,
+      requestId: response.routing?.requestId,
       ...(response.usage?.cachedTokens ? { cachedTokens: response.usage.cachedTokens } : {})
     });
   }
@@ -1465,6 +1486,23 @@ export class ChatOrchestrator {
       totalTokens: promptTokens + completionTokens,
       source: "estimated"
     });
+  }
+
+  private createLlmMetadata(
+    message: MessageEnvelope,
+    intent: BotIntent,
+    slot: ModelRoutingSlot,
+    purpose: string,
+    complexityHint?: "simple" | "complex"
+  ): LlmRequestMetadata {
+    return {
+      requestId: `${message.messageId}:${purpose}`,
+      userKey: anonymizeUserKey(message.userId),
+      intent,
+      slot,
+      purpose,
+      complexityHint
+    };
   }
 
   private async recordSelfReflectionLesson(
@@ -1568,7 +1606,9 @@ export class ChatOrchestrator {
           eventType: trace.responded ? "reply" : "ignore",
           intent: trace.intent,
           routeReason: trace.routeReason,
-          modelUsed: trace.modelKind,
+          modelUsed: trace.llmCalls?.at(-1)?.provider
+            ? `${trace.llmCalls.at(-1)?.provider}:${trace.llmCalls.at(-1)?.model}`
+            : trace.llmCalls?.at(-1)?.model ?? trace.modelKind,
           usedSearch: trace.usedSearch,
           toolCalls: trace.toolNames,
           contextMessages: trace.contextMessages,
@@ -1673,4 +1713,8 @@ function mergeEmbeddings(primary?: number[], secondary?: number[]) {
   }
 
   return primary?.length ? primary : secondary;
+}
+
+function anonymizeUserKey(userId: string) {
+  return `u:${userId.slice(-6)}`;
 }

@@ -71,6 +71,25 @@ describe("ModelRouter", () => {
     expect(router.pickModel("summary", routing)).toBe("gpt-5-mini");
   });
 
+  it("uses router fallback model and OpenAI embeddings in router mode", () => {
+    const env = loadEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      AI_PROVIDER: "router",
+      OPENAI_API_KEY: "openai-key",
+      OPENAI_MODEL: "gpt-5-nano"
+    });
+    const router = new ModelRouter(env);
+    const routing = resolveModelRouting(env);
+
+    expect(routing.provider).toBe("router");
+    expect(router.pickModel("chat", routing)).toBe("gpt-5-nano");
+    expect(router.pickEmbeddingModel()).toEqual({
+      model: "text-embedding-3-small",
+      dimensions: 768
+    });
+  });
+
   it("lets slot overrides beat the active preset", () => {
     const env = loadEnv({
       DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",

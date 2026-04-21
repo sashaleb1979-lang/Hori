@@ -373,11 +373,16 @@ export interface ActiveMemoryContext {
 export interface LlmCallTrace {
   purpose: string;
   model: string;
+  provider?: string;
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
   source: "reported" | "estimated";
   durationMs?: number;
+  finishReason?: string;
+  fallbackDepth?: number;
+  routedFrom?: string[];
+  requestId?: string;
   /** Tokens served from OpenAI prompt cache. Present only when > 0. */
   cachedTokens?: number;
 }

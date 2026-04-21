@@ -1,5 +1,6 @@
 import { buildFeatureFlags, defaultPersonaSettings, POWER_PROFILE_PRESETS, type AppEnv, type PowerProfileName } from "@hori/config";
 import {
+  createEmptyAiRouterState,
   defaultModelRoutingPresetForEnv,
   isModelRoutingModelId,
   isModelRoutingPresetName,
@@ -10,6 +11,7 @@ import {
   SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS,
   sanitizeOverrides,
   serializeModelRouting,
+  type AiRouterState,
   type ModelRoutingModelId,
   type ModelRoutingPresetName,
   type ModelRoutingSlot,
@@ -52,6 +54,7 @@ export const FEATURE_KEY_MAP = {
 export const POWER_PROFILE_SETTING_KEY = "power.profile";
 export const OPENAI_EMBED_DIMENSIONS_SETTING_KEY = "llm.openai_embed_dimensions";
 export const MEMORY_HYDE_SETTING_KEY = "memory.hyde_enabled";
+export const AI_ROUTER_STATE_SETTING_KEY = "llm.ai_router_state";
 
 const RUNTIME_OVERRIDE_DEFINITIONS: Record<string, { field: keyof Omit<EffectiveRuntimeSettings, "powerProfile" | "modelRouting">; parse: (value: string) => string | number | boolean | undefined }> = {
   "runtime.llm.max_context_messages": { field: "llmMaxContextMessages", parse: parsePositiveInt },
@@ -357,6 +360,40 @@ export class RuntimeConfigService {
     return this.getModelRoutingStatus();
   }
 
+  async getAiRouterState(): Promise<AiRouterState> {
+    const row = await this.getRuntimeSettingRow(AI_ROUTER_STATE_SETTING_KEY);
+    if (!row?.value?.trim()) {
+      return createEmptyAiRouterState();
+    }
+
+    try {
+      const parsed = JSON.parse(row.value) as AiRouterState;
+      if (!parsed || typeof parsed !== "object") {
+        return createEmptyAiRouterState();
+      }
+
+      return {
+        providers: parsed.providers && typeof parsed.providers === "object" ? parsed.providers : {},
+        recentRoutes: Array.isArray(parsed.recentRoutes) ? parsed.recentRoutes : [],
+        updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString()
+      };
+    } catch {
+      return createEmptyAiRouterState();
+    }
+  }
+
+  async setAiRouterState(state: AiRouterState, updatedBy?: string) {
+    await this.writeRuntimeSetting(AI_ROUTER_STATE_SETTING_KEY, JSON.stringify(state), updatedBy, false);
+    return state;
+  }
+
+  async updateAiRouterState(updater: (current: AiRouterState) => AiRouterState | Promise<AiRouterState>, updatedBy?: string) {
+    const current = await this.getAiRouterState();
+    const next = await updater(current);
+    await this.writeRuntimeSetting(AI_ROUTER_STATE_SETTING_KEY, JSON.stringify(next), updatedBy, false);
+    return next;
+  }
+
   async getGuildSettings(guildId: string): Promise<PersonaSettings> {
     const guild = await this.prisma.guild.findUnique({
       where: { id: guildId }
@@ -505,7 +542,7 @@ export class RuntimeConfigService {
     return rows[0] ?? null;
   }
 
-  private async writeRuntimeSetting(key: string, value: string, updatedBy?: string) {
+  private async writeRuntimeSetting(key: string, value: string, updatedBy?: string, invalidate = true) {
     await this.prisma.runtimeSetting.upsert({
       where: { key },
       update: {
@@ -520,7 +557,9 @@ export class RuntimeConfigService {
       }
     });
 
-    this.invalidate();
+    if (invalidate) {
+      this.invalidate();
+    }
   }
 
   private async deleteRuntimeSetting(key: string) {

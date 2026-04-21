@@ -112,7 +112,7 @@ const coreEnvSchema = z.object({
   DATABASE_URL: urlish,
   REDIS_URL: urlish,
 
-  LLM_PROVIDER: z.enum(["ollama", "openai"]).default("ollama"),
+  LLM_PROVIDER: z.enum(["ollama", "openai", "router"]).default("ollama"),
 
   OLLAMA_BASE_URL: urlish.optional(),
   OLLAMA_FAST_MODEL: z.string().default("qwen3.5:9b"),
@@ -125,10 +125,37 @@ const coreEnvSchema = z.object({
   OLLAMA_LOG_MAX_CHARS: intish.default(12000),
 
   OPENAI_API_KEY: z.string().optional(),
+  OPENAI_MODEL: z.string().default("gpt-5-nano"),
   OPENAI_CHAT_MODEL: z.string().default("gpt-5.4-nano"),
   OPENAI_SMART_MODEL: z.string().default("gpt-5.4-nano"),
   OPENAI_EMBED_MODEL: z.string().default("text-embedding-3-small"),
   OPENAI_EMBED_DIMENSIONS: intish.default(768),
+
+  GOOGLE_API_KEY: z.string().optional(),
+  GEMINI_FLASH_MODEL: z.string().default("gemini-2.5-flash"),
+  GEMINI_PRO_MODEL: z.string().default("gemini-2.5-pro"),
+
+  CF_ACCOUNT_ID: z.string().optional(),
+  CF_API_TOKEN: z.string().optional(),
+  CF_MODEL: z.string().default("@cf/zai-org/glm-4.7-flash"),
+
+  GITHUB_TOKEN: z.string().optional(),
+  GITHUB_MODELS_URL: urlish.default("https://models.github.ai/inference/chat/completions"),
+  GITHUB_MODEL_PRIMARY: z.string().default("openai/gpt-5-mini"),
+  GITHUB_MODEL_SECONDARY: z.string().default("openai/gpt-5-chat"),
+  GITHUB_MODEL_TERTIARY: z.string().default("openai/gpt-5-nano"),
+
+  AI_ROUTER_ENABLE_GEMINI: boolish.default(true),
+  AI_ROUTER_ENABLE_CLOUDFLARE: boolish.default(true),
+  AI_ROUTER_ENABLE_GITHUB: boolish.default(true),
+  AI_ROUTER_ENABLE_OPENAI: boolish.default(true),
+  AI_ROUTER_LOG_VERBOSE: boolish.default(false),
+  AI_ROUTER_USE_GEMINI_PRO_FOR_COMPLEX: boolish.default(true),
+  AI_ROUTER_GEMINI_FLASH_DAILY_LIMIT: intish.default(250),
+  AI_ROUTER_GEMINI_PRO_DAILY_LIMIT: intish.default(100),
+  AI_ROUTER_CLOUDFLARE_COOLDOWN_MS: intish.default(900000),
+  AI_ROUTER_GITHUB_COOLDOWN_MS: intish.default(1800000),
+  AI_ROUTER_OPENAI_COOLDOWN_MS: intish.default(300000),
 
   BRAVE_SEARCH_API_KEY: z.string().optional(),
 
@@ -359,6 +386,19 @@ const legacyAdvancedSchema = z
 export interface AppEnv extends z.infer<typeof coreEnvSchema>, RuntimeTuning {}
 export type AppRole = "bot" | "api" | "worker";
 
+export const AI_ROUTER_PROVIDER_NAMES = ["gemini", "cloudflare", "github", "openai"] as const;
+export type AiRouterProviderName = (typeof AI_ROUTER_PROVIDER_NAMES)[number];
+
+export interface AiRouterProviderEnvState {
+  name: AiRouterProviderName;
+  enabledByFlag: boolean;
+  configured: boolean;
+  enabled: boolean;
+  missing: string[];
+}
+
+export type AiRouterEnvState = Record<AiRouterProviderName, AiRouterProviderEnvState>;
+
 const envAliasMap = {
   BOT_TOKEN: "DISCORD_TOKEN",
   BOT_ID: "DISCORD_CLIENT_ID",
@@ -383,10 +423,21 @@ const envAliasMap = {
   HORI_CONFIG_JSON: "CFG",
   AI_PROVIDER: "LLM_PROVIDER",
   OAI_KEY: "OPENAI_API_KEY",
+  OAI_MODEL: "OPENAI_MODEL",
   OAI_CHAT: "OPENAI_CHAT_MODEL",
   OAI_SMART: "OPENAI_SMART_MODEL",
   OAI_EMBED: "OPENAI_EMBED_MODEL",
-  OAI_EMBED_DIMS: "OPENAI_EMBED_DIMENSIONS"
+  OAI_EMBED_DIMS: "OPENAI_EMBED_DIMENSIONS",
+  GOOGLE_KEY: "GOOGLE_API_KEY",
+  GEMINI_FLASH: "GEMINI_FLASH_MODEL",
+  GEMINI_PRO: "GEMINI_PRO_MODEL",
+  CF_ACCOUNT: "CF_ACCOUNT_ID",
+  CF_TOKEN: "CF_API_TOKEN",
+  GH_TOKEN: "GITHUB_TOKEN",
+  GH_MODELS_URL: "GITHUB_MODELS_URL",
+  GH_MODEL_PRIMARY: "GITHUB_MODEL_PRIMARY",
+  GH_MODEL_SECONDARY: "GITHUB_MODEL_SECONDARY",
+  GH_MODEL_TERTIARY: "GITHUB_MODEL_TERTIARY"
 } as const satisfies Record<string, string>;
 
 const canonicalEnvHints = {
@@ -434,11 +485,57 @@ function mapCoreAliases(raw: NodeJS.ProcessEnv) {
     CFG: raw.CFG ?? raw.HORI_CFG ?? raw.HORI_CONFIG_JSON,
     LLM_PROVIDER: raw.AI_PROVIDER ?? raw.LLM_PROVIDER,
     OPENAI_API_KEY: raw.OAI_KEY ?? raw.OPENAI_API_KEY,
-    OPENAI_CHAT_MODEL: raw.OAI_CHAT ?? raw.OPENAI_CHAT_MODEL,
-    OPENAI_SMART_MODEL: raw.OAI_SMART ?? raw.OPENAI_SMART_MODEL,
+    OPENAI_MODEL: raw.OAI_MODEL ?? raw.OPENAI_MODEL ?? raw.OAI_CHAT ?? raw.OPENAI_CHAT_MODEL,
+    OPENAI_CHAT_MODEL: raw.OAI_CHAT ?? raw.OPENAI_CHAT_MODEL ?? raw.OAI_MODEL ?? raw.OPENAI_MODEL,
+    OPENAI_SMART_MODEL: raw.OAI_SMART ?? raw.OPENAI_SMART_MODEL ?? raw.OAI_MODEL ?? raw.OPENAI_MODEL,
     OPENAI_EMBED_MODEL: raw.OAI_EMBED ?? raw.OPENAI_EMBED_MODEL,
-    OPENAI_EMBED_DIMENSIONS: raw.OAI_EMBED_DIMS ?? raw.OPENAI_EMBED_DIMENSIONS
+    OPENAI_EMBED_DIMENSIONS: raw.OAI_EMBED_DIMS ?? raw.OPENAI_EMBED_DIMENSIONS,
+    GOOGLE_API_KEY: raw.GOOGLE_KEY ?? raw.GOOGLE_API_KEY,
+    GEMINI_FLASH_MODEL: raw.GEMINI_FLASH ?? raw.GEMINI_FLASH_MODEL,
+    GEMINI_PRO_MODEL: raw.GEMINI_PRO ?? raw.GEMINI_PRO_MODEL,
+    CF_ACCOUNT_ID: raw.CF_ACCOUNT ?? raw.CF_ACCOUNT_ID,
+    CF_API_TOKEN: raw.CF_TOKEN ?? raw.CF_API_TOKEN,
+    CF_MODEL: raw.CF_MODEL,
+    GITHUB_TOKEN: raw.GH_TOKEN ?? raw.GITHUB_TOKEN,
+    GITHUB_MODELS_URL: raw.GH_MODELS_URL ?? raw.GITHUB_MODELS_URL,
+    GITHUB_MODEL_PRIMARY: raw.GH_MODEL_PRIMARY ?? raw.GITHUB_MODEL_PRIMARY,
+    GITHUB_MODEL_SECONDARY: raw.GH_MODEL_SECONDARY ?? raw.GITHUB_MODEL_SECONDARY,
+    GITHUB_MODEL_TERTIARY: raw.GH_MODEL_TERTIARY ?? raw.GITHUB_MODEL_TERTIARY,
+    AI_ROUTER_ENABLE_GEMINI: raw.AI_ROUTER_ENABLE_GEMINI,
+    AI_ROUTER_ENABLE_CLOUDFLARE: raw.AI_ROUTER_ENABLE_CLOUDFLARE,
+    AI_ROUTER_ENABLE_GITHUB: raw.AI_ROUTER_ENABLE_GITHUB,
+    AI_ROUTER_ENABLE_OPENAI: raw.AI_ROUTER_ENABLE_OPENAI,
+    AI_ROUTER_LOG_VERBOSE: raw.AI_ROUTER_LOG_VERBOSE,
+    AI_ROUTER_USE_GEMINI_PRO_FOR_COMPLEX: raw.AI_ROUTER_USE_GEMINI_PRO_FOR_COMPLEX,
+    AI_ROUTER_GEMINI_FLASH_DAILY_LIMIT: raw.AI_ROUTER_GEMINI_FLASH_DAILY_LIMIT,
+    AI_ROUTER_GEMINI_PRO_DAILY_LIMIT: raw.AI_ROUTER_GEMINI_PRO_DAILY_LIMIT,
+    AI_ROUTER_CLOUDFLARE_COOLDOWN_MS: raw.AI_ROUTER_CLOUDFLARE_COOLDOWN_MS,
+    AI_ROUTER_GITHUB_COOLDOWN_MS: raw.AI_ROUTER_GITHUB_COOLDOWN_MS,
+    AI_ROUTER_OPENAI_COOLDOWN_MS: raw.AI_ROUTER_OPENAI_COOLDOWN_MS
   };
+}
+
+export function resolveAiRouterEnvState(env: AppEnv): AiRouterEnvState {
+  return {
+    gemini: buildProviderState("gemini", env.AI_ROUTER_ENABLE_GEMINI, [
+      ["GOOGLE_API_KEY", env.GOOGLE_API_KEY]
+    ]),
+    cloudflare: buildProviderState("cloudflare", env.AI_ROUTER_ENABLE_CLOUDFLARE, [
+      ["CF_ACCOUNT_ID", env.CF_ACCOUNT_ID],
+      ["CF_API_TOKEN", env.CF_API_TOKEN]
+    ]),
+    github: buildProviderState("github", env.AI_ROUTER_ENABLE_GITHUB, [
+      ["GITHUB_TOKEN", env.GITHUB_TOKEN]
+    ]),
+    openai: buildProviderState("openai", env.AI_ROUTER_ENABLE_OPENAI, [
+      ["OPENAI_API_KEY", env.OPENAI_API_KEY]
+    ])
+  };
+}
+
+export function getEnabledAiRouterProviders(env: AppEnv): AiRouterProviderName[] {
+  const state = resolveAiRouterEnvState(env);
+  return AI_ROUTER_PROVIDER_NAMES.filter((provider) => state[provider].enabled);
 }
 
 function parseCompactConfig(cfg?: string): Partial<RuntimeTuning> {
@@ -621,4 +718,38 @@ export function assertEnvForRole(env: AppEnv, role: AppRole) {
   if ((role === "bot" || role === "worker") && env.LLM_PROVIDER === "openai" && !env.OPENAI_API_KEY) {
     throw new Error("Missing OPENAI_API_KEY — required when LLM_PROVIDER=openai. Set OAI_KEY or OPENAI_API_KEY.");
   }
+
+  if ((role === "bot" || role === "worker") && env.LLM_PROVIDER === "router") {
+    const state = resolveAiRouterEnvState(env);
+    const enabledProviders = AI_ROUTER_PROVIDER_NAMES.filter((provider) => state[provider].enabled);
+
+    for (const provider of AI_ROUTER_PROVIDER_NAMES) {
+      const details = state[provider];
+      if (details.enabledByFlag && !details.configured) {
+        console.warn(`[config] AI router provider ${provider} disabled: missing ${details.missing.join(", ")}`);
+      }
+    }
+
+    if (enabledProviders.length === 0) {
+      console.warn("[config] AI router has no configured providers — bot will fall back to safe empty-reply handling until secrets are configured");
+    }
+  }
+}
+
+function buildProviderState(
+  name: AiRouterProviderName,
+  enabledByFlag: boolean,
+  requirements: Array<[string, string | undefined]>
+): AiRouterProviderEnvState {
+  const missing = requirements
+    .filter(([, value]) => !value?.trim())
+    .map(([key]) => key);
+
+  return {
+    name,
+    enabledByFlag,
+    configured: missing.length === 0,
+    enabled: enabledByFlag && missing.length === 0,
+    missing
+  };
 }

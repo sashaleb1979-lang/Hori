@@ -23,6 +23,7 @@ import {
 
 type ProviderAwareEnv = AppEnv & {
   LLM_PROVIDER?: string;
+  OPENAI_MODEL?: string;
   OPENAI_CHAT_MODEL?: string;
   OPENAI_SMART_MODEL?: string;
   OPENAI_EMBED_MODEL?: string;
@@ -37,6 +38,10 @@ export class ModelRouter {
 
   private get isOpenAI(): boolean {
     return this.providerEnv.LLM_PROVIDER === "openai";
+  }
+
+  private get isRouter(): boolean {
+    return this.providerEnv.LLM_PROVIDER === "router";
   }
 
   pickKind(intent: BotIntent): ModelKind {
@@ -74,11 +79,15 @@ export class ModelRouter {
         : env.OPENAI_CHAT_MODEL ?? "gpt-5.4-nano";
     }
 
+    if (this.isRouter) {
+      return this.providerEnv.OPENAI_MODEL ?? this.providerEnv.OPENAI_CHAT_MODEL ?? "gpt-5-nano";
+    }
+
     return this.pickKind(intent) === "smart" ? this.env.OLLAMA_SMART_MODEL : this.env.OLLAMA_FAST_MODEL;
   }
 
   pickEmbeddingModel(overrides?: { dimensions?: number }): { model: string; dimensions?: number } {
-    if (this.isOpenAI) {
+    if (this.isOpenAI || this.isRouter) {
       return {
         model: OPENAI_EMBEDDING_MODEL,
         dimensions: resolveOpenAIEmbeddingDimensions({ OPENAI_EMBED_DIMENSIONS: overrides?.dimensions ?? this.providerEnv.OPENAI_EMBED_DIMENSIONS })
@@ -89,7 +98,7 @@ export class ModelRouter {
   }
 
   pickEmbedModel(): string {
-    if (this.isOpenAI) {
+    if (this.isOpenAI || this.isRouter) {
       return this.providerEnv.OPENAI_EMBED_MODEL ?? "text-embedding-3-small";
     }
 

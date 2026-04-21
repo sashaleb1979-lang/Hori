@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { loadEnv } from "@hori/config";
+import { assertEnvForRole, getEnabledAiRouterProviders, loadEnv, resolveAiRouterEnvState } from "@hori/config";
 
 describe("loadEnv", () => {
   it("applies defaults for omitted boolean and numeric env vars", () => {
@@ -95,6 +95,52 @@ describe("loadEnv", () => {
     });
 
     expect(env.OLLAMA_BASE_URL).toBeUndefined();
+  });
+
+  it("maps router provider env and OPENAI_MODEL alias for multi-provider routing", () => {
+    const env = loadEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      AI_PROVIDER: "router",
+      GOOGLE_API_KEY: "google-key",
+      CF_ACCOUNT_ID: "cf-account",
+      CF_API_TOKEN: "cf-token",
+      GITHUB_TOKEN: "gh-token",
+      OPENAI_API_KEY: "openai-key",
+      OPENAI_MODEL: "gpt-5-nano"
+    });
+
+    expect(env.LLM_PROVIDER).toBe("router");
+    expect(env.OPENAI_MODEL).toBe("gpt-5-nano");
+    expect(env.OPENAI_CHAT_MODEL).toBe("gpt-5-nano");
+    expect(env.OPENAI_SMART_MODEL).toBe("gpt-5-nano");
+    expect(env.GEMINI_FLASH_MODEL).toBe("gemini-2.5-flash");
+    expect(env.GEMINI_PRO_MODEL).toBe("gemini-2.5-pro");
+    expect(env.CF_MODEL).toBe("@cf/zai-org/glm-4.7-flash");
+    expect(env.GITHUB_MODELS_URL).toBe("https://models.github.ai/inference/chat/completions");
+    expect(getEnabledAiRouterProviders(env)).toEqual(["gemini", "cloudflare", "github", "openai"]);
+  });
+
+  it("disables only missing router providers instead of crashing startup", () => {
+    const env = loadEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      AI_PROVIDER: "router",
+      OPENAI_API_KEY: "openai-key",
+      AI_ROUTER_ENABLE_GITHUB: "false"
+    });
+
+    const state = resolveAiRouterEnvState(env);
+
+    expect(state.gemini.enabled).toBe(false);
+    expect(state.gemini.missing).toEqual(["GOOGLE_API_KEY"]);
+    expect(state.cloudflare.enabled).toBe(false);
+    expect(state.cloudflare.missing).toEqual(["CF_ACCOUNT_ID", "CF_API_TOKEN"]);
+    expect(state.github.enabledByFlag).toBe(false);
+    expect(state.github.enabled).toBe(false);
+    expect(state.openai.enabled).toBe(true);
+    expect(() => assertEnvForRole(env, "bot")).toThrow(/DISCORD_TOKEN/);
+    expect(() => assertEnvForRole({ ...env, DISCORD_TOKEN: "token", DISCORD_CLIENT_ID: "client" }, "bot")).not.toThrow();
   });
 
   it("throws a clearer error for unresolved Railway database references", () => {

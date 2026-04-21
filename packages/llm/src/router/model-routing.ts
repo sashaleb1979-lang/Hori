@@ -96,7 +96,7 @@ export interface StoredModelRouting {
 }
 
 export interface ResolvedModelRouting {
-  provider: "openai" | "ollama";
+  provider: "openai" | "ollama" | "router";
   preset: ModelRoutingPresetName;
   source: "default" | "runtime_setting";
   slots: ModelRoutingSlots;
@@ -180,12 +180,12 @@ export function resolveModelRouting(
     slots,
     overrides,
     legacyFallback,
-    embeddingModel: provider === "openai"
-      ? OPENAI_EMBEDDING_MODEL
-      : env.OLLAMA_EMBED_MODEL,
-    embeddingDimensions: provider === "openai"
-      ? resolveOpenAIEmbeddingDimensions({ OPENAI_EMBED_DIMENSIONS: overrides?.openaiEmbedDimensions ?? (env as ProviderAwareEnv).OPENAI_EMBED_DIMENSIONS })
-      : undefined,
+    embeddingModel: provider === "ollama"
+      ? env.OLLAMA_EMBED_MODEL
+      : OPENAI_EMBEDDING_MODEL,
+    embeddingDimensions: provider === "ollama"
+      ? undefined
+      : resolveOpenAIEmbeddingDimensions({ OPENAI_EMBED_DIMENSIONS: overrides?.openaiEmbedDimensions ?? (env as ProviderAwareEnv).OPENAI_EMBED_DIMENSIONS }),
     parseError: parsed.error
   };
 }
@@ -271,12 +271,27 @@ function buildLegacyFallback(env: AppEnv) {
     };
   }
 
+  if (getProvider(env) === "router") {
+    return {
+      chat: providerEnv.OPENAI_MODEL ?? providerEnv.OPENAI_CHAT_MODEL ?? "gpt-5-nano",
+      smart: providerEnv.OPENAI_MODEL ?? providerEnv.OPENAI_SMART_MODEL ?? "gpt-5-nano"
+    };
+  }
+
   return {
     chat: env.OLLAMA_FAST_MODEL,
     smart: env.OLLAMA_SMART_MODEL
   };
 }
 
-function getProvider(env: AppEnv): "openai" | "ollama" {
-  return (env as ProviderAwareEnv).LLM_PROVIDER === "openai" ? "openai" : "ollama";
+function getProvider(env: AppEnv): "openai" | "ollama" | "router" {
+  if ((env as ProviderAwareEnv).LLM_PROVIDER === "openai") {
+    return "openai";
+  }
+
+  if ((env as ProviderAwareEnv).LLM_PROVIDER === "router") {
+    return "router";
+  }
+
+  return "ollama";
 }

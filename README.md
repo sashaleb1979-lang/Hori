@@ -1,13 +1,13 @@
 # Hori Discord Bot
 
-Production-ready TypeScript monorepo for a Discord bot with persona layers, analytics, memory, web search, admin controls and a provider-aware LLM backend.
+Production-ready TypeScript monorepo for a Discord bot with persona layers, analytics, memory, web search, admin controls and a multi-provider AI router with deterministic fallback.
 
 ## Architecture
 - `apps/bot`: Discord gateway, message ingestion, slash commands, context actions, reply routing.
 - `apps/api`: internal Fastify API for health, readiness, metrics, admin read endpoints and debug traces.
 - `apps/worker`: BullMQ workers for summaries, profiling, embeddings and cleanup jobs.
 - `packages/core`: intent router, persona assembly, safety, orchestration, admin services.
-- `packages/llm`: Ollama/OpenAI clients, model router, tool-calling, prompt helpers.
+- `packages/llm`: multi-provider AI router, Gemini/Cloudflare/GitHub/OpenAI clients, model router, tool-calling, prompt helpers.
 - `packages/memory`: recent context, summaries, profile lifecycle, relationship profiles, semantic retrieval.
 - `packages/analytics`: message ingestion, counters, aggregates, analytics queries.
 - `packages/search`: Brave Search integration, page fetch, sanitization, cache.
@@ -36,7 +36,7 @@ tests/
 ## Core Features In V1
 - Reply by bot name, mention, reply to bot and message context actions.
 - Natural language intents: `help`, `summary`, `analytics`, `search`, `memory_write`, `memory_forget`, `rewrite`, `profile`.
-- Fast vs smart model routing through a provider-aware model router.
+- Fast vs smart response shaping through a model router, with provider selection handled by the AI router.
 - Brave Search tools with cache, cooldown and fetch sanitization.
 - Message ingestion and analytics counters stored in PostgreSQL.
 - Three-layer memory: recent messages, channel summaries, server memory.
@@ -49,8 +49,23 @@ tests/
 - pnpm
 - PostgreSQL 15+ with `pgvector`
 - Redis
-- Either Ollama reachable over HTTP or an OpenAI API key
+- OpenAI API key for the final paid fallback and embeddings
+- Optional provider credentials for Gemini, Cloudflare Workers AI and GitHub Models
 - Brave Search API key
+
+## AI Router
+Default runtime mode is `AI_PROVIDER=router`.
+
+Deterministic fallback order:
+1. `Gemini Pro` only for complex prompts when enabled and quota/health allow it
+2. `Gemini Flash` as the default free tier
+3. `Cloudflare Workers AI` as the next free fallback
+4. `GitHub Models` as reserve
+5. `OpenAI gpt-5-nano` as the final paid fallback
+
+Health and quota status:
+- Use `/hori ai-status` for enabled providers, active order, cooldowns, Gemini daily counters, recent routes and fallback counts.
+- `/hori state tab:brain` now shows router mode and points to `/hori ai-status` for detailed diagnostics.
 
 ## Bootstrap
 1. Install Git if it is not in `PATH`.
@@ -93,9 +108,8 @@ pnpm build
 ## Environment Variables
 See [.env.example](./.env.example). Short aliases are the preferred setup for Railway:
 - Required in most setups: `BOT_TOKEN`, `BOT_ID`, `DB_URL`, `KV_URL`
-- Choose one LLM path:
-- Ollama: `AI_PROVIDER=ollama` (default) plus `AI_URL`, with optional `AI_FAST`, `AI_SMART`, `AI_EMBED`, `AI_TIMEOUT`
-- OpenAI: `AI_PROVIDER=openai` plus `OAI_KEY`, with optional `OAI_CHAT`, `OAI_SMART`, `OAI_EMBED`
+- Default production path: `AI_PROVIDER=router` plus `GOOGLE_API_KEY`, `CF_ACCOUNT_ID`, `CF_API_TOKEN`, `GITHUB_TOKEN`, `OAI_KEY`
+- Direct fallback-only mode: `AI_PROVIDER=openai` plus `OAI_KEY`, with optional `OAI_CHAT`, `OAI_SMART`, `OAI_EMBED`
 - Usually set too: `BOT_OWNERS`, `BOT_NAME`, `BRAVE_KEY`
 - Optional top-level overrides: `BOT_LANG`, `HOST`, `PORT`, `ADMIN_KEY`
 - Advanced tuning is compressed into one optional `CFG` JSON instead of dozens of separate vars
@@ -106,7 +120,12 @@ BOT_TOKEN=...
 BOT_ID=...
 DB_URL=postgresql://...
 KV_URL=redis://...
-AI_URL=https://ollama.example.com
+AI_PROVIDER=router
+GOOGLE_API_KEY=...
+CF_ACCOUNT_ID=...
+CF_API_TOKEN=...
+GITHUB_TOKEN=...
+OAI_KEY=...
 BRAVE_KEY=...
 ```
 
@@ -129,17 +148,18 @@ CFG={"features":{"webSearch":true,"autoInterject":false},"profiles":{"minMessage
 
 Notes:
 - The app still accepts legacy long names like `DISCORD_TOKEN` and `DATABASE_URL`.
-- OpenAI short aliases also work: `AI_PROVIDER`, `OAI_KEY`, `OAI_CHAT`, `OAI_SMART`, `OAI_EMBED`.
+- OpenAI short aliases also work: `AI_PROVIDER`, `OAI_KEY`, `OAI_MODEL`, `OAI_CHAT`, `OAI_SMART`, `OAI_EMBED`.
 - Discord commands are registered globally, so there is no per-server guild id to update when moving the bot.
 - Put your Discord user ID in `BOT_OWNERS` to use owner-only commands like `/bot-lockdown on|off|status`.
-- For verbose Ollama tunnel logging, set `OLLAMA_LOG_TRAFFIC=true`, `OLLAMA_LOG_PROMPTS=true`, and `OLLAMA_LOG_RESPONSES=true`. Short aliases also work: `AI_LOG_TRAFFIC`, `AI_LOG_PROMPTS`, `AI_LOG_RESPONSES`.
+- For verbose AI router transition logs, set `AI_ROUTER_LOG_VERBOSE=true`.
 - Prisma-based scripts use the alias bridge automatically, so `DB_URL` is enough if you run the provided `pnpm prisma:*` and `pnpm seed` scripts.
-- API-only deployments can skip LLM vars entirely; bot and worker need either `AI_URL`/`OLLAMA_BASE_URL` for Ollama or `AI_PROVIDER=openai` with `OAI_KEY`/`OPENAI_API_KEY`.
+- API-only deployments can skip LLM vars entirely; bot and worker need either `AI_PROVIDER=router` with provider keys or `AI_PROVIDER=openai` with `OAI_KEY`/`OPENAI_API_KEY`.
 - In Railway, prefer using the built-in managed database variable names directly for service references: `DATABASE_URL=${{Postgres.DATABASE_URL}}` and `REDIS_URL=${{Redis.REDIS_URL}}`.
 
 ## Slash Commands
 - Main command surface now lives under `/hori`. Detailed panel guides: [docs/hori-panel-guide.md](./docs/hori-panel-guide.md) and [docs/hori-panel-step-by-step-ru.md](./docs/hori-panel-step-by-step-ru.md)
 - Owner LLM runtime controls now live in `/hori panel` -> `LLM`: model preset/slot, live HyDE toggle and OpenAI embedding dimensions.
+- Owner AI router health is available in `/hori ai-status`.
 - `/bot-help`
 - `/bot-style`
 - `/bot-memory remember|forget`
@@ -185,9 +205,8 @@ Do not use `pnpm dev`, `tsx watch`, or workspace-local dev commands in Railway.
 ### Infra
 - Attach a managed PostgreSQL instance.
 - Attach a managed Redis instance.
-- Choose one LLM provider mode:
-- Ollama: keep it outside Railway and provide `AI_URL` in short mode or `OLLAMA_BASE_URL` in legacy mode.
-- OpenAI: set `AI_PROVIDER=openai` and provide `OAI_KEY`, optionally `OAI_CHAT`, `OAI_SMART`, `OAI_EMBED`.
+- Default AI path: set `AI_PROVIDER=router` and provide `GOOGLE_API_KEY`, `CF_ACCOUNT_ID`, `CF_API_TOKEN`, `GITHUB_TOKEN`, `OAI_KEY`.
+- Direct paid-only fallback mode: set `AI_PROVIDER=openai` and provide `OAI_KEY`, optionally `OAI_CHAT`, `OAI_SMART`, `OAI_EMBED`.
 - Link database and Redis variables with Railway references, for example:
 ```env
 DB_URL=${{Postgres.DATABASE_URL}}
@@ -223,6 +242,22 @@ Admin/debug endpoints require `Authorization: Bearer <ADMIN_KEY>` or the legacy 
 - Search provider abstraction is ready but only Brave is wired; retry logic (`fetchWithRetry`, 3 attempts) is already in place.
 - Semantic retrieval uses pgvector raw SQL and expects the extension to exist in PostgreSQL (architectural choice).
 - There is no full web admin UI in V1; admin surface is slash-first plus internal read-only API (by design).
+
+## AI Router Verification
+Use these checks after deploy or after changing provider secrets:
+
+1. Run `/hori ai-status` and confirm enabled providers, active order and empty/expected cooldowns.
+2. Ask the bot a short simple question and confirm the latest route in `/hori ai-status` lands on Gemini Flash when available.
+3. Ask a long analytical or code-heavy question and confirm the route moves to Gemini Pro when quota is available.
+4. Temporarily disable a provider secret or wait for a cooldown, then repeat the same prompt and confirm fallback moves to Cloudflare, then GitHub, then OpenAI.
+5. Inspect BotEventLog or debug trace and verify `modelUsed` plus `llmCalls` show the real provider/model path.
+
+Example router log lines:
+```text
+info  requestId=req-1 userKey=u:123456 provider=gemini model=gemini-2.5-flash success=true fallbackDepth=0 latencyMs=842
+warn  requestId=req-2 userKey=u:123456 provider=gemini model=gemini-2.5-pro success=false errorClass=quota_exhausted fallbackDepth=0
+info  requestId=req-2 userKey=u:123456 provider=cloudflare model=@cf/zai-org/glm-4.7-flash success=true fallbackDepth=1 latencyMs=615
+```
 
 ## OpenAI Re-Embed Backfill
 Use the dedicated script when you lower OpenAI embedding dimensions for retrieval, for example `768 -> 512`.

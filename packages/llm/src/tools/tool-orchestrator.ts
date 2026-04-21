@@ -1,6 +1,6 @@
 import type { AppLogger, ChatRunResult, LlmChatMessage, ToolExecutionResult } from "@hori/shared";
 
-import type { LlmClient, LlmToolDefinition } from "../client/llm-client";
+import type { LlmClient, LlmRequestMetadata, LlmToolDefinition } from "../client/llm-client";
 
 export interface ExecutableTool {
   definition: LlmToolDefinition;
@@ -24,6 +24,7 @@ export class ToolOrchestrator {
     keepAlive?: string;
     numCtx?: number;
     numBatch?: number;
+    metadata?: LlmRequestMetadata;
   }): Promise<ChatRunResult> {
     const transcript = [...options.messages];
     const toolMap = new Map(options.tools.map((tool) => [tool.definition.function.name, tool]));
@@ -39,7 +40,8 @@ export class ToolOrchestrator {
         maxTokens: options.maxTokens,
         keepAlive: options.keepAlive,
         numCtx: options.numCtx,
-        numBatch: options.numBatch
+        numBatch: options.numBatch,
+        metadata: options.metadata
       });
 
       transcript.push({
@@ -93,7 +95,8 @@ export class ToolOrchestrator {
       maxTokens: options.maxTokens,
       keepAlive: options.keepAlive,
       numCtx: options.numCtx,
-      numBatch: options.numBatch
+      numBatch: options.numBatch,
+      metadata: options.metadata
     });
 
     return {

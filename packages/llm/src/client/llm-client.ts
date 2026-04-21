@@ -21,12 +21,35 @@ export interface LlmToolCall {
   };
 }
 
+export interface LlmRequestMetadata {
+  requestId?: string;
+  userKey?: string;
+  intent?: string;
+  slot?: string;
+  purpose?: string;
+  complexityHint?: "simple" | "complex";
+  allowPaidFallback?: boolean;
+}
+
+export interface LlmRoutingMetadata {
+  provider: string;
+  model: string;
+  latencyMs: number;
+  finishReason?: string;
+  routedFrom?: string[];
+  fallbackDepth?: number;
+  requestId?: string;
+  errorClass?: string;
+}
+
 export interface LlmChatResponse {
   message: {
     role: "assistant";
     content: string;
     tool_calls?: LlmToolCall[];
   };
+  routing?: LlmRoutingMetadata;
+  rawUsage?: Record<string, unknown>;
   usage?: {
     promptTokens?: number;
     completionTokens?: number;
@@ -50,6 +73,7 @@ export interface LlmChatOptions {
   keepAlive?: string;
   numCtx?: number;
   numBatch?: number;
+  metadata?: LlmRequestMetadata;
 }
 
 export interface LlmEmbedOptions {

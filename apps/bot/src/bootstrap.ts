@@ -3,11 +3,11 @@ import type { Client } from "discord.js";
 import { AnalyticsQueryService, MessageIngestService } from "@hori/analytics";
 import { assertEnvForRole, loadEnv } from "@hori/config";
 import { AffinityService, createChatOrchestrator, MediaReactionService, MoodService, ReplyQueueService, RuntimeConfigService, SlashAdminService } from "@hori/core";
-import { EmbeddingAdapter, ModelRouter, OllamaClient, OpenAIClient, ToolOrchestrator } from "@hori/llm";
+import { AiRouterClient, EmbeddingAdapter, ModelRouter, OpenAIClient, ToolOrchestrator } from "@hori/llm";
 import type { LlmClient } from "@hori/llm";
 import { ActiveMemoryService, ContextService, InteractionRequestService, MemoryAlbumService, ProfileService, ReflectionService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
 import { BraveSearchClient, SearchCacheService } from "@hori/search";
-import { createLogger, createPrismaClient, createRedisClient, createAppQueues, ensureInfrastructureReady, loadPersistedOllamaBaseUrl } from "@hori/shared";
+import { createLogger, createPrismaClient, createRedisClient, createAppQueues, ensureInfrastructureReady } from "@hori/shared";
 
 import { createDiscordClient } from "./gateway/create-discord-client";
 import { registerEvents } from "./events/register-events";
@@ -94,14 +94,6 @@ export async function bootstrapBot() {
     allowRedisFailure: env.NODE_ENV !== "production"
   });
 
-  if (!env.OLLAMA_BASE_URL) {
-    const persistedOllamaUrl = await loadPersistedOllamaBaseUrl(prisma, logger);
-
-    if (persistedOllamaUrl) {
-      env.OLLAMA_BASE_URL = persistedOllamaUrl;
-    }
-  }
-
   const queues: BotQueues = redisReady
     ? createAppQueues(env.REDIS_URL, env.JOB_QUEUE_PREFIX)
     : createNoopQueues(logger, env.JOB_QUEUE_PREFIX);
@@ -131,28 +123,20 @@ export async function bootstrapBot() {
     llmClient = new OpenAIClient(env, logger);
     logger.info("LLM provider: OpenAI");
   } else {
-    llmClient = new OllamaClient(env, logger);
+    (env as typeof env & { LLM_PROVIDER: string }).LLM_PROVIDER = "router";
 
-    // --- Ollama health check: сразу видно в логах, жива ли нейронка ---
-    if (env.OLLAMA_BASE_URL) {
-      try {
-        const probe = await fetch(new URL("/api/tags", env.OLLAMA_BASE_URL), {
-          signal: AbortSignal.timeout(5000)
-        });
-        if (probe.ok) {
-          const data = (await probe.json()) as { models?: { name: string }[] };
-          const models = data.models?.map((m) => m.name) ?? [];
-          logger.info({ url: env.OLLAMA_BASE_URL, models }, `ollama reachable: url=${env.OLLAMA_BASE_URL} models=${models.join(",")}`);
-        } else {
-          logger.warn({ url: env.OLLAMA_BASE_URL, status: probe.status }, `ollama responded with error: url=${env.OLLAMA_BASE_URL} status=${probe.status} — fallback replies until fixed`);
-        }
-      } catch (error) {
-        const errorText = error instanceof Error ? error.message : String(error);
-        logger.warn({ url: env.OLLAMA_BASE_URL, error: errorText }, `ollama unreachable: url=${env.OLLAMA_BASE_URL} error=${errorText} — bot will use fallback replies. Run start-tunnel.ps1 and /bot-ai-url`);
-      }
-    } else {
-      logger.warn("OLLAMA_BASE_URL not set — bot will use fallback replies for all LLM calls");
+    if (llmProvider === "ollama") {
+      logger.warn("LLM_PROVIDER=ollama is deprecated in this runtime; using multi-provider AI router instead");
     }
+
+    llmClient = new AiRouterClient(env, logger, {
+      stateStore: {
+        getState: () => runtimeConfig.getAiRouterState(),
+        setState: (state) => runtimeConfig.setAiRouterState(state),
+        updateState: (updater) => runtimeConfig.updateAiRouterState(updater)
+      }
+    });
+    logger.info("LLM provider: AI router");
   }
 
   const modelRouter = new ModelRouter(env);
@@ -172,7 +156,8 @@ export async function bootstrapBot() {
     replyQueueService,
     memoryAlbumService,
     reflectionService,
-    embeddingAdapter
+    embeddingAdapter,
+    llmClient
   );
   const orchestrator = createChatOrchestrator({
     env,

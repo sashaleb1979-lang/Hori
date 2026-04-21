@@ -6,7 +6,7 @@ import { parseCsv, toVectorLiteral } from "@hori/shared";
 
 import { defaultPersonaSettings, type PowerProfileName } from "@hori/config";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
-import type { EmbeddingAdapter } from "@hori/llm";
+import { isAiRouterClient, type EmbeddingAdapter, type LlmClient } from "@hori/llm";
 import { MemoryAlbumService, ReflectionService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
 import type { MoodService } from "./mood-service";
 import type { ReplyQueueService } from "./reply-queue-service";
@@ -24,14 +24,15 @@ export class SlashAdminService {
     private readonly replyQueue?: ReplyQueueService,
     private readonly memoryAlbum?: MemoryAlbumService,
     private readonly reflection?: ReflectionService,
-    private readonly embeddingAdapter?: EmbeddingAdapter
+    private readonly embeddingAdapter?: EmbeddingAdapter,
+    private readonly llmClient?: LlmClient
   ) {}
 
   async handleHelp() {
     return [
       "Owner master panel: `/hori panel`.",
       "Частые ветки: `/hori profile`, `/hori search`, `/hori memory`, `/hori channel`, `/hori mood`, `/hori queue`, `/hori album`.",
-      "Owner: `/hori state`, `/hori relationship`, `/hori power`, `/hori lockdown`, `/hori ai-url`, `/hori import`.",
+      "Owner: `/hori state`, `/hori ai-status`, `/hori relationship`, `/hori power`, `/hori lockdown`, `/hori ai-url`, `/hori import`.",
       "Legacy `/bot-*` команды скрыты из регистрации по умолчанию; их можно вернуть флагом `DISCORD_REGISTER_LEGACY_COMMANDS=true`."
     ].join("\n");
   }
@@ -135,6 +136,40 @@ export class SlashAdminService {
     }
 
     return `${formatPowerProfileStatus(await this.runtimeConfig.getPowerProfileStatus())}\n\nВыбери пресет кнопками ниже или через /hori power action:apply.`;
+  }
+
+  async aiStatus() {
+    if (!this.llmClient || !isAiRouterClient(this.llmClient)) {
+      return "AI router status недоступен в текущем LLM режиме.";
+    }
+
+    const snapshot = await this.llmClient.getStatusSnapshot();
+    const enabled = snapshot.enabledProviders
+      .map((entry) => `${entry.provider}=${entry.enabled ? "on" : entry.enabledByFlag ? `off(missing:${entry.missing.join(",") || "none"})` : "off(flag)"}`)
+      .join("\n");
+    const cooldowns = snapshot.cooldowns.length
+      ? snapshot.cooldowns.map((entry) => `${entry.provider}/${entry.model} until ${entry.cooldownUntil}`).join("\n")
+      : "none";
+    const recent = snapshot.recentRoutes.length
+      ? snapshot.recentRoutes
+        .slice(-20)
+        .map((entry) => `${entry.timestamp} ${entry.success ? "ok" : "fail"} ${entry.provider}/${entry.model} depth=${entry.fallbackDepth}${entry.errorClass ? ` err=${entry.errorClass}` : ""}`)
+        .join("\n")
+      : "none";
+    const fallbackCounts = Object.entries(snapshot.fallbackCounts)
+      .map(([provider, count]) => `${provider}=${count}`)
+      .join(", ") || "none";
+
+    return [
+      "AI router status",
+      `Active order:\n${snapshot.activeOrder.join("\n")}`,
+      `Providers:\n${enabled}`,
+      `Cooldowns:\n${cooldowns}`,
+      `Gemini Flash: ${snapshot.geminiUsage.flash.used}/${snapshot.geminiUsage.flash.limit ?? "?"}`,
+      `Gemini Pro: ${snapshot.geminiUsage.pro.used}/${snapshot.geminiUsage.pro.limit ?? "?"}`,
+      `Fallback counts: ${fallbackCounts}`,
+      `Recent routes:\n${recent}`
+    ].join("\n\n");
   }
 
   async powerApply(profile: PowerProfileName, updatedBy?: string) {

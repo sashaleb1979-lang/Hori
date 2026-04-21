@@ -77,7 +77,18 @@ export class BotStateService {
           ...MODEL_ROUTING_SLOTS.map((slot) => `${slot}=${modelRouting.slots[slot]}`),
           `embed=${embeddingStatus}`
         ].join("\n")
-      : `provider=ollama\nurl=${this.runtime.env.OLLAMA_BASE_URL ?? "missing"}\nfast=${this.runtime.env.OLLAMA_FAST_MODEL}\nsmart=${this.runtime.env.OLLAMA_SMART_MODEL}`;
+      : modelRouting.provider === "router"
+        ? [
+            "provider=router",
+            `fallbackOpenAI=${this.runtime.env.OPENAI_MODEL}`,
+            `geminiFlash=${this.runtime.env.GEMINI_FLASH_MODEL}`,
+            `geminiPro=${this.runtime.env.GEMINI_PRO_MODEL}`,
+            `cloudflare=${this.runtime.env.CF_MODEL}`,
+            `github=${this.runtime.env.GITHUB_MODEL_PRIMARY}`,
+            `embed=${embeddingStatus}`,
+            "details=/hori ai-status"
+          ].join("\n")
+        : `provider=ollama\nurl=${this.runtime.env.OLLAMA_BASE_URL ?? "missing"}\nfast=${this.runtime.env.OLLAMA_FAST_MODEL}\nsmart=${this.runtime.env.OLLAMA_SMART_MODEL}`;
 
     return {
       title: "Состояние: мозги",

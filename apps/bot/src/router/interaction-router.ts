@@ -575,6 +575,19 @@ async function handleHoriCommand(
     return;
   }
 
+  if (subcommand === "ai-status") {
+    if (!isOwner) {
+      await interaction.reply({ content: "AI router status только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.reply({
+      content: await runtime.slashAdmin.aiStatus(),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
   if (subcommand === "search") {
     await handleHoriSearchCommand(runtime, interaction, isModerator);
     return;

@@ -1,7 +1,7 @@
 import { AnalyticsQueryService } from "@hori/analytics";
 import { assertEnvForRole, loadEnv } from "@hori/config";
 import { RuntimeConfigService } from "@hori/core";
-import { EmbeddingAdapter, ModelRouter, OllamaClient, OpenAIClient } from "@hori/llm";
+import { AiRouterClient, EmbeddingAdapter, ModelRouter, OpenAIClient } from "@hori/llm";
 import type { LlmClient } from "@hori/llm";
 import { ProfileService, RetrievalService, SummaryService, TopicService } from "@hori/memory";
 import { SearchCacheService } from "@hori/search";
@@ -12,10 +12,7 @@ import {
   createRedisClient,
   createWorker,
   ensureInfrastructureReady,
-  loadPersistedOllamaBaseUrl,
   QUEUE_NAMES,
-  shouldAutoSyncOllamaBaseUrl,
-  startOllamaBaseUrlSync
 } from "@hori/shared";
 
 import { createCleanupJob } from "./jobs/cleanup";
@@ -62,18 +59,6 @@ async function main() {
     logger
   });
 
-  if (!env.OLLAMA_BASE_URL) {
-    const persistedOllamaUrl = await loadPersistedOllamaBaseUrl(prisma, logger);
-
-    if (persistedOllamaUrl) {
-      env.OLLAMA_BASE_URL = persistedOllamaUrl;
-    }
-  }
-
-  if (shouldAutoSyncOllamaBaseUrl()) {
-    startOllamaBaseUrlSync({ env, prisma, logger });
-  }
-
   const queues = createAppQueues(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
   const analytics = new AnalyticsQueryService(prisma);
   const summaryService = new SummaryService(prisma);
@@ -92,9 +77,24 @@ async function main() {
   if (llmProvider === "openai") {
     llmClient = new OpenAIClient(env, logger);
     logger.info("worker LLM provider: OpenAI");
+  } else if (env.OPENAI_API_KEY) {
+    llmClient = new OpenAIClient(env, logger);
+    logger.info("worker LLM provider: OpenAI direct (background-safe mode)");
   } else {
-    llmClient = new OllamaClient(env, logger);
-    logger.info("worker LLM provider: Ollama");
+    (env as typeof env & { LLM_PROVIDER: string }).LLM_PROVIDER = "router";
+
+    if (llmProvider === "ollama") {
+      logger.warn("worker LLM_PROVIDER=ollama is deprecated; using AI router fallback mode instead");
+    }
+
+    llmClient = new AiRouterClient(env, logger, {
+      stateStore: {
+        getState: () => runtimeConfig.getAiRouterState(),
+        setState: (state) => runtimeConfig.setAiRouterState(state),
+        updateState: (updater) => runtimeConfig.updateAiRouterState(updater)
+      }
+    });
+    logger.info("worker LLM provider: AI router");
   }
 
   const modelRouter = new ModelRouter(env);

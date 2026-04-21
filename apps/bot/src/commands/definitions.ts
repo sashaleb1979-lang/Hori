@@ -88,6 +88,11 @@ const horiCommandDefinition = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand
+      .setName("ai-status")
+      .setDescription("Owner: статус AI router, cooldown и fallback цепочки")
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
       .setName("search")
       .setDescription("Сделать web search через усиленный fallback")
       .addStringOption((option) => option.setName("query").setDescription("Что искать").setRequired(true))
