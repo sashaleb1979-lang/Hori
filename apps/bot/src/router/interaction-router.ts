@@ -1262,6 +1262,10 @@ async function handleLlmPanelSelect(
   const value = interaction.values[0];
 
   if (action === "preset") {
+    if (!(await ensureLlmModelControlsEditable(runtime, interaction))) {
+      return;
+    }
+
     if (!isModelRoutingPresetName(value)) {
       await interaction.reply({ content: "Неизвестный LLM preset.", flags: MessageFlags.Ephemeral });
       return;
@@ -1279,6 +1283,10 @@ async function handleLlmPanelSelect(
   }
 
   if (action === "model") {
+    if (!(await ensureLlmModelControlsEditable(runtime, interaction))) {
+      return;
+    }
+
     const slot = isModelRoutingSlot(selectedSlot ?? "") ? selectedSlot as ModelRoutingSlot : null;
 
     if (!slot || !isModelRoutingModelId(value)) {
@@ -1692,18 +1700,43 @@ async function handleLlmPanelButton(runtime: BotRuntime, interaction: ButtonInte
   const slot = isModelRoutingSlot(selectedSlot ?? "") ? selectedSlot as ModelRoutingSlot : "chat";
 
   if (action === "reset-slot") {
+    if (!(await ensureLlmModelControlsEditable(runtime, interaction))) {
+      return;
+    }
+
     await runtime.runtimeConfig.resetModelSlot(slot, interaction.user.id);
     await interaction.update(await buildLlmPanelResponse(runtime, slot, interaction.guildId));
     return;
   }
 
   if (action === "reset-all") {
+    if (!(await ensureLlmModelControlsEditable(runtime, interaction))) {
+      return;
+    }
+
     await runtime.runtimeConfig.resetModelRouting(interaction.user.id);
     await interaction.update(await buildLlmPanelResponse(runtime, slot, interaction.guildId));
     return;
   }
 
   await interaction.reply({ content: "Неизвестная кнопка LLM panel.", flags: MessageFlags.Ephemeral });
+}
+
+async function ensureLlmModelControlsEditable(
+  runtime: BotRuntime,
+  interaction: StringSelectMenuInteraction | ButtonInteraction
+) {
+  const status = await runtime.runtimeConfig.getModelRoutingStatus();
+
+  if (status.controlsEditable) {
+    return true;
+  }
+
+  await interaction.reply({
+    content: status.controlsNote ?? "Эти model controls сейчас только для просмотра.",
+    flags: MessageFlags.Ephemeral
+  });
+  return false;
 }
 
 async function handleHoriPanelAction(
@@ -2468,6 +2501,10 @@ async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRou
   const activeModel = status.slots[activeSlot];
   const preset = MODEL_ROUTING_PRESETS[status.preset];
   const embeddingStatus = formatEmbeddingStatus(status);
+  const ignoredOverrides = status.storedOverrides && Object.keys(status.storedOverrides).length
+    ? Object.entries(status.storedOverrides).map(([slot, model]) => `${slot}=${model}`).join(", ")
+    : null;
+  const controlsStatus = status.controlsEditable ? "editable" : "informational-only";
   const telemetry = guildId ? await buildLlmTelemetry(runtime, guildId) : "Открой панель внутри сервера, чтобы увидеть telemetry.";
   const updated = status.updatedAt
     ? `\nupdated=${status.updatedAt.toISOString()}${status.updatedBy ? ` by ${status.updatedBy}` : ""}`
@@ -2483,7 +2520,11 @@ async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRou
         .setDescription([
           `Preset: **${status.preset}** (${preset.label})`,
           `Provider: **${status.provider}** · source=${status.source}${updated}`,
+          `Model controls: **${controlsStatus}**`,
           `Selected slot: **${activeSlot}** -> \`${activeModel}\``,
+          ...(status.storedPreset ? [`Ignored stored preset: \`${status.storedPreset}\``] : []),
+          ...(ignoredOverrides ? [`Ignored stored overrides: \`${ignoredOverrides}\``] : []),
+          ...(status.controlsNote ? [status.controlsNote] : []),
           "",
           `Embeddings: \`${embeddingStatus}\``,
           `HyDE retrieval: **${hydeStatus.value ? "on" : "off"}** (${hydeStatus.source})`,
@@ -2515,7 +2556,9 @@ async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRou
     ],
     components: buildLlmPanelRows(status.preset, activeSlot, activeModel, {
       provider: status.provider,
+      controlsEditable: status.controlsEditable,
       hydeEnabled: hydeStatus.value,
+      supportsEmbeddingDimensions: embedStatus.source !== "unsupported",
       embedDimensions: embedStatus.source === "unsupported" ? undefined : embedStatus.value
     })
   };
@@ -2525,7 +2568,13 @@ function buildLlmPanelRows(
   activePreset: string,
   activeSlot: ModelRoutingSlot,
   activeModel: string,
-  runtime: { provider: "openai" | "ollama"; hydeEnabled: boolean; embedDimensions?: number }
+  runtime: {
+    provider: "openai" | "ollama" | "router";
+    controlsEditable: boolean;
+    hydeEnabled: boolean;
+    supportsEmbeddingDimensions: boolean;
+    embedDimensions?: number;
+  }
 ) {
   const runtimeOptions = [
     {
@@ -2538,7 +2587,7 @@ function buildLlmPanelRows(
       value: "hyde:reset",
       description: "Return HyDE to env default"
     },
-    ...(runtime.provider === "openai"
+    ...(runtime.supportsEmbeddingDimensions
       ? SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS.map((dimensions) => ({
           label: `Embeddings: ${dimensions} dims`,
           value: `embed:${dimensions}`,
@@ -2556,7 +2605,8 @@ function buildLlmPanelRows(
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId(`${LLM_PANEL_PREFIX}:preset`)
-        .setPlaceholder("LLM preset")
+        .setPlaceholder(runtime.controlsEditable ? "LLM preset" : "LLM preset (informational-only)")
+        .setDisabled(!runtime.controlsEditable)
         .addOptions(
           ...Object.entries(MODEL_ROUTING_PRESETS).map(([value, preset]) => ({
             label: preset.label,
@@ -2569,7 +2619,7 @@ function buildLlmPanelRows(
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId(`${LLM_PANEL_PREFIX}:slot`)
-        .setPlaceholder("LLM slot")
+        .setPlaceholder(runtime.controlsEditable ? "LLM slot" : "Inspect slot (read-only)")
         .addOptions(
           ...MODEL_ROUTING_SLOTS.map((slot) => ({
             label: slot,
@@ -2581,7 +2631,8 @@ function buildLlmPanelRows(
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId(`${LLM_PANEL_PREFIX}:model:${activeSlot}`)
-        .setPlaceholder(`Model for ${activeSlot}`)
+        .setPlaceholder(runtime.controlsEditable ? `Model for ${activeSlot}` : `Model for ${activeSlot} (read-only)`)
+        .setDisabled(!runtime.controlsEditable)
         .addOptions(
           ...MODEL_ROUTING_MODEL_IDS.map((model) => ({
             label: model,
@@ -2600,10 +2651,12 @@ function buildLlmPanelRows(
       new ButtonBuilder()
         .setCustomId(`${LLM_PANEL_PREFIX}:reset-slot:${activeSlot}`)
         .setLabel("Reset slot")
+        .setDisabled(!runtime.controlsEditable)
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(`${LLM_PANEL_PREFIX}:reset-all:${activeSlot}`)
         .setLabel("Reset all")
+        .setDisabled(!runtime.controlsEditable)
         .setStyle(ButtonStyle.Danger),
       new ButtonBuilder()
         .setCustomId(`${HORI_ACTION_PREFIX}:panel_home`)
