@@ -171,7 +171,8 @@ export async function bootstrapBot() {
     moodService,
     replyQueueService,
     memoryAlbumService,
-    reflectionService
+    reflectionService,
+    embeddingAdapter
   );
   const orchestrator = createChatOrchestrator({
     env,

@@ -125,6 +125,7 @@ export interface MemoryFormationRetrieval {
     entityType: "server_memory" | "user_memory" | "channel_memory" | "event_memory",
     entityId: string,
     vectorLiteral: string,
+    dimensions?: number,
   ): Promise<unknown>;
 }
 
@@ -839,6 +840,8 @@ export class MemoryFormationService {
 
   private async updateEmbedding(entityType: "server_memory" | "user_memory" | "channel_memory" | "event_memory", entityId: string, text: string) {
     try {
+      await this.invalidateEmbedding(entityType, entityId);
+
       const [embedding] = await this.llm.embed(this.embedModel, text, {
         dimensions: this.embedDimensions,
       });
@@ -846,10 +849,25 @@ export class MemoryFormationService {
         return;
       }
 
-      await this.retrieval.setEmbedding(entityType, entityId, toVectorLiteral(embedding));
+      await this.retrieval.setEmbedding(entityType, entityId, toVectorLiteral(embedding), embedding.length);
     } catch {
       return;
     }
+  }
+
+  private async invalidateEmbedding(entityType: "server_memory" | "user_memory" | "channel_memory" | "event_memory", entityId: string) {
+    const tableName = entityType === "server_memory"
+      ? "ServerMemory"
+      : entityType === "channel_memory"
+        ? "ChannelMemoryNote"
+        : entityType === "event_memory"
+          ? "EventMemory"
+          : "UserMemoryNote";
+
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE "${tableName}" SET embedding = NULL, dimensions = NULL WHERE id = $1`,
+      entityId,
+    );
   }
 }
 

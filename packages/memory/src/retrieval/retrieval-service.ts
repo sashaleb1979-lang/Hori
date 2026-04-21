@@ -41,6 +41,7 @@ type UserMemoryRow = { id: string; key: string; value: string; createdAt: Date; 
 type MessageMemoryRow = { id: string; content: string; userId: string; createdAt: Date };
 type ChannelMemoryRow = { id: string; key: string; value: string; type: string; createdAt: Date; updatedAt: Date; confidence: number; salience: number };
 type EventMemoryRow = { id: string; eventKey: string; key: string; value: string; type: string; createdAt: Date; updatedAt: Date; confidence: number; salience: number };
+type MemoryEmbeddingEntityType = "server_memory" | "user_memory" | "channel_memory" | "event_memory";
 
 export class RetrievalService {
   constructor(
@@ -81,7 +82,7 @@ export class RetrievalService {
           WHERE "guildId" = $1
             AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
             AND embedding IS NOT NULL
-            AND vector_dims(embedding) = $3
+            AND (dimensions = $3 OR (dimensions IS NULL AND vector_dims(embedding) = $3))
           ORDER BY embedding <=> $2::vector
           LIMIT $4
         `,
@@ -122,7 +123,7 @@ export class RetrievalService {
             AND active = TRUE
             AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
             AND embedding IS NOT NULL
-            AND vector_dims(embedding) = $4
+            AND (dimensions = $4 OR (dimensions IS NULL AND vector_dims(embedding) = $4))
           ORDER BY embedding <=> $3::vector
           LIMIT $5
         `,
@@ -202,7 +203,7 @@ export class RetrievalService {
             AND active = TRUE
             AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
             AND embedding IS NOT NULL
-            AND vector_dims(embedding) = $4
+            AND (dimensions = $4 OR (dimensions IS NULL AND vector_dims(embedding) = $4))
           ORDER BY embedding <=> $3::vector
           LIMIT $5
         `,
@@ -259,7 +260,7 @@ export class RetrievalService {
             AND ("channelId" = $2 OR "channelId" IS NULL OR tags && ARRAY['server','global']::TEXT[])
             AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
             AND embedding IS NOT NULL
-            AND vector_dims(embedding) = $4
+            AND (dimensions = $4 OR (dimensions IS NULL AND vector_dims(embedding) = $4))
           ORDER BY embedding <=> $3::vector
           LIMIT $5
         `,
@@ -293,7 +294,7 @@ export class RetrievalService {
     source?: string | null;
     createdBy?: string | null;
   }) {
-    return this.prisma.serverMemory.upsert({
+    const memory = await this.prisma.serverMemory.upsert({
       where: {
         guildId_key: {
           guildId: input.guildId,
@@ -316,6 +317,9 @@ export class RetrievalService {
         createdBy: input.createdBy ?? undefined
       }
     });
+
+    await this.invalidateEmbedding("server_memory", memory.id);
+    return memory;
   }
 
   async rememberChannelFact(input: {
@@ -330,7 +334,7 @@ export class RetrievalService {
     source?: string | null;
     createdBy?: string | null;
   }) {
-    return this.prisma.channelMemoryNote.upsert({
+    const memory = await this.prisma.channelMemoryNote.upsert({
       where: {
         guildId_channelId_key: {
           guildId: input.guildId,
@@ -363,6 +367,9 @@ export class RetrievalService {
         createdBy: input.createdBy ?? undefined
       }
     });
+
+    await this.invalidateEmbedding("channel_memory", memory.id);
+    return memory;
   }
 
   async rememberEventFact(input: {
@@ -379,7 +386,7 @@ export class RetrievalService {
     source?: string | null;
     createdBy?: string | null;
   }) {
-    return this.prisma.eventMemory.upsert({
+    const memory = await this.prisma.eventMemory.upsert({
       where: {
         guildId_eventKey_key: {
           guildId: input.guildId,
@@ -416,6 +423,9 @@ export class RetrievalService {
         createdBy: input.createdBy ?? undefined
       }
     });
+
+    await this.invalidateEmbedding("event_memory", memory.id);
+    return memory;
   }
 
   async forgetServerFact(guildId: string, key: string): Promise<{ count: number }> {
@@ -425,37 +435,17 @@ export class RetrievalService {
   }
 
   async setEmbedding(
-    entityType: "server_memory" | "user_memory" | "channel_memory" | "event_memory",
+    entityType: MemoryEmbeddingEntityType,
     entityId: string,
-    vectorLiteral: string
+    vectorLiteral: string,
+    dimensions?: number
   ) {
-    if (entityType === "server_memory") {
-      return this.prisma.$executeRawUnsafe(
-        `UPDATE "ServerMemory" SET embedding = $1::vector WHERE id = $2`,
-        vectorLiteral,
-        entityId
-      );
-    }
-
-    if (entityType === "channel_memory") {
-      return this.prisma.$executeRawUnsafe(
-        `UPDATE "ChannelMemoryNote" SET embedding = $1::vector WHERE id = $2`,
-        vectorLiteral,
-        entityId
-      );
-    }
-
-    if (entityType === "event_memory") {
-      return this.prisma.$executeRawUnsafe(
-        `UPDATE "EventMemory" SET embedding = $1::vector WHERE id = $2`,
-        vectorLiteral,
-        entityId
-      );
-    }
+    const resolvedDimensions = dimensions ?? parseVectorLiteralDimensions(vectorLiteral);
 
     return this.prisma.$executeRawUnsafe(
-      `UPDATE "UserMemoryNote" SET embedding = $1::vector WHERE id = $2`,
+      `UPDATE "${resolveEmbeddingTable(entityType)}" SET embedding = $1::vector, dimensions = $2 WHERE id = $3`,
       vectorLiteral,
+      resolvedDimensions,
       entityId
     );
   }
@@ -476,7 +466,7 @@ export class RetrievalService {
           WHERE "guildId" = $1
             AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
             AND embedding IS NOT NULL
-            AND vector_dims(embedding) = $3
+            AND (dimensions = $3 OR (dimensions IS NULL AND vector_dims(embedding) = $3))
           ORDER BY embedding <=> $2::vector
           LIMIT $4
         `,
@@ -494,7 +484,7 @@ export class RetrievalService {
             AND active = TRUE
             AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
             AND embedding IS NOT NULL
-            AND vector_dims(embedding) = $4
+            AND (dimensions = $4 OR (dimensions IS NULL AND vector_dims(embedding) = $4))
           ORDER BY embedding <=> $3::vector
           LIMIT $5
         `,
@@ -513,7 +503,7 @@ export class RetrievalService {
             AND active = TRUE
             AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
             AND embedding IS NOT NULL
-            AND vector_dims(embedding) = $4
+            AND (dimensions = $4 OR (dimensions IS NULL AND vector_dims(embedding) = $4))
           ORDER BY embedding <=> $3::vector
           LIMIT $5
         `,
@@ -532,7 +522,7 @@ export class RetrievalService {
             AND ("channelId" = $2 OR "channelId" IS NULL OR tags && ARRAY['server','global']::TEXT[])
             AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
             AND embedding IS NOT NULL
-            AND vector_dims(embedding) = $4
+            AND (dimensions = $4 OR (dimensions IS NULL AND vector_dims(embedding) = $4))
           ORDER BY embedding <=> $3::vector
           LIMIT $5
         `,
@@ -571,6 +561,40 @@ export class RetrievalService {
       return [];
     }
 
+    private async invalidateEmbedding(entityType: MemoryEmbeddingEntityType, entityId: string) {
+      return this.prisma.$executeRawUnsafe(
+        `UPDATE "${resolveEmbeddingTable(entityType)}" SET embedding = NULL, dimensions = NULL WHERE id = $1`,
+        entityId
+      );
+    }
+
+
+  function resolveEmbeddingTable(entityType: MemoryEmbeddingEntityType) {
+    if (entityType === "server_memory") {
+      return "ServerMemory";
+    }
+
+    if (entityType === "channel_memory") {
+      return "ChannelMemoryNote";
+    }
+
+    if (entityType === "event_memory") {
+      return "EventMemory";
+    }
+
+    return "UserMemoryNote";
+  }
+
+  function parseVectorLiteralDimensions(vectorLiteral: string) {
+    const trimmed = vectorLiteral.trim();
+    const payload = trimmed.replace(/^\[/, "").replace(/\]$/, "").trim();
+
+    if (!payload) {
+      return 0;
+    }
+
+    return payload.split(",").length;
+  }
     const perScopeLimit = Math.max(2, Math.ceil(limit / 2));
     const serverOr = terms.flatMap((term) => [
       { key: { contains: term, mode: "insensitive" as const } },

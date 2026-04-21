@@ -82,7 +82,7 @@ export function createEmbeddingJob(runtime: WorkerRuntime) {
       return { skipped: true, reason: "ollama unavailable" };
     }
 
-    await runtime.retrievalService.setEmbedding(job.data.entityType, job.data.entityId, toVectorLiteral(vector));
+    await runtime.retrievalService.setEmbedding(job.data.entityType, job.data.entityId, toVectorLiteral(vector), vector.length);
 
     return { skipped: false, entityType: job.data.entityType };
   };

@@ -954,7 +954,7 @@ export class ChatOrchestrator {
 
     const embedding = await this.safeEmbed(memory.value, runtimeSettings);
     if (embedding?.length) {
-      await this.deps.retrieval.setEmbedding("server_memory", memory.id, `[${embedding.join(",")}]`);
+      await this.deps.retrieval.setEmbedding("server_memory", memory.id, `[${embedding.join(",")}]`, embedding.length);
     }
 
     return `Ладно. Запомнила: ${fact}`;

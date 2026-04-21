@@ -150,9 +150,45 @@ describe("hybrid recall", () => {
     expect(rawQueries.some((query) => query.sql.includes('FROM "ServerMemory"') && query.sql.includes('"updatedAt"'))).toBe(true);
     expect(rawQueries.some((query) => query.sql.includes('FROM "ChannelMemoryNote"') && query.sql.includes('"updatedAt"'))).toBe(true);
     expect(rawQueries.some((query) => query.sql.includes('FROM "EventMemory"') && query.sql.includes('"updatedAt"'))).toBe(true);
-    expect(rawQueries.some((query) => query.sql.includes("vector_dims(embedding) = $3"))).toBe(true);
+    expect(rawQueries.some((query) => query.sql.includes("dimensions = $3 OR (dimensions IS NULL AND vector_dims(embedding) = $3)"))).toBe(true);
+    expect(rawQueries.some((query) => query.sql.includes("dimensions = $4 OR (dimensions IS NULL AND vector_dims(embedding) = $4)"))).toBe(true);
     expect(rawQueries.some((query) => query.sql.includes("e.dimensions = $4"))).toBe(true);
     expect(rawQueries.some((query) => query.params.includes(3))).toBe(true);
+  });
+
+  it("invalidates stale metadata on rememberServerFact and writes explicit dimensions on setEmbedding", async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: "server-1" });
+    const executeRaw = vi.fn().mockResolvedValue(1);
+    const prisma = {
+      $executeRawUnsafe: executeRaw,
+      serverMemory: {
+        upsert
+      }
+    } as unknown as AppPrismaClient;
+
+    const retrieval = new RetrievalService(prisma);
+
+    await retrieval.rememberServerFact({
+      guildId: "guild-1",
+      key: "pizza-rule",
+      value: "В канале часто обсуждают пиццу.",
+      type: "fact"
+    });
+    await retrieval.setEmbedding("server_memory", "server-1", "[0.1,0.2,0.3]", 3);
+
+    expect(upsert).toHaveBeenCalled();
+    expect(executeRaw).toHaveBeenNthCalledWith(
+      1,
+      'UPDATE "ServerMemory" SET embedding = NULL, dimensions = NULL WHERE id = $1',
+      'server-1'
+    );
+    expect(executeRaw).toHaveBeenNthCalledWith(
+      2,
+      'UPDATE "ServerMemory" SET embedding = $1::vector, dimensions = $2 WHERE id = $3',
+      '[0.1,0.2,0.3]',
+      3,
+      'server-1'
+    );
   });
 
   it("falls back to lexical recall when stored vector dimensions differ", async () => {

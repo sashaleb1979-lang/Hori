@@ -144,4 +144,46 @@ describe("SlashAdminService settings", () => {
     expect(result).toContain("messages=420");
     expect(result).toContain("m1:");
   });
+
+  it("writes an embedding for manual remember when embedding adapter is available", async () => {
+    const rememberServerFact = vi.fn().mockResolvedValue({ id: "memory-1" });
+    const setEmbedding = vi.fn().mockResolvedValue(undefined);
+    const getRuntimeSettings = vi.fn().mockResolvedValue({ openaiEmbedDimensions: 768 });
+    const embedOne = vi.fn().mockResolvedValue([0.1, 0.2, 0.3]);
+    const prisma = {} as unknown as AppPrismaClient;
+    const service = new SlashAdminService(
+      prisma,
+      {} as never,
+      {} as never,
+      {
+        rememberServerFact,
+        setEmbedding
+      } as never,
+      {} as never,
+      {
+        getRuntimeSettings
+      } as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        embedOne
+      } as never
+    );
+
+    await service.remember("guild-1", "owner-1", "pizza", "В канале любят пиццу.");
+
+    expect(rememberServerFact).toHaveBeenCalledWith({
+      guildId: "guild-1",
+      key: "pizza",
+      value: "В канале любят пиццу.",
+      type: "note",
+      createdBy: "owner-1",
+      source: "slash"
+    });
+    expect(getRuntimeSettings).toHaveBeenCalled();
+    expect(embedOne).toHaveBeenCalledWith("В канале любят пиццу.", { dimensions: 768 });
+    expect(setEmbedding).toHaveBeenCalledWith("server_memory", "memory-1", "[0.1,0.2,0.3]", 3);
+  });
 });

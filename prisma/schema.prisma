@@ -208,10 +208,12 @@ model ServerMemory {
   updatedAt  DateTime              @updatedAt
   expiresAt  DateTime?
   embedding  Unsupported("vector")?
+  dimensions Int?
   guild      Guild                 @relation(fields: [guildId], references: [id], onDelete: Cascade)
 
   @@unique([guildId, key])
   @@index([guildId, type])
+  @@index([guildId, dimensions])
 }
 
 model UserMemoryNote {
@@ -226,11 +228,13 @@ model UserMemoryNote {
   expiresAt  DateTime?
   active     Boolean               @default(true)
   embedding  Unsupported("vector")?
+  dimensions Int?
   guild      Guild                 @relation(fields: [guildId], references: [id], onDelete: Cascade)
   user       User                  @relation("UserMemoryTarget", fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([guildId, userId, key])
   @@index([guildId, userId, active])
+  @@index([guildId, userId, active, dimensions])
 }
 
 model ChannelMemoryNote {
@@ -250,11 +254,13 @@ model ChannelMemoryNote {
   expiresAt  DateTime?
   active     Boolean               @default(true)
   embedding  Unsupported("vector")?
+  dimensions Int?
   guild      Guild                 @relation(fields: [guildId], references: [id], onDelete: Cascade)
 
   @@unique([guildId, channelId, key])
   @@index([guildId, channelId, active])
   @@index([guildId, channelId, type])
+  @@index([guildId, channelId, active, dimensions])
 }
 
 model EventMemory {
@@ -278,12 +284,14 @@ model EventMemory {
   expiresAt  DateTime?
   active     Boolean               @default(true)
   embedding  Unsupported("vector")?
+  dimensions Int?
   guild      Guild                 @relation(fields: [guildId], references: [id], onDelete: Cascade)
 
   @@unique([guildId, eventKey, key])
   @@index([guildId, active, updatedAt])
   @@index([guildId, channelId, active])
   @@index([guildId, eventKey])
+  @@index([guildId, active, dimensions])
 }
 
 model SearchCache {
@@ -500,6 +508,7 @@ model TopicSession {
   summaryShort String
   summaryFacts Json
   embedding    Unsupported("vector")?
+  dimensions   Int?
   confidence   Float                  @default(0.5)
   startedAt    DateTime               @default(now())
   lastActiveAt DateTime               @default(now())
@@ -510,6 +519,7 @@ model TopicSession {
 
   @@index([guildId, channelId, lastActiveAt])
   @@index([guildId, channelId, closedAt])
+  @@index([guildId, channelId, dimensions])
 }
 
 model TopicMessageLink {

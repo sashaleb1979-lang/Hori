@@ -2,10 +2,11 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import type { AppPrismaClient, PersonaMode } from "@hori/shared";
-import { parseCsv } from "@hori/shared";
+import { parseCsv, toVectorLiteral } from "@hori/shared";
 
 import { defaultPersonaSettings, type PowerProfileName } from "@hori/config";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
+import type { EmbeddingAdapter } from "@hori/llm";
 import { MemoryAlbumService, ReflectionService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
 import type { MoodService } from "./mood-service";
 import type { ReplyQueueService } from "./reply-queue-service";
@@ -22,7 +23,8 @@ export class SlashAdminService {
     private readonly mood?: MoodService,
     private readonly replyQueue?: ReplyQueueService,
     private readonly memoryAlbum?: MemoryAlbumService,
-    private readonly reflection?: ReflectionService
+    private readonly reflection?: ReflectionService,
+    private readonly embeddingAdapter?: EmbeddingAdapter
   ) {}
 
   async handleHelp() {
@@ -190,7 +192,7 @@ export class SlashAdminService {
   }
 
   async remember(guildId: string, createdBy: string, key: string, value: string) {
-    await this.retrieval.rememberServerFact({
+    const memory = await this.retrieval.rememberServerFact({
       guildId,
       key,
       value,
@@ -198,6 +200,21 @@ export class SlashAdminService {
       createdBy,
       source: "slash"
     });
+
+    if (this.embeddingAdapter) {
+      try {
+        const runtimeSettings = await this.runtimeConfig?.getRuntimeSettings();
+        const vector = await this.embeddingAdapter.embedOne(value, {
+          dimensions: runtimeSettings?.openaiEmbedDimensions
+        });
+
+        if (vector.length) {
+          await this.retrieval.setEmbedding("server_memory", memory.id, toVectorLiteral(vector), vector.length);
+        }
+      } catch {
+        // Memory was already stored; semantic embedding can be retried later.
+      }
+    }
 
     return `Запомнила: ${key}.`;
   }

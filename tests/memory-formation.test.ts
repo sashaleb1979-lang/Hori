@@ -9,6 +9,7 @@ describe("memory-formation", () => {
     const userMemories: Array<Record<string, unknown>> = [];
 
     const prisma = {
+      $executeRawUnsafe: async () => 1,
       serverMemory: {
         findMany: async () => [],
         deleteMany: async () => ({ count: 0 }),
@@ -127,6 +128,7 @@ describe("memory-formation", () => {
     ];
 
     const prisma = {
+      $executeRawUnsafe: async () => 1,
       serverMemory: {
         findMany: async () => [],
         deleteMany: async () => ({ count: 0 }),
@@ -242,6 +244,7 @@ describe("memory-formation", () => {
     const userMemories: Array<Record<string, unknown>> = [];
 
     const prisma = {
+      $executeRawUnsafe: async () => 1,
       serverMemory: {
         findMany: async () => [],
         deleteMany: async () => ({ count: 0 }),

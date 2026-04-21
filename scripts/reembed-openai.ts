@@ -105,7 +105,7 @@ const ENTITY_PLANS: Record<ReembedEntityType, EntityPlan> = {
           SELECT COUNT(*) AS count
           FROM "ServerMemory"
           WHERE embedding IS NOT NULL
-            AND vector_dims(embedding) = $1
+            AND (dimensions = $1 OR (dimensions IS NULL AND vector_dims(embedding) = $1))
             AND NULLIF(BTRIM(value), '') IS NOT NULL
             AND ($2::TEXT IS NULL OR "guildId" = $2)
         `,
@@ -121,7 +121,7 @@ const ENTITY_PLANS: Record<ReembedEntityType, EntityPlan> = {
           SELECT id, value AS text
           FROM "ServerMemory"
           WHERE embedding IS NOT NULL
-            AND vector_dims(embedding) = $1
+            AND (dimensions = $1 OR (dimensions IS NULL AND vector_dims(embedding) = $1))
             AND NULLIF(BTRIM(value), '') IS NOT NULL
             AND ($2::TEXT IS NULL OR "guildId" = $2)
           ORDER BY "createdAt" ASC, id ASC
@@ -132,10 +132,11 @@ const ENTITY_PLANS: Record<ReembedEntityType, EntityPlan> = {
         take,
       );
     },
-    async apply(prisma, row, vector) {
+    async apply(prisma, row, vector, targetDimensions) {
       await prisma.$executeRawUnsafe(
-        `UPDATE "ServerMemory" SET embedding = $1::vector WHERE id = $2`,
+        `UPDATE "ServerMemory" SET embedding = $1::vector, dimensions = $2 WHERE id = $3`,
         toVectorLiteral(vector),
+        targetDimensions,
         row.id,
       );
     },
@@ -148,7 +149,7 @@ const ENTITY_PLANS: Record<ReembedEntityType, EntityPlan> = {
           SELECT COUNT(*) AS count
           FROM "UserMemoryNote"
           WHERE embedding IS NOT NULL
-            AND vector_dims(embedding) = $1
+            AND (dimensions = $1 OR (dimensions IS NULL AND vector_dims(embedding) = $1))
             AND NULLIF(BTRIM(value), '') IS NOT NULL
             AND ($2::TEXT IS NULL OR "guildId" = $2)
         `,
@@ -164,7 +165,7 @@ const ENTITY_PLANS: Record<ReembedEntityType, EntityPlan> = {
           SELECT id, value AS text
           FROM "UserMemoryNote"
           WHERE embedding IS NOT NULL
-            AND vector_dims(embedding) = $1
+            AND (dimensions = $1 OR (dimensions IS NULL AND vector_dims(embedding) = $1))
             AND NULLIF(BTRIM(value), '') IS NOT NULL
             AND ($2::TEXT IS NULL OR "guildId" = $2)
           ORDER BY "createdAt" ASC, id ASC
@@ -175,10 +176,11 @@ const ENTITY_PLANS: Record<ReembedEntityType, EntityPlan> = {
         take,
       );
     },
-    async apply(prisma, row, vector) {
+    async apply(prisma, row, vector, targetDimensions) {
       await prisma.$executeRawUnsafe(
-        `UPDATE "UserMemoryNote" SET embedding = $1::vector WHERE id = $2`,
+        `UPDATE "UserMemoryNote" SET embedding = $1::vector, dimensions = $2 WHERE id = $3`,
         toVectorLiteral(vector),
+        targetDimensions,
         row.id,
       );
     },
@@ -191,7 +193,7 @@ const ENTITY_PLANS: Record<ReembedEntityType, EntityPlan> = {
           SELECT COUNT(*) AS count
           FROM "ChannelMemoryNote"
           WHERE embedding IS NOT NULL
-            AND vector_dims(embedding) = $1
+            AND (dimensions = $1 OR (dimensions IS NULL AND vector_dims(embedding) = $1))
             AND NULLIF(BTRIM(value), '') IS NOT NULL
             AND ($2::TEXT IS NULL OR "guildId" = $2)
         `,
@@ -207,7 +209,7 @@ const ENTITY_PLANS: Record<ReembedEntityType, EntityPlan> = {
           SELECT id, value AS text
           FROM "ChannelMemoryNote"
           WHERE embedding IS NOT NULL
-            AND vector_dims(embedding) = $1
+            AND (dimensions = $1 OR (dimensions IS NULL AND vector_dims(embedding) = $1))
             AND NULLIF(BTRIM(value), '') IS NOT NULL
             AND ($2::TEXT IS NULL OR "guildId" = $2)
           ORDER BY "createdAt" ASC, id ASC
@@ -218,10 +220,11 @@ const ENTITY_PLANS: Record<ReembedEntityType, EntityPlan> = {
         take,
       );
     },
-    async apply(prisma, row, vector) {
+    async apply(prisma, row, vector, targetDimensions) {
       await prisma.$executeRawUnsafe(
-        `UPDATE "ChannelMemoryNote" SET embedding = $1::vector WHERE id = $2`,
+        `UPDATE "ChannelMemoryNote" SET embedding = $1::vector, dimensions = $2 WHERE id = $3`,
         toVectorLiteral(vector),
+        targetDimensions,
         row.id,
       );
     },
@@ -234,7 +237,7 @@ const ENTITY_PLANS: Record<ReembedEntityType, EntityPlan> = {
           SELECT COUNT(*) AS count
           FROM "EventMemory"
           WHERE embedding IS NOT NULL
-            AND vector_dims(embedding) = $1
+            AND (dimensions = $1 OR (dimensions IS NULL AND vector_dims(embedding) = $1))
             AND NULLIF(BTRIM(value), '') IS NOT NULL
             AND ($2::TEXT IS NULL OR "guildId" = $2)
         `,
@@ -250,7 +253,7 @@ const ENTITY_PLANS: Record<ReembedEntityType, EntityPlan> = {
           SELECT id, value AS text
           FROM "EventMemory"
           WHERE embedding IS NOT NULL
-            AND vector_dims(embedding) = $1
+            AND (dimensions = $1 OR (dimensions IS NULL AND vector_dims(embedding) = $1))
             AND NULLIF(BTRIM(value), '') IS NOT NULL
             AND ($2::TEXT IS NULL OR "guildId" = $2)
           ORDER BY "createdAt" ASC, id ASC
@@ -261,10 +264,11 @@ const ENTITY_PLANS: Record<ReembedEntityType, EntityPlan> = {
         take,
       );
     },
-    async apply(prisma, row, vector) {
+    async apply(prisma, row, vector, targetDimensions) {
       await prisma.$executeRawUnsafe(
-        `UPDATE "EventMemory" SET embedding = $1::vector WHERE id = $2`,
+        `UPDATE "EventMemory" SET embedding = $1::vector, dimensions = $2 WHERE id = $3`,
         toVectorLiteral(vector),
+        targetDimensions,
         row.id,
       );
     },
