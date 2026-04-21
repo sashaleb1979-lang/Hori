@@ -246,6 +246,8 @@ Admin/debug endpoints require `Authorization: Bearer <ADMIN_KEY>` or the legacy 
 ## AI Router Verification
 Use these checks after deploy or after changing provider secrets:
 
+Подробный русский чеклист: [docs/ai-router-runtime-checklist-ru.md](./docs/ai-router-runtime-checklist-ru.md)
+
 1. Run `/hori ai-status` and confirm enabled providers, active order and empty/expected cooldowns.
 2. Ask the bot a short simple question and confirm the latest route in `/hori ai-status` lands on Gemini Flash when available.
 3. Ask a long analytical or code-heavy question and confirm the route moves to Gemini Pro when quota is available.

@@ -145,29 +145,28 @@ export class SlashAdminService {
 
     const snapshot = await this.llmClient.getStatusSnapshot();
     const enabled = snapshot.enabledProviders
-      .map((entry) => `${entry.provider}=${entry.enabled ? "on" : entry.enabledByFlag ? `off(missing:${entry.missing.join(",") || "none"})` : "off(flag)"}`)
-      .join("\n");
+      .map((entry) => `${entry.provider}:${entry.enabled ? "on" : entry.enabledByFlag ? `off(missing:${entry.missing.join(",") || "none"})` : "off(flag)"}`)
+      .join(" | ");
     const cooldowns = snapshot.cooldowns.length
-      ? snapshot.cooldowns.map((entry) => `${entry.provider}/${entry.model} until ${entry.cooldownUntil}`).join("\n")
+      ? snapshot.cooldowns.slice(0, 4).map((entry) => `${entry.provider}/${entry.model}→${compactIso(entry.cooldownUntil)}`).join(" | ")
       : "none";
     const recent = snapshot.recentRoutes.length
       ? snapshot.recentRoutes
-        .slice(-20)
-        .map((entry) => `${entry.timestamp} ${entry.success ? "ok" : "fail"} ${entry.provider}/${entry.model} depth=${entry.fallbackDepth}${entry.errorClass ? ` err=${entry.errorClass}` : ""}`)
+        .slice(-8)
+        .map((entry) => `${compactIso(entry.timestamp)} ${entry.success ? "ok" : "fail"} ${entry.provider}/${entry.model} d${entry.fallbackDepth}${entry.errorClass ? ` ${entry.errorClass}` : ""}`)
         .join("\n")
       : "none";
     const fallbackCounts = Object.entries(snapshot.fallbackCounts)
       .map(([provider, count]) => `${provider}=${count}`)
-      .join(", ") || "none";
+      .join(" | ") || "none";
 
     return [
       "AI router status",
-      `Active order:\n${snapshot.activeOrder.join("\n")}`,
-      `Providers:\n${enabled}`,
-      `Cooldowns:\n${cooldowns}`,
-      `Gemini Flash: ${snapshot.geminiUsage.flash.used}/${snapshot.geminiUsage.flash.limit ?? "?"}`,
-      `Gemini Pro: ${snapshot.geminiUsage.pro.used}/${snapshot.geminiUsage.pro.limit ?? "?"}`,
-      `Fallback counts: ${fallbackCounts}`,
+      `Order: ${snapshot.activeOrder.join(" -> ")}`,
+      `Providers: ${enabled}`,
+      `Cooldowns: ${cooldowns}`,
+      `Gemini: flash ${snapshot.geminiUsage.flash.used}/${snapshot.geminiUsage.flash.limit ?? "?"}, pro ${snapshot.geminiUsage.pro.used}/${snapshot.geminiUsage.pro.limit ?? "?"}`,
+      `Fallbacks: ${fallbackCounts}`,
       `Recent routes:\n${recent}`
     ].join("\n\n");
   }
@@ -798,6 +797,10 @@ function resettableString(value: string | null | undefined, fallback: string) {
   }
 
   return value === null ? fallback : value;
+}
+
+function compactIso(value: string) {
+  return value.length >= 16 ? `${value.slice(5, 16)}Z` : value;
 }
 
 function resettableStringArray(value: string | null | undefined) {

@@ -12,6 +12,62 @@ import {
 } from "@hori/llm";
 
 describe("AiRouterClient", () => {
+  it("routes complex requests to Gemini Pro first", async () => {
+    const gemini = createMockProvider("gemini", async (request) => successResponse("gemini", request.model, "pro ok"));
+    const cloudflare = createMockProvider("cloudflare", async (request) => successResponse("cloudflare", request.model, "cf ok"));
+    const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh ok"));
+    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa ok"));
+
+    const client = createRouter({ gemini, cloudflare, github, openai });
+    const response = await client.chat({
+      model: "ignored",
+      messages: [{ role: "user", content: "Сравни три архитектурных варианта, распиши trade-offs и предложи лучший с аргументами" }],
+      metadata: { requestId: "req-pro-1", userKey: "u:123", complexityHint: "complex" }
+    });
+
+    expect(response.routing?.provider).toBe("gemini");
+    expect(response.routing?.model).toBe("gemini-2.5-pro");
+    expect(gemini.send).toHaveBeenCalledTimes(1);
+    expect(gemini.send).toHaveBeenCalledWith(expect.objectContaining({ model: "gemini-2.5-pro" }));
+    expect(cloudflare.send).not.toHaveBeenCalled();
+    expect(github.send).not.toHaveBeenCalled();
+    expect(openai.send).not.toHaveBeenCalled();
+  });
+
+  it("falls back from Gemini Pro to Gemini Flash before Cloudflare", async () => {
+    const gemini = createMockProvider("gemini", async (request) => {
+      if (request.model === "gemini-2.5-pro") {
+        throw new ProviderRequestError({
+          provider: "gemini",
+          status: 429,
+          bodyText: "quota exceeded",
+          message: "Gemini Pro quota exhausted"
+        });
+      }
+
+      return successResponse("gemini", request.model, "flash ok");
+    });
+    const cloudflare = createMockProvider("cloudflare", async (request) => successResponse("cloudflare", request.model, "cf ok"));
+    const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh ok"));
+    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa ok"));
+
+    const client = createRouter({ gemini, cloudflare, github, openai });
+    const response = await client.chat({
+      model: "ignored",
+      messages: [{ role: "user", content: "Разбери большой спорный кейс и сравни подходы" }],
+      metadata: { requestId: "req-pro-2", userKey: "u:123", complexityHint: "complex" }
+    });
+
+    expect(response.routing?.provider).toBe("gemini");
+    expect(response.routing?.model).toBe("gemini-2.5-flash");
+    expect(response.routing?.fallbackDepth).toBe(1);
+    expect(response.routing?.routedFrom).toEqual(["gemini:gemini-2.5-pro"]);
+    expect(gemini.send).toHaveBeenCalledTimes(2);
+    expect(gemini.send).toHaveBeenNthCalledWith(1, expect.objectContaining({ model: "gemini-2.5-pro" }));
+    expect(gemini.send).toHaveBeenNthCalledWith(2, expect.objectContaining({ model: "gemini-2.5-flash" }));
+    expect(cloudflare.send).not.toHaveBeenCalled();
+  });
+
   it("falls back from Gemini 429 to Cloudflare", async () => {
     const gemini = createMockProvider("gemini", async () => {
       throw new ProviderRequestError({
@@ -109,6 +165,34 @@ describe("AiRouterClient", () => {
     expect(response.routing?.provider).toBe("openai");
     expect(github.send).toHaveBeenCalledTimes(3);
     expect(openai.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports recent routes and fallback counts in status snapshot", async () => {
+    const gemini = createMockProvider("gemini", async () => {
+      throw new ProviderRequestError({
+        provider: "gemini",
+        status: 429,
+        bodyText: "quota exceeded",
+        message: "Gemini rate limited"
+      });
+    });
+    const cloudflare = createMockProvider("cloudflare", async (request) => successResponse("cloudflare", request.model, "cf ok"));
+    const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh ok"));
+    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa ok"));
+
+    const client = createRouter({ gemini, cloudflare, github, openai });
+    await client.chat({
+      model: "ignored",
+      messages: [{ role: "user", content: "коротко ответь" }],
+      metadata: { requestId: "req-status-1", userKey: "u:123", complexityHint: "simple" }
+    });
+
+    const snapshot = await client.getStatusSnapshot();
+
+    expect(snapshot.activeOrder[0]).toContain("gemini:gemini-2.5-pro");
+    expect(snapshot.recentRoutes.some((entry) => entry.requestId === "req-status-1" && entry.provider === "cloudflare" && entry.success)).toBe(true);
+    expect(snapshot.fallbackCounts.cloudflare).toBe(1);
+    expect(snapshot.enabledProviders.find((entry) => entry.provider === "gemini")?.enabled).toBe(true);
   });
 });
 
