@@ -215,6 +215,14 @@ export interface LlmChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
   name?: string;
+  tool_call_id?: string;
+  tool_calls?: Array<{
+    id?: string;
+    function: {
+      name: string;
+      arguments: Record<string, unknown>;
+    };
+  }>;
 }
 
 export interface ToolExecutionResult {

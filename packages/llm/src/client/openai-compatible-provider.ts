@@ -157,6 +157,7 @@ export class OpenAICompatibleProvider implements ChatProvider {
       }
 
       return {
+        id: call.id,
         function: {
           name: call.function.name,
           arguments: parsedArgs
@@ -214,11 +215,7 @@ function buildRequestBody(
 ) {
   const body: Record<string, unknown> = {
     model: request.model,
-    messages: request.messages.map((message) => ({
-      role: message.role,
-      content: message.content,
-      ...(message.name ? { name: message.name } : {})
-    }))
+    messages: request.messages.map((message) => serializeOpenAiCompatibleMessage(message))
   };
 
   if (usesMaxCompletionTokens(request.model)) {
@@ -259,6 +256,29 @@ function buildRequestBody(
   }
 
   return body;
+}
+
+function serializeOpenAiCompatibleMessage(message: ChatProviderRequest["messages"][number]) {
+  const isAssistantToolCall = message.role === "assistant" && Boolean(message.tool_calls?.length);
+
+  return {
+    role: message.role,
+    content: isAssistantToolCall && !message.content ? null : message.content,
+    ...(message.name && message.role !== "tool" ? { name: message.name } : {}),
+    ...(message.role === "tool" && message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
+    ...(isAssistantToolCall
+      ? {
+          tool_calls: message.tool_calls?.map((call, index) => ({
+            id: call.id ?? `tool-call-${index + 1}`,
+            type: "function" as const,
+            function: {
+              name: call.function.name,
+              arguments: JSON.stringify(call.function.arguments ?? {})
+            }
+          }))
+        }
+      : {})
+  };
 }
 
 function stripModelNamespace(model: string) {

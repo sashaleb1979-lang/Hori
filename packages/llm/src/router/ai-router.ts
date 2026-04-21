@@ -21,6 +21,7 @@ import type {
 } from "../client/llm-client";
 import { OpenAiFallbackProvider } from "../client/openai-fallback-provider";
 import { OpenAIClient } from "../client/openai-client";
+import { OPENAI_EMBEDDING_MODEL, resolveOpenAIEmbeddingDimensions } from "./model-routing";
 import type { ChatProvider, ChatProviderRequest } from "./chat-provider";
 import { InMemoryAiRouterStateStore, type AiRouterRecentRoute, type AiRouterState, type AiRouterStateStore } from "./ai-router-state";
 import { classifyProviderError, type ProviderErrorInfo } from "./provider-error";
@@ -46,6 +47,13 @@ export interface AiRouterStatusSnapshot {
   geminiUsage: {
     flash: { used: number; limit?: number };
     pro: { used: number; limit?: number };
+  };
+  embeddings: {
+    provider: "openai";
+    model: string;
+    dimensions: number;
+    available: boolean;
+    missing: string[];
   };
   recentRoutes: AiRouterRecentRoute[];
   fallbackCounts: Record<string, number>;
@@ -79,7 +87,8 @@ export class AiRouterClient implements LlmClient {
         geminiProDailyLimit: env.AI_ROUTER_GEMINI_PRO_DAILY_LIMIT,
         cloudflareCooldownMs: env.AI_ROUTER_CLOUDFLARE_COOLDOWN_MS,
         githubCooldownMs: env.AI_ROUTER_GITHUB_COOLDOWN_MS,
-        openaiCooldownMs: env.AI_ROUTER_OPENAI_COOLDOWN_MS
+        openaiCooldownMs: env.AI_ROUTER_OPENAI_COOLDOWN_MS,
+        reservationTtlMs: Math.max(env.OLLAMA_TIMEOUT_MS * 2, 5 * 60 * 1000)
       }
     );
 
@@ -91,6 +100,7 @@ export class AiRouterClient implements LlmClient {
     const userKey = options.metadata?.userKey ?? "anonymous";
     const attempts = this.buildAttemptChain(options);
     const routedFrom: string[] = [];
+    const failedFrom: string[] = [];
     const allowPaidFallback = options.metadata?.allowPaidFallback !== false;
     let lastError: Error | undefined;
 
@@ -139,7 +149,11 @@ export class AiRouterClient implements LlmClient {
         continue;
       }
 
-      const availability = await this.quotaManager.canUse(attempt.providerName, attempt.model);
+      const availability = await this.quotaManager.reserve({
+        provider: attempt.providerName,
+        model: attempt.model,
+        requestId
+      });
       if (!availability.allowed) {
         this.logTransition({
           requestId,
@@ -155,7 +169,8 @@ export class AiRouterClient implements LlmClient {
 
       try {
         const response = await this.sendWithRetry(provider, {
-          ...options,
+          openaiCooldownMs: env.AI_ROUTER_OPENAI_COOLDOWN_MS,
+          reservationTtlMs: Math.max(env.OLLAMA_TIMEOUT_MS * 2, 5 * 60 * 1000)
           model: attempt.model,
           metadata: {
             ...options.metadata,
@@ -166,11 +181,12 @@ export class AiRouterClient implements LlmClient {
         });
 
         await this.quotaManager.recordSuccess({
+              ...options,
           provider: attempt.providerName,
           model: attempt.model,
           requestId,
           routedFrom,
-          fallbackDepth: index,
+          fallbackDepth: failedFrom.length,
           reason: attempt.reason
         });
 
@@ -182,7 +198,7 @@ export class AiRouterClient implements LlmClient {
             model: attempt.model,
             latencyMs: response.latencyMs,
             success: true,
-            fallbackDepth: index,
+            fallbackDepth: failedFrom.length,
             routedFrom,
             finishReason: response.finishReason
           },
@@ -201,7 +217,7 @@ export class AiRouterClient implements LlmClient {
             latencyMs: response.latencyMs,
             finishReason: response.finishReason,
             routedFrom,
-            fallbackDepth: index,
+            fallbackDepth: failedFrom.length,
             requestId
           },
           rawUsage: response.rawUsage,
@@ -215,7 +231,7 @@ export class AiRouterClient implements LlmClient {
           classification: classification.class,
           requestId,
           routedFrom,
-          fallbackDepth: index,
+          fallbackDepth: failedFrom.length,
           reason: attempt.reason,
           retryAfterMs: classification.retryAfterMs
         });
@@ -227,7 +243,7 @@ export class AiRouterClient implements LlmClient {
             provider: attempt.providerName,
             model: attempt.model,
             success: false,
-            fallbackDepth: index,
+            fallbackDepth: failedFrom.length,
             fallbackReason: attempt.reason,
             errorClass: classification.class,
             status: classification.status,
@@ -237,6 +253,7 @@ export class AiRouterClient implements LlmClient {
         );
 
         routedFrom.push(`${attempt.providerName}:${attempt.model}`);
+        failedFrom.push(`${attempt.providerName}:${attempt.model}`);
         lastError = error instanceof Error ? error : new Error(String(error));
 
         if (!classification.fallbackImmediately) {
@@ -277,6 +294,13 @@ export class AiRouterClient implements LlmClient {
       geminiUsage: {
         flash: { used: geminiFlash?.requestsToday ?? 0, limit: geminiFlash?.dailyLimit },
         pro: { used: geminiPro?.requestsToday ?? 0, limit: geminiPro?.dailyLimit }
+      },
+      embeddings: {
+        provider: "openai",
+        model: OPENAI_EMBEDDING_MODEL,
+        dimensions: resolveOpenAIEmbeddingDimensions({ OPENAI_EMBED_DIMENSIONS: this.env.OPENAI_EMBED_DIMENSIONS }),
+        available: Boolean(this.embedClient),
+        missing: this.embedClient ? [] : ["OPENAI_API_KEY"]
       },
       recentRoutes: state.recentRoutes,
       fallbackCounts: Object.fromEntries(

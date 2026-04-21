@@ -8,10 +8,12 @@ import { AI_ROUTER_STATE_SETTING_KEY, RuntimeConfigService } from "../packages/c
 
 describe("RuntimeConfigService ai router state", () => {
   it("returns empty state when runtime setting is missing or invalid", async () => {
-    const serviceMissing = new RuntimeConfigService(createPrisma([]), createEnv());
-    const serviceInvalid = new RuntimeConfigService(createPrisma([
+    const missingState = createPrisma([]);
+    const invalidState = createPrisma([
       { key: AI_ROUTER_STATE_SETTING_KEY, value: "{not-json", updatedBy: null, updatedAt: new Date() }
-    ]), createEnv());
+    ]);
+    const serviceMissing = new RuntimeConfigService(missingState.prisma, createEnv());
+    const serviceInvalid = new RuntimeConfigService(invalidState.prisma, createEnv());
 
     await expect(serviceMissing.getAiRouterState()).resolves.toEqual(createEmptyAiRouterState());
 
@@ -22,9 +24,8 @@ describe("RuntimeConfigService ai router state", () => {
   });
 
   it("persists ai router state without invalidating routing cache", async () => {
-    const upsert = vi.fn().mockResolvedValue(undefined);
-    const prisma = createPrisma([], upsert);
-    const service = new RuntimeConfigService(prisma, createEnv());
+    const prismaState = createPrisma([]);
+    const service = new RuntimeConfigService(prismaState.prisma, createEnv());
     const invalidateSpy = vi.spyOn(service, "invalidate");
     const state = {
       providers: {
@@ -46,9 +47,14 @@ describe("RuntimeConfigService ai router state", () => {
 
     await service.setAiRouterState(state, "owner-1");
 
-    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+    expect(prismaState.prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaState.tx.$queryRawUnsafe).toHaveBeenCalledWith(
+      expect.stringContaining("FOR UPDATE"),
+      AI_ROUTER_STATE_SETTING_KEY
+    );
+    expect(prismaState.tx.runtimeSetting.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { key: AI_ROUTER_STATE_SETTING_KEY },
-      update: expect.objectContaining({
+      data: expect.objectContaining({
         value: JSON.stringify(state),
         updatedBy: "owner-1"
       })
@@ -62,11 +68,10 @@ describe("RuntimeConfigService ai router state", () => {
       recentRoutes: [{ requestId: "req-1", provider: "gemini", model: "gemini-2.5-flash", timestamp: "2026-04-21T10:00:00.000Z", fallbackDepth: 0, routedFrom: [], success: true }],
       updatedAt: "2026-04-21T10:00:00.000Z"
     };
-    const upsert = vi.fn().mockResolvedValue(undefined);
-    const prisma = createPrisma([
+    const prismaState = createPrisma([
       { key: AI_ROUTER_STATE_SETTING_KEY, value: JSON.stringify(current), updatedBy: null, updatedAt: new Date() }
-    ], upsert);
-    const service = new RuntimeConfigService(prisma, createEnv());
+    ]);
+    const service = new RuntimeConfigService(prismaState.prisma, createEnv());
 
     const next = await service.updateAiRouterState((state) => ({
       ...state,
@@ -76,8 +81,13 @@ describe("RuntimeConfigService ai router state", () => {
 
     expect(next.recentRoutes).toHaveLength(2);
     expect(next.recentRoutes[1]?.provider).toBe("cloudflare");
-    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
-      update: expect.objectContaining({
+    expect(prismaState.prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaState.tx.$queryRawUnsafe).toHaveBeenCalledWith(
+      expect.stringContaining("FOR UPDATE"),
+      AI_ROUTER_STATE_SETTING_KEY
+    );
+    expect(prismaState.tx.runtimeSetting.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
         value: JSON.stringify(next)
       })
     }));
@@ -93,7 +103,9 @@ function createEnv() {
   });
 }
 
-function createPrisma(rows: Array<{ key: string; value: string; updatedBy: string | null; updatedAt: Date }>, upsert = vi.fn().mockResolvedValue(undefined)) {
+function createPrisma(initialRows: Array<{ key: string; value: string; updatedBy: string | null; updatedAt: Date }>) {
+  const rows = [...initialRows];
+
   const runtimeSetting = {
     findMany: vi.fn(async (args?: { where?: { key?: { in?: string[] } } }) => {
       const keys = args?.where?.key?.in;
@@ -103,13 +115,44 @@ function createPrisma(rows: Array<{ key: string; value: string; updatedBy: strin
 
       return rows.filter((row) => keys.includes(row.key));
     }),
-    upsert
+    update: vi.fn(async (args: { where: { key: string }; data: { value: string; updatedBy: string | null; updatedAt: Date } }) => {
+      const existing = rows.find((row) => row.key === args.where.key);
+      if (!existing) {
+        throw new Error(`Missing row ${args.where.key}`);
+      }
+
+      existing.value = args.data.value;
+      existing.updatedBy = args.data.updatedBy;
+      existing.updatedAt = args.data.updatedAt;
+      return existing;
+    })
   };
 
-  return {
+  const tx = {
     runtimeSetting,
+    $executeRawUnsafe: vi.fn(async (_sql: string, key: string, value: string, updatedBy: string | null) => {
+      if (!rows.some((row) => row.key === key)) {
+        rows.push({ key, value, updatedBy, updatedAt: new Date() });
+      }
+
+      return 1;
+    }),
+    $queryRawUnsafe: vi.fn(async (_sql: string, key: string) => {
+      return rows.filter((row) => row.key === key).map((row) => ({ value: row.value }));
+    })
+  };
+
+  const prisma = {
+    runtimeSetting,
+    $transaction: vi.fn(async (callback: (input: typeof tx) => Promise<unknown>) => callback(tx)),
     featureFlag: { findMany: vi.fn().mockResolvedValue([]) },
     guild: { findUnique: vi.fn().mockResolvedValue(null) },
     channelConfig: { findUnique: vi.fn().mockResolvedValue(null) }
   } as unknown as AppPrismaClient;
+
+  return {
+    prisma,
+    tx,
+    rows
+  };
 }

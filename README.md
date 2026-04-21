@@ -65,6 +65,8 @@ Deterministic fallback order:
 
 Health and quota status:
 - Use `/hori ai-status` for enabled providers, active order, cooldowns, Gemini daily counters, recent routes and fallback counts.
+- In router mode, bot and worker now use the same AI router policy. There is no worker-only direct OpenAI bypass anymore.
+- Router-mode embeddings still use OpenAI embeddings. If `OAI_KEY` / `OPENAI_API_KEY` is missing, startup warns and `/hori ai-status` shows embeddings as unavailable.
 - `/hori state tab:brain` now shows router mode and points to `/hori ai-status` for detailed diagnostics.
 
 ## Bootstrap
@@ -154,6 +156,7 @@ Notes:
 - For verbose AI router transition logs, set `AI_ROUTER_LOG_VERBOSE=true`.
 - Prisma-based scripts use the alias bridge automatically, so `DB_URL` is enough if you run the provided `pnpm prisma:*` and `pnpm seed` scripts.
 - API-only deployments can skip LLM vars entirely; bot and worker need either `AI_PROVIDER=router` with provider keys or `AI_PROVIDER=openai` with `OAI_KEY`/`OPENAI_API_KEY`.
+- In `AI_PROVIDER=router`, `OAI_KEY` is still recommended because it powers the final paid fallback and OpenAI embeddings used by retrieval/profile/topic jobs.
 - In Railway, prefer using the built-in managed database variable names directly for service references: `DATABASE_URL=${{Postgres.DATABASE_URL}}` and `REDIS_URL=${{Redis.REDIS_URL}}`.
 
 ## Slash Commands
@@ -249,10 +252,11 @@ Use these checks after deploy or after changing provider secrets:
 Подробный русский чеклист: [docs/ai-router-runtime-checklist-ru.md](./docs/ai-router-runtime-checklist-ru.md)
 
 1. Run `/hori ai-status` and confirm enabled providers, active order and empty/expected cooldowns.
-2. Ask the bot a short simple question and confirm the latest route in `/hori ai-status` lands on Gemini Flash when available.
-3. Ask a long analytical or code-heavy question and confirm the route moves to Gemini Pro when quota is available.
-4. Temporarily disable a provider secret or wait for a cooldown, then repeat the same prompt and confirm fallback moves to Cloudflare, then GitHub, then OpenAI.
-5. Inspect BotEventLog or debug trace and verify `modelUsed` plus `llmCalls` show the real provider/model path.
+2. Confirm the `Embeddings:` line in `/hori ai-status` is `openai:on` if `OAI_KEY` is configured, or explicitly `openai:off(missing:OPENAI_API_KEY)` if you intentionally run without embeddings.
+3. Ask the bot a short simple question and confirm the latest route in `/hori ai-status` lands on Gemini Flash when available.
+4. Ask a long analytical or code-heavy question and confirm the route moves to Gemini Pro when quota is available.
+5. Temporarily disable a provider secret or wait for a cooldown, then repeat the same prompt and confirm fallback moves to Cloudflare, then GitHub, then OpenAI.
+6. Inspect BotEventLog or debug trace and verify `modelUsed` plus `llmCalls` show the real provider/model path.
 
 Example router log lines:
 ```text

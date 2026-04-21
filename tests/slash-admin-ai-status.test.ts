@@ -55,6 +55,7 @@ describe("SlashAdminService aiStatus", () => {
     expect(result).toContain("Order:");
     expect(result).toContain("Providers: gemini:on");
     expect(result).toContain("cloudflare:on");
+    expect(result).toContain("Embeddings: openai:on text-embedding-3-small dim=768");
     expect(result).toContain("Cooldowns: ");
     expect(result).toContain("gemini/gemini-2.5-flash");
     expect(result).toContain("Gemini: flash 0/250, pro 0/100");
@@ -62,10 +63,53 @@ describe("SlashAdminService aiStatus", () => {
     expect(result).toContain("Recent routes:");
     expect(result).toContain("ok cloudflare/@cf/zai-org/glm-4.7-flash d1");
   });
+
+  it("does not report skipped providers as real fallback in the owner status", async () => {
+    const cloudflare = createMockProvider("cloudflare", async (request) => successResponse("cloudflare", request.model, "cf ok"));
+    const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh ok"));
+    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa ok"));
+
+    const client = createRouterWithEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      AI_PROVIDER: "router",
+      CF_ACCOUNT_ID: "cf-account",
+      CF_API_TOKEN: "cf-token",
+      GITHUB_TOKEN: "gh-token",
+      OPENAI_API_KEY: "openai-key"
+    }, { cloudflare, github, openai });
+
+    await client.chat({
+      model: "ignored",
+      messages: [{ role: "user", content: "коротко ответь" }],
+      metadata: { requestId: "req-ai-status-skip", userKey: "u:123", complexityHint: "simple" }
+    });
+
+    const service = new SlashAdminService(
+      {} as AppPrismaClient,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      client
+    );
+
+    const result = await service.aiStatus();
+
+    expect(result).toContain("Providers: gemini:off(missing:GOOGLE_API_KEY)");
+    expect(result).toContain("Fallbacks: cloudflare=0");
+    expect(result).toContain("ok cloudflare/@cf/zai-org/glm-4.7-flash d0");
+  });
 });
 
 function createRouter(providers: Record<string, ChatProvider>) {
-  const env = loadEnv({
+  return createRouterWithEnv({
     DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
     REDIS_URL: "redis://localhost:6379",
     AI_PROVIDER: "router",
@@ -74,6 +118,12 @@ function createRouter(providers: Record<string, ChatProvider>) {
     CF_API_TOKEN: "cf-token",
     GITHUB_TOKEN: "gh-token",
     OPENAI_API_KEY: "openai-key"
+  }, providers);
+}
+
+function createRouterWithEnv(envInput: Record<string, string>, providers: Record<string, ChatProvider>) {
+  const env = loadEnv({
+    ...envInput
   });
 
   return new AiRouterClient(env, createLogger(), {

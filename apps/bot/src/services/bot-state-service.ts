@@ -71,24 +71,41 @@ export class BotStateService {
     const embeddingStatus = modelRouting.embeddingDimensions
       ? `${modelRouting.embeddingModel} @ ${modelRouting.embeddingDimensions} dims`
       : modelRouting.embeddingModel;
+    const ignoredOverrides = modelRouting.storedOverrides && Object.keys(modelRouting.storedOverrides).length
+      ? Object.entries(modelRouting.storedOverrides).map(([slot, model]) => `${slot}=${model}`).join(", ")
+      : null;
     const llm = modelRouting.provider === "openai"
       ? [
           `provider=openai preset=${modelRouting.preset}`,
+          "routingControls=editable",
           ...MODEL_ROUTING_SLOTS.map((slot) => `${slot}=${modelRouting.slots[slot]}`),
           `embed=${embeddingStatus}`
         ].join("\n")
       : modelRouting.provider === "router"
         ? [
             "provider=router",
+            "routingControls=informational-only",
+            ...(modelRouting.storedPreset ? [`ignoredPreset=${modelRouting.storedPreset}`] : []),
+            ...(ignoredOverrides ? [`ignoredOverrides=${ignoredOverrides}`] : []),
             `fallbackOpenAI=${this.runtime.env.OPENAI_MODEL}`,
             `geminiFlash=${this.runtime.env.GEMINI_FLASH_MODEL}`,
             `geminiPro=${this.runtime.env.GEMINI_PRO_MODEL}`,
             `cloudflare=${this.runtime.env.CF_MODEL}`,
             `github=${this.runtime.env.GITHUB_MODEL_PRIMARY}`,
             `embed=${embeddingStatus}`,
+            ...(modelRouting.controlsNote ? [`note=${modelRouting.controlsNote}`] : []),
             "details=/hori ai-status"
           ].join("\n")
-        : `provider=ollama\nurl=${this.runtime.env.OLLAMA_BASE_URL ?? "missing"}\nfast=${this.runtime.env.OLLAMA_FAST_MODEL}\nsmart=${this.runtime.env.OLLAMA_SMART_MODEL}`;
+        : [
+            "provider=ollama",
+            "routingControls=informational-only",
+            ...(modelRouting.storedPreset ? [`ignoredPreset=${modelRouting.storedPreset}`] : []),
+            ...(ignoredOverrides ? [`ignoredOverrides=${ignoredOverrides}`] : []),
+            `url=${this.runtime.env.OLLAMA_BASE_URL ?? "missing"}`,
+            `fast=${this.runtime.env.OLLAMA_FAST_MODEL}`,
+            `smart=${this.runtime.env.OLLAMA_SMART_MODEL}`,
+            ...(modelRouting.controlsNote ? [`note=${modelRouting.controlsNote}`] : [])
+          ].join("\n");
 
     return {
       title: "Состояние: мозги",

@@ -78,15 +78,7 @@ export function classifyProviderError(error: unknown): ProviderErrorInfo {
 
   if (
     normalized.status === 408 ||
-    normalized.status === 502 ||
-    normalized.status === 503 ||
-    normalized.status === 504 ||
-    normalized.status === 520 ||
-    normalized.status === 522 ||
-    normalized.status === 523 ||
-    normalized.status === 524 ||
-    normalized.status === 529 ||
-    normalized.status === 530 ||
+    (normalized.status !== undefined && normalized.status >= 500 && normalized.status < 600) ||
     /service unavailable|temporar|overload|upstream|unavailable/i.test(haystack)
   ) {
     return buildInfo("provider_unavailable", normalized, { retryOnce: true, setCooldown: true, alertInLogs: true });
@@ -157,7 +149,7 @@ function buildInfo(
     status: normalized.status,
     provider: normalized.provider,
     retryAfterMs: normalized.retryAfterMs,
-    fallbackImmediately: kind !== "unknown",
+    fallbackImmediately: true,
     retryOnce: overrides.retryOnce,
     setCooldown: overrides.setCooldown,
     alertInLogs: overrides.alertInLogs

@@ -2,8 +2,8 @@ import type { Client } from "discord.js";
 
 import { AnalyticsQueryService, MessageIngestService } from "@hori/analytics";
 import { assertEnvForRole, loadEnv } from "@hori/config";
-import { AffinityService, createChatOrchestrator, MediaReactionService, MoodService, ReplyQueueService, RuntimeConfigService, SlashAdminService } from "@hori/core";
-import { AiRouterClient, EmbeddingAdapter, ModelRouter, OpenAIClient, ToolOrchestrator } from "@hori/llm";
+import { AffinityService, createChatOrchestrator, createRuntimeLlmClient, MediaReactionService, MoodService, ReplyQueueService, RuntimeConfigService, SlashAdminService } from "@hori/core";
+import { EmbeddingAdapter, ModelRouter, ToolOrchestrator } from "@hori/llm";
 import type { LlmClient } from "@hori/llm";
 import { ActiveMemoryService, ContextService, InteractionRequestService, MemoryAlbumService, ProfileService, ReflectionService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
 import { BraveSearchClient, SearchCacheService } from "@hori/search";
@@ -115,29 +115,7 @@ export async function bootstrapBot() {
   const replyQueueService = new ReplyQueueService(prisma, env.REPLY_QUEUE_BUSY_TTL_SEC);
   const contextService = new ContextService(prisma, summaryService, profileService, relationshipService, retrievalService, activeMemoryService, redisReady ? redis : undefined);
 
-  // --- LLM client: выбор провайдера ---
-  const llmProvider = (env as unknown as Record<string, unknown>).LLM_PROVIDER as string;
-  let llmClient: LlmClient;
-
-  if (llmProvider === "openai") {
-    llmClient = new OpenAIClient(env, logger);
-    logger.info("LLM provider: OpenAI");
-  } else {
-    (env as typeof env & { LLM_PROVIDER: string }).LLM_PROVIDER = "router";
-
-    if (llmProvider === "ollama") {
-      logger.warn("LLM_PROVIDER=ollama is deprecated in this runtime; using multi-provider AI router instead");
-    }
-
-    llmClient = new AiRouterClient(env, logger, {
-      stateStore: {
-        getState: () => runtimeConfig.getAiRouterState(),
-        setState: (state) => runtimeConfig.setAiRouterState(state),
-        updateState: (updater) => runtimeConfig.updateAiRouterState(updater)
-      }
-    });
-    logger.info("LLM provider: AI router");
-  }
+  const { client: llmClient } = createRuntimeLlmClient(env, logger, runtimeConfig, "bot");
 
   const modelRouter = new ModelRouter(env);
   const embeddingAdapter = new EmbeddingAdapter(llmClient, modelRouter);

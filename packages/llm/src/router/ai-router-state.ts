@@ -8,6 +8,7 @@ export interface AiRouterModelState {
   dailyLimit?: number;
   cooldownUntil?: string;
   recentFailureCount: number;
+  reservations?: Record<string, string>;
   lastSuccessfulRequestAt?: string;
   lastRateLimitAt?: string;
   lastErrorClass?: ProviderErrorClass;
@@ -75,7 +76,8 @@ export function getOrCreateModelState(providerState: AiRouterProviderState, mode
 
   const created: AiRouterModelState = {
     requestsToday: 0,
-    recentFailureCount: 0
+    recentFailureCount: 0,
+    reservations: {}
   };
   providerState.models[model] = created;
   return created;

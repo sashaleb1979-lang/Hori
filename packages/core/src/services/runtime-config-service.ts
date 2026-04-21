@@ -244,13 +244,13 @@ export class RuntimeConfigService {
 
     return {
       ...routing,
-      updatedBy: row?.updatedBy,
-      updatedAt: row?.updatedAt
+      updatedBy: routing.source === "runtime_setting" ? row?.updatedBy : undefined,
+      updatedAt: routing.source === "runtime_setting" ? row?.updatedAt : undefined
     };
   }
 
   async getOpenAIEmbeddingDimensionsStatus(): Promise<RuntimeOverrideStatus<number | undefined>> {
-    if ((this.env as { LLM_PROVIDER?: string }).LLM_PROVIDER !== "openai") {
+    if (!usesOpenAiEmbeddingPolicy(this.env)) {
       return {
         value: undefined,
         source: "unsupported"
@@ -269,8 +269,8 @@ export class RuntimeConfigService {
   }
 
   async setOpenAIEmbeddingDimensions(dimensions: number, updatedBy?: string) {
-    if ((this.env as { LLM_PROVIDER?: string }).LLM_PROVIDER !== "openai") {
-      throw new Error("OpenAI embedding dimensions are only available when LLM_PROVIDER=openai");
+    if (!usesOpenAiEmbeddingPolicy(this.env)) {
+      throw new Error("OpenAI embedding dimensions are only available when LLM_PROVIDER=openai or router");
     }
 
     const parsedValue = parseOpenAIEmbeddingDimensions(String(dimensions));
@@ -310,6 +310,8 @@ export class RuntimeConfigService {
   }
 
   async setModelPreset(preset: ModelRoutingPresetName, updatedBy?: string) {
+    this.assertModelRoutingControlsEditable();
+
     if (!isModelRoutingPresetName(preset)) {
       throw new Error(`Unsupported model preset: ${preset}`);
     }
@@ -319,6 +321,8 @@ export class RuntimeConfigService {
   }
 
   async setModelSlot(slot: ModelRoutingSlot, model: ModelRoutingModelId, updatedBy?: string) {
+    this.assertModelRoutingControlsEditable();
+
     if (!isModelRoutingSlot(slot)) {
       throw new Error(`Unsupported model slot: ${slot}`);
     }
@@ -339,6 +343,8 @@ export class RuntimeConfigService {
   }
 
   async resetModelSlot(slot: ModelRoutingSlot, updatedBy?: string) {
+    this.assertModelRoutingControlsEditable();
+
     if (!isModelRoutingSlot(slot)) {
       throw new Error(`Unsupported model slot: ${slot}`);
     }
@@ -353,6 +359,8 @@ export class RuntimeConfigService {
   }
 
   async resetModelRouting(updatedBy?: string) {
+    this.assertModelRoutingControlsEditable();
+
     const stored = await this.getStoredModelRoutingValue();
     const preset = stored?.preset ?? defaultModelRoutingPresetForEnv(this.env);
 
@@ -362,36 +370,63 @@ export class RuntimeConfigService {
 
   async getAiRouterState(): Promise<AiRouterState> {
     const row = await this.getRuntimeSettingRow(AI_ROUTER_STATE_SETTING_KEY);
-    if (!row?.value?.trim()) {
-      return createEmptyAiRouterState();
-    }
-
-    try {
-      const parsed = JSON.parse(row.value) as AiRouterState;
-      if (!parsed || typeof parsed !== "object") {
-        return createEmptyAiRouterState();
-      }
-
-      return {
-        providers: parsed.providers && typeof parsed.providers === "object" ? parsed.providers : {},
-        recentRoutes: Array.isArray(parsed.recentRoutes) ? parsed.recentRoutes : [],
-        updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString()
-      };
-    } catch {
-      return createEmptyAiRouterState();
-    }
+    return parseAiRouterStateValue(row?.value);
   }
 
   async setAiRouterState(state: AiRouterState, updatedBy?: string) {
-    await this.writeRuntimeSetting(AI_ROUTER_STATE_SETTING_KEY, JSON.stringify(state), updatedBy, false);
-    return state;
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        'INSERT INTO "RuntimeSetting" ("key", "value", "updatedBy", "createdAt", "updatedAt") VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT ("key") DO NOTHING',
+        AI_ROUTER_STATE_SETTING_KEY,
+        JSON.stringify(createEmptyAiRouterState()),
+        updatedBy ?? null
+      );
+      await tx.$queryRawUnsafe(
+        'SELECT "key" FROM "RuntimeSetting" WHERE "key" = $1 FOR UPDATE',
+        AI_ROUTER_STATE_SETTING_KEY
+      );
+
+      const next = parseAiRouterStateValue(JSON.stringify(state));
+      await tx.runtimeSetting.update({
+        where: { key: AI_ROUTER_STATE_SETTING_KEY },
+        data: {
+          value: JSON.stringify(next),
+          updatedBy: updatedBy ?? null,
+          updatedAt: new Date()
+        }
+      });
+
+      return next;
+    });
   }
 
   async updateAiRouterState(updater: (current: AiRouterState) => AiRouterState | Promise<AiRouterState>, updatedBy?: string) {
-    const current = await this.getAiRouterState();
-    const next = await updater(current);
-    await this.writeRuntimeSetting(AI_ROUTER_STATE_SETTING_KEY, JSON.stringify(next), updatedBy, false);
-    return next;
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        'INSERT INTO "RuntimeSetting" ("key", "value", "updatedBy", "createdAt", "updatedAt") VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT ("key") DO NOTHING',
+        AI_ROUTER_STATE_SETTING_KEY,
+        JSON.stringify(createEmptyAiRouterState()),
+        updatedBy ?? null
+      );
+
+      const rows = await tx.$queryRawUnsafe<Array<{ value: string }>>(
+        'SELECT "value" FROM "RuntimeSetting" WHERE "key" = $1 FOR UPDATE',
+        AI_ROUTER_STATE_SETTING_KEY
+      );
+      const current = parseAiRouterStateValue(rows[0]?.value);
+      const next = parseAiRouterStateValue(JSON.stringify(await updater(current)));
+
+      await tx.runtimeSetting.update({
+        where: { key: AI_ROUTER_STATE_SETTING_KEY },
+        data: {
+          value: JSON.stringify(next),
+          updatedBy: updatedBy ?? null,
+          updatedAt: new Date()
+        }
+      });
+
+      return next;
+    });
   }
 
   async getGuildSettings(guildId: string): Promise<PersonaSettings> {
@@ -599,6 +634,20 @@ export class RuntimeConfigService {
 
     this.invalidate();
   }
+
+  private assertModelRoutingControlsEditable() {
+    const provider = (this.env as { LLM_PROVIDER?: string }).LLM_PROVIDER;
+
+    if (provider === "openai") {
+      return;
+    }
+
+    if (provider === "router") {
+      throw new Error("Model preset and slot overrides are informational-only when LLM_PROVIDER=router; the AI router uses deterministic env-controlled routing.");
+    }
+
+    throw new Error("Model preset and slot overrides are informational-only when LLM_PROVIDER=ollama; use OLLAMA_FAST_MODEL and OLLAMA_SMART_MODEL instead.");
+  }
 }
 
 function applyPowerProfilePreset(base: EffectiveRuntimeSettings, profile: PowerProfileName): EffectiveRuntimeSettings {
@@ -710,4 +759,92 @@ function applyRuntimeOverride(
       target.mediaAutoMinIntensity = Number(value);
       return;
   }
+}
+
+function parseAiRouterStateValue(rawValue?: string | null) {
+  if (!rawValue?.trim()) {
+    return createEmptyAiRouterState();
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as AiRouterState;
+    if (!parsed || typeof parsed !== "object") {
+      return createEmptyAiRouterState();
+    }
+
+    const providers = parsed.providers && typeof parsed.providers === "object"
+      ? Object.fromEntries(
+          Object.entries(parsed.providers)
+            .filter(([, providerState]) => providerState && typeof providerState === "object")
+            .map(([provider, providerState]) => {
+              const typedProvider = providerState as {
+                fallbackCount?: unknown;
+                lastSuccessfulRequestAt?: unknown;
+                lastRateLimitAt?: unknown;
+                lastErrorClass?: unknown;
+                models?: unknown;
+              };
+              const models = typedProvider.models && typeof typedProvider.models === "object"
+                ? Object.fromEntries(
+                    Object.entries(typedProvider.models)
+                      .filter(([, modelState]) => modelState && typeof modelState === "object")
+                      .map(([model, modelState]) => {
+                        const typedModel = modelState as {
+                          requestsToday?: unknown;
+                          windowKey?: unknown;
+                          dailyLimit?: unknown;
+                          cooldownUntil?: unknown;
+                          recentFailureCount?: unknown;
+                          reservations?: unknown;
+                          lastSuccessfulRequestAt?: unknown;
+                          lastRateLimitAt?: unknown;
+                          lastErrorClass?: unknown;
+                        };
+
+                        return [model, {
+                          requestsToday: typeof typedModel.requestsToday === "number" && typedModel.requestsToday >= 0 ? typedModel.requestsToday : 0,
+                          windowKey: typeof typedModel.windowKey === "string" ? typedModel.windowKey : undefined,
+                          dailyLimit: typeof typedModel.dailyLimit === "number" && typedModel.dailyLimit >= 0 ? typedModel.dailyLimit : undefined,
+                          cooldownUntil: typeof typedModel.cooldownUntil === "string" ? typedModel.cooldownUntil : undefined,
+                          recentFailureCount: typeof typedModel.recentFailureCount === "number" && typedModel.recentFailureCount >= 0 ? typedModel.recentFailureCount : 0,
+                          reservations: typedModel.reservations && typeof typedModel.reservations === "object"
+                            ? Object.fromEntries(
+                                Object.entries(typedModel.reservations as Record<string, unknown>)
+                                  .filter(([, reservedAt]) => typeof reservedAt === "string")
+                              )
+                            : {},
+                          lastSuccessfulRequestAt: typeof typedModel.lastSuccessfulRequestAt === "string" ? typedModel.lastSuccessfulRequestAt : undefined,
+                          lastRateLimitAt: typeof typedModel.lastRateLimitAt === "string" ? typedModel.lastRateLimitAt : undefined,
+                          lastErrorClass: typeof typedModel.lastErrorClass === "string" ? typedModel.lastErrorClass : undefined
+                        }];
+                      })
+                  )
+                : {};
+
+              return [provider, {
+                fallbackCount: typeof typedProvider.fallbackCount === "number" && typedProvider.fallbackCount >= 0 ? typedProvider.fallbackCount : 0,
+                lastSuccessfulRequestAt: typeof typedProvider.lastSuccessfulRequestAt === "string" ? typedProvider.lastSuccessfulRequestAt : undefined,
+                lastRateLimitAt: typeof typedProvider.lastRateLimitAt === "string" ? typedProvider.lastRateLimitAt : undefined,
+                lastErrorClass: typeof typedProvider.lastErrorClass === "string" ? typedProvider.lastErrorClass : undefined,
+                models
+              }];
+            })
+        )
+      : {};
+
+    return {
+      providers,
+      recentRoutes: Array.isArray(parsed.recentRoutes)
+        ? parsed.recentRoutes.filter((route): route is AiRouterState["recentRoutes"][number] => Boolean(route && typeof route === "object"))
+        : [],
+      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString()
+    };
+  } catch {
+    return createEmptyAiRouterState();
+  }
+}
+
+function usesOpenAiEmbeddingPolicy(env: AppEnv) {
+  const provider = (env as { LLM_PROVIDER?: string }).LLM_PROVIDER;
+  return provider === "openai" || provider === "router";
 }

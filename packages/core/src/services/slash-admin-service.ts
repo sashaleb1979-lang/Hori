@@ -144,6 +144,12 @@ export class SlashAdminService {
     }
 
     const snapshot = await this.llmClient.getStatusSnapshot();
+    const embeddingDimensionsStatus = this.runtimeConfig
+      ? await this.runtimeConfig.getOpenAIEmbeddingDimensionsStatus()
+      : undefined;
+    const embeddingDimensions = embeddingDimensionsStatus?.source !== "unsupported"
+      ? embeddingDimensionsStatus?.value ?? snapshot.embeddings.dimensions
+      : snapshot.embeddings.dimensions;
     const enabled = snapshot.enabledProviders
       .map((entry) => `${entry.provider}:${entry.enabled ? "on" : entry.enabledByFlag ? `off(missing:${entry.missing.join(",") || "none"})` : "off(flag)"}`)
       .join(" | ");
@@ -164,6 +170,7 @@ export class SlashAdminService {
       "AI router status",
       `Order: ${snapshot.activeOrder.join(" -> ")}`,
       `Providers: ${enabled}`,
+      `Embeddings: ${snapshot.embeddings.provider}:${snapshot.embeddings.available ? "on" : `off(missing:${snapshot.embeddings.missing.join(",") || "none"})`} ${snapshot.embeddings.model} dim=${embeddingDimensions ?? "?"}`,
       `Cooldowns: ${cooldowns}`,
       `Gemini: flash ${snapshot.geminiUsage.flash.used}/${snapshot.geminiUsage.flash.limit ?? "?"}, pro ${snapshot.geminiUsage.pro.used}/${snapshot.geminiUsage.pro.limit ?? "?"}`,
       `Fallbacks: ${fallbackCounts}`,

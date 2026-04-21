@@ -88,6 +88,26 @@ describe("ModelRouter", () => {
       model: "text-embedding-3-small",
       dimensions: 768
     });
+    expect(routing.controlsEditable).toBe(false);
+    expect(routing.controlsNote).toMatch(/deterministic and env-controlled/i);
+  });
+
+  it("keeps stale router-mode preset overrides only as informational metadata", () => {
+    const env = loadEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      AI_PROVIDER: "router",
+      OPENAI_MODEL: "gpt-5-nano"
+    });
+    const routing = resolveModelRouting(env, serializeModelRouting("quality_openai", { chat: "gpt-5.4-mini" }));
+
+    expect(routing.source).toBe("default");
+    expect(routing.preset).toBe("legacy_env");
+    expect(routing.controlsEditable).toBe(false);
+    expect(routing.slots.chat).toBe("gpt-5-nano");
+    expect(routing.overrides).toEqual({});
+    expect(routing.storedPreset).toBe("quality_openai");
+    expect(routing.storedOverrides).toEqual({ chat: "gpt-5.4-mini" });
   });
 
   it("lets slot overrides beat the active preset", () => {

@@ -1,7 +1,7 @@
 import { AnalyticsQueryService } from "@hori/analytics";
 import { assertEnvForRole, loadEnv } from "@hori/config";
-import { RuntimeConfigService } from "@hori/core";
-import { AiRouterClient, EmbeddingAdapter, ModelRouter, OpenAIClient } from "@hori/llm";
+import { createRuntimeLlmClient, RuntimeConfigService } from "@hori/core";
+import { EmbeddingAdapter, ModelRouter } from "@hori/llm";
 import type { LlmClient } from "@hori/llm";
 import { ProfileService, RetrievalService, SummaryService, TopicService } from "@hori/memory";
 import { SearchCacheService } from "@hori/search";
@@ -71,31 +71,7 @@ async function main() {
   const searchCache = new SearchCacheService(prisma, redis);
   const runtimeConfig = new RuntimeConfigService(prisma, env);
 
-  const llmProvider = (env as unknown as Record<string, unknown>).LLM_PROVIDER as string;
-  let llmClient: LlmClient;
-
-  if (llmProvider === "openai") {
-    llmClient = new OpenAIClient(env, logger);
-    logger.info("worker LLM provider: OpenAI");
-  } else if (env.OPENAI_API_KEY) {
-    llmClient = new OpenAIClient(env, logger);
-    logger.info("worker LLM provider: OpenAI direct (background-safe mode)");
-  } else {
-    (env as typeof env & { LLM_PROVIDER: string }).LLM_PROVIDER = "router";
-
-    if (llmProvider === "ollama") {
-      logger.warn("worker LLM_PROVIDER=ollama is deprecated; using AI router fallback mode instead");
-    }
-
-    llmClient = new AiRouterClient(env, logger, {
-      stateStore: {
-        getState: () => runtimeConfig.getAiRouterState(),
-        setState: (state) => runtimeConfig.setAiRouterState(state),
-        updateState: (updater) => runtimeConfig.updateAiRouterState(updater)
-      }
-    });
-    logger.info("worker LLM provider: AI router");
-  }
+  const { client: llmClient } = createRuntimeLlmClient(env, logger, runtimeConfig, "worker");
 
   const modelRouter = new ModelRouter(env);
   const embeddingAdapter = new EmbeddingAdapter(llmClient, modelRouter);

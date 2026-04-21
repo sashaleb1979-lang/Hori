@@ -15,6 +15,7 @@ export const UTC_RESET_TIMEZONE = "UTC";
 const DEFAULT_GEMINI_COOLDOWN_MS = 15 * 60 * 1000;
 const DEFAULT_TRANSIENT_COOLDOWN_MS = 60 * 1000;
 const MAX_TRANSIENT_COOLDOWN_MS = 15 * 60 * 1000;
+const DEFAULT_RESERVATION_TTL_MS = 10 * 60 * 1000;
 
 export interface AiRouterQuotaConfig {
   geminiFlashModel: string;
@@ -26,6 +27,7 @@ export interface AiRouterQuotaConfig {
   openaiCooldownMs: number;
   geminiCooldownMs?: number;
   transientCooldownMs?: number;
+  reservationTtlMs?: number;
 }
 
 export interface AiRouterAvailability {
@@ -61,6 +63,13 @@ export interface AiRouterSuccessRecord {
   now?: Date;
 }
 
+export interface AiRouterReservationRecord {
+  provider: string;
+  model: string;
+  requestId: string;
+  now?: Date;
+}
+
 export class AiRouterQuotaManager {
   constructor(
     private readonly store: AiRouterStateStore,
@@ -81,10 +90,12 @@ export class AiRouterQuotaManager {
       const modelState = getOrCreateModelState(providerState, model);
 
       this.applyWindow(modelState, policy, now);
+      const reservationCount = this.getReservationCount(modelState, now);
+      const effectiveRequestsToday = modelState.requestsToday + reservationCount;
       const cooldownUntil = modelState.cooldownUntil ? new Date(modelState.cooldownUntil) : null;
       const resetAt = policy.resetTimeZone ? getNextResetAt(now, policy.resetTimeZone) : undefined;
 
-      if (policy.dailyLimit !== undefined && modelState.requestsToday >= policy.dailyLimit) {
+      if (policy.dailyLimit !== undefined && effectiveRequestsToday >= policy.dailyLimit) {
         if (!modelState.cooldownUntil || new Date(modelState.cooldownUntil) < now) {
           modelState.cooldownUntil = resetAt?.toISOString();
         }
@@ -109,7 +120,7 @@ export class AiRouterQuotaManager {
           reason: "cooldown",
           requestsToday: modelState.requestsToday,
           dailyLimit: policy.dailyLimit,
-          remainingToday: policy.dailyLimit !== undefined ? Math.max(0, policy.dailyLimit - modelState.requestsToday) : undefined,
+          remainingToday: policy.dailyLimit !== undefined ? Math.max(0, policy.dailyLimit - effectiveRequestsToday) : undefined,
           cooldownUntil: modelState.cooldownUntil,
           resetAt: resetAt?.toISOString(),
           recentFailureCount: modelState.recentFailureCount
@@ -122,7 +133,94 @@ export class AiRouterQuotaManager {
         allowed: true,
         requestsToday: modelState.requestsToday,
         dailyLimit: policy.dailyLimit,
-        remainingToday: policy.dailyLimit !== undefined ? Math.max(0, policy.dailyLimit - modelState.requestsToday) : undefined,
+        remainingToday: policy.dailyLimit !== undefined ? Math.max(0, policy.dailyLimit - effectiveRequestsToday) : undefined,
+        cooldownUntil: modelState.cooldownUntil,
+        resetAt: resetAt?.toISOString(),
+        recentFailureCount: modelState.recentFailureCount
+      };
+      normalized.updatedAt = now.toISOString();
+      return normalized;
+    });
+
+    return result;
+  }
+
+  async reserve(record: AiRouterReservationRecord): Promise<AiRouterAvailability> {
+    const now = record.now ?? new Date();
+    let result: AiRouterAvailability = {
+      allowed: false,
+      requestsToday: 0,
+      recentFailureCount: 0
+    };
+
+    await this.store.updateState((state) => {
+      const normalized = this.normalizeState(state, now);
+      const policy = this.getPolicy(record.provider, record.model, now);
+      const providerState = getOrCreateProviderState(normalized, record.provider);
+      const modelState = getOrCreateModelState(providerState, record.model);
+
+      this.applyWindow(modelState, policy, now);
+      const alreadyReserved = this.hasReservation(modelState, record.requestId, now);
+      const reservationCount = this.getReservationCount(modelState, now);
+      const effectiveRequestsToday = modelState.requestsToday + reservationCount;
+      const cooldownUntil = modelState.cooldownUntil ? new Date(modelState.cooldownUntil) : null;
+      const resetAt = policy.resetTimeZone ? getNextResetAt(now, policy.resetTimeZone) : undefined;
+
+      if (alreadyReserved) {
+        result = {
+          allowed: true,
+          requestsToday: modelState.requestsToday,
+          dailyLimit: policy.dailyLimit,
+          remainingToday: policy.dailyLimit !== undefined ? Math.max(0, policy.dailyLimit - effectiveRequestsToday) : undefined,
+          cooldownUntil: modelState.cooldownUntil,
+          resetAt: resetAt?.toISOString(),
+          recentFailureCount: modelState.recentFailureCount
+        };
+        normalized.updatedAt = now.toISOString();
+        return normalized;
+      }
+
+      if (policy.dailyLimit !== undefined && effectiveRequestsToday >= policy.dailyLimit) {
+        if (!modelState.cooldownUntil || new Date(modelState.cooldownUntil) < now) {
+          modelState.cooldownUntil = resetAt?.toISOString();
+        }
+
+        result = {
+          allowed: false,
+          reason: "daily_limit_reached",
+          requestsToday: modelState.requestsToday,
+          dailyLimit: policy.dailyLimit,
+          remainingToday: 0,
+          cooldownUntil: modelState.cooldownUntil,
+          resetAt: resetAt?.toISOString(),
+          recentFailureCount: modelState.recentFailureCount
+        };
+        normalized.updatedAt = now.toISOString();
+        return normalized;
+      }
+
+      if (cooldownUntil && cooldownUntil > now) {
+        result = {
+          allowed: false,
+          reason: "cooldown",
+          requestsToday: modelState.requestsToday,
+          dailyLimit: policy.dailyLimit,
+          remainingToday: policy.dailyLimit !== undefined ? Math.max(0, policy.dailyLimit - effectiveRequestsToday) : undefined,
+          cooldownUntil: modelState.cooldownUntil,
+          resetAt: resetAt?.toISOString(),
+          recentFailureCount: modelState.recentFailureCount
+        };
+        normalized.updatedAt = now.toISOString();
+        return normalized;
+      }
+
+      this.addReservation(modelState, record.requestId, now);
+      const reservedCount = this.getReservationCount(modelState, now);
+      result = {
+        allowed: true,
+        requestsToday: modelState.requestsToday,
+        dailyLimit: policy.dailyLimit,
+        remainingToday: policy.dailyLimit !== undefined ? Math.max(0, policy.dailyLimit - modelState.requestsToday - reservedCount) : undefined,
         cooldownUntil: modelState.cooldownUntil,
         resetAt: resetAt?.toISOString(),
         recentFailureCount: modelState.recentFailureCount
@@ -144,6 +242,7 @@ export class AiRouterQuotaManager {
       const modelState = getOrCreateModelState(providerState, record.model);
 
       this.applyWindow(modelState, policy, now);
+      this.removeReservation(modelState, record.requestId, now);
 
       modelState.requestsToday += 1;
       modelState.dailyLimit = policy.dailyLimit;
@@ -183,6 +282,7 @@ export class AiRouterQuotaManager {
       const modelState = getOrCreateModelState(providerState, record.model);
 
       this.applyWindow(modelState, policy, now);
+      this.removeReservation(modelState, record.requestId, now);
 
       modelState.recentFailureCount += 1;
       modelState.lastErrorClass = record.classification;
@@ -231,6 +331,7 @@ export class AiRouterQuotaManager {
     for (const [provider, providerState] of Object.entries(next.providers)) {
       for (const [model, modelState] of Object.entries(providerState.models)) {
         this.applyWindow(modelState, this.getPolicy(provider, model, now), now);
+        this.pruneReservations(modelState, now);
 
         if (modelState.cooldownUntil && new Date(modelState.cooldownUntil) <= now) {
           modelState.cooldownUntil = undefined;
@@ -250,12 +351,51 @@ export class AiRouterQuotaManager {
       modelState.recentFailureCount = 0;
       modelState.cooldownUntil = undefined;
       modelState.lastErrorClass = undefined;
+      modelState.reservations = {};
     }
 
     modelState.windowKey = windowKey;
     if (policy.dailyLimit !== undefined) {
       modelState.dailyLimit = policy.dailyLimit;
     }
+  }
+
+  private getReservationCount(modelState: ReturnType<typeof getOrCreateModelState>, now: Date) {
+    return Object.keys(this.pruneReservations(modelState, now)).length;
+  }
+
+  private hasReservation(modelState: ReturnType<typeof getOrCreateModelState>, requestId: string, now: Date) {
+    return Boolean(this.pruneReservations(modelState, now)[requestId]);
+  }
+
+  private addReservation(modelState: ReturnType<typeof getOrCreateModelState>, requestId: string, now: Date) {
+    const reservations = this.pruneReservations(modelState, now);
+    reservations[requestId] = now.toISOString();
+    modelState.reservations = reservations;
+  }
+
+  private removeReservation(modelState: ReturnType<typeof getOrCreateModelState>, requestId: string, now: Date) {
+    const reservations = this.pruneReservations(modelState, now);
+    delete reservations[requestId];
+    modelState.reservations = reservations;
+  }
+
+  private pruneReservations(modelState: ReturnType<typeof getOrCreateModelState>, now: Date) {
+    const rawReservations = modelState.reservations && typeof modelState.reservations === "object"
+      ? modelState.reservations
+      : {};
+    const cutoff = now.getTime() - (this.config.reservationTtlMs ?? DEFAULT_RESERVATION_TTL_MS);
+    const next: Record<string, string> = {};
+
+    for (const [requestId, reservedAt] of Object.entries(rawReservations)) {
+      const reservedAtMs = new Date(reservedAt).getTime();
+      if (Number.isFinite(reservedAtMs) && reservedAtMs > cutoff) {
+        next[requestId] = reservedAt;
+      }
+    }
+
+    modelState.reservations = next;
+    return next;
   }
 
   private getPolicy(provider: string, model: string, now: Date): ProviderQuotaPolicy {

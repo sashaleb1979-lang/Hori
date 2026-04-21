@@ -16,6 +16,7 @@ export * from "./services/media-reaction-service";
 export * from "./services/micro-reaction-service";
 export * from "./services/mood-service";
 export * from "./services/reply-queue-service";
+export * from "./services/runtime-llm-client-factory";
 export * from "./services/runtime-config-service";
 export * from "./services/slash-admin-service";
 

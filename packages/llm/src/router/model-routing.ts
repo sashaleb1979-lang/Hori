@@ -101,6 +101,10 @@ export interface ResolvedModelRouting {
   source: "default" | "runtime_setting";
   slots: ModelRoutingSlots;
   overrides: Partial<Record<ModelRoutingSlot, ModelRoutingModelId>>;
+  controlsEditable: boolean;
+  controlsNote?: string;
+  storedPreset?: ModelRoutingPresetName;
+  storedOverrides?: Partial<Record<ModelRoutingSlot, ModelRoutingModelId>>;
   legacyFallback: {
     chat: string;
     smart: string;
@@ -168,17 +172,28 @@ export function resolveModelRouting(
   const legacyFallback = buildLegacyFallback(env);
   const defaultPreset = defaultModelRoutingPresetForEnv(env);
   const parsed = parseStoredModelRouting(rawStoredValue);
-  const preset = provider === "openai" ? parsed.value?.preset ?? defaultPreset : "legacy_env";
+  const controlsEditable = provider === "openai";
+  const storedPreset = parsed.value?.preset;
+  const storedOverrides = parsed.value?.overrides ?? {};
+  const preset = controlsEditable ? storedPreset ?? defaultPreset : "legacy_env";
   const baseSlots = buildPresetSlots(env, preset);
-  const overrides = provider === "openai" ? parsed.value?.overrides ?? {} : {};
+  const overrides = controlsEditable ? storedOverrides : {};
   const slots = { ...baseSlots, ...overrides };
 
   return {
     provider,
     preset,
-    source: parsed.value ? "runtime_setting" : "default",
+    source: controlsEditable && parsed.value ? "runtime_setting" : "default",
     slots,
     overrides,
+    controlsEditable,
+    controlsNote: controlsEditable
+      ? undefined
+      : provider === "router"
+        ? "Informational-only: router mode ignores OpenAI model presets and slot overrides; routing is deterministic and env-controlled."
+        : "Informational-only: ollama mode ignores OpenAI model presets and slot overrides; use fast/smart env models instead.",
+    storedPreset: controlsEditable ? undefined : storedPreset,
+    storedOverrides: controlsEditable ? undefined : storedOverrides,
     legacyFallback,
     embeddingModel: provider === "ollama"
       ? env.OLLAMA_EMBED_MODEL

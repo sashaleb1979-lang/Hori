@@ -21,6 +21,7 @@ interface OpenAIChatMessage {
   content: string | null;
   tool_calls?: OpenAIToolCall[];
   tool_call_id?: string;
+  name?: string;
 }
 
 interface OpenAIToolCall {
@@ -100,10 +101,7 @@ export class OpenAIClient implements LlmClient {
   }
 
   async chat(options: LlmChatOptions): Promise<LlmChatResponse> {
-    const messages: OpenAIChatMessage[] = options.messages.map((m) => ({
-      role: m.role as "system" | "user" | "assistant",
-      content: m.content
-    }));
+    const messages: OpenAIChatMessage[] = options.messages.map((message) => toOpenAIChatMessage(message));
 
     const body: Record<string, unknown> = {
       model: options.model,
@@ -183,6 +181,7 @@ export class OpenAIClient implements LlmClient {
       }
 
       return {
+        id: tc.id,
         function: {
           name: tc.function.name,
           arguments: parsedArgs
@@ -317,6 +316,29 @@ export class OpenAIClient implements LlmClient {
       .sort((a, b) => a.index - b.index)
       .map((d) => d.embedding);
   }
+}
+
+function toOpenAIChatMessage(message: LlmChatOptions["messages"][number]): OpenAIChatMessage {
+  const isAssistantToolCall = message.role === "assistant" && Boolean(message.tool_calls?.length);
+
+  return {
+    role: message.role,
+    content: isAssistantToolCall && !message.content ? null : message.content,
+    ...(message.name && message.role !== "tool" ? { name: message.name } : {}),
+    ...(message.role === "tool" && message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
+    ...(isAssistantToolCall
+      ? {
+          tool_calls: message.tool_calls?.map((call, index) => ({
+            id: call.id ?? `tool-call-${index + 1}`,
+            type: "function" as const,
+            function: {
+              name: call.function.name,
+              arguments: JSON.stringify(call.function.arguments ?? {})
+            }
+          }))
+        }
+      : {})
+  };
 }
 
 function usesMaxCompletionTokens(model: string) {

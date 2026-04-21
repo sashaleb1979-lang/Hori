@@ -43,13 +43,16 @@ export class ToolOrchestrator {
         numBatch: options.numBatch,
         metadata: options.metadata
       });
+      const toolCalls = (response.message.tool_calls ?? []).map((call, toolCallIndex) => ({
+        ...call,
+        id: call.id ?? `tool-call-${iteration + 1}-${toolCallIndex + 1}`
+      }));
 
       transcript.push({
         role: "assistant",
-        content: response.message.content ?? ""
+        content: response.message.content ?? "",
+        ...(toolCalls.length ? { tool_calls: toolCalls } : {})
       });
-
-      const toolCalls = response.message.tool_calls ?? [];
 
       if (!toolCalls.length) {
         return {
@@ -80,6 +83,7 @@ export class ToolOrchestrator {
         transcript.push({
           role: "tool",
           name: call.function.name,
+          tool_call_id: call.id,
           content: JSON.stringify(output)
         });
       }

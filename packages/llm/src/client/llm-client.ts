@@ -15,6 +15,7 @@ export interface LlmToolDefinition {
 }
 
 export interface LlmToolCall {
+  id?: string;
   function: {
     name: string;
     arguments: Record<string, unknown>;

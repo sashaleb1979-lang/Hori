@@ -730,6 +730,10 @@ export function assertEnvForRole(env: AppEnv, role: AppRole) {
       }
     }
 
+    if (!env.OPENAI_API_KEY) {
+      console.warn("[config] AI router embeddings disabled: missing OPENAI_API_KEY");
+    }
+
     if (enabledProviders.length === 0) {
       console.warn("[config] AI router has no configured providers — bot will fall back to safe empty-reply handling until secrets are configured");
     }

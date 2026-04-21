@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { assertEnvForRole, getEnabledAiRouterProviders, loadEnv, resolveAiRouterEnvState } from "@hori/config";
 
 describe("loadEnv", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("applies defaults for omitted boolean and numeric env vars", () => {
     const env = loadEnv({
       DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
@@ -141,6 +145,20 @@ describe("loadEnv", () => {
     expect(state.openai.enabled).toBe(true);
     expect(() => assertEnvForRole(env, "bot")).toThrow(/DISCORD_TOKEN/);
     expect(() => assertEnvForRole({ ...env, DISCORD_TOKEN: "token", DISCORD_CLIENT_ID: "client" }, "bot")).not.toThrow();
+  });
+
+  it("warns when router mode is running without OpenAI embeddings", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const env = loadEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      AI_PROVIDER: "router",
+      GOOGLE_API_KEY: "google-key"
+    });
+
+    assertEnvForRole({ ...env, DISCORD_TOKEN: "token", DISCORD_CLIENT_ID: "client" }, "bot");
+
+    expect(warnSpy).toHaveBeenCalledWith("[config] AI router embeddings disabled: missing OPENAI_API_KEY");
   });
 
   it("throws a clearer error for unresolved Railway database references", () => {

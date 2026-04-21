@@ -139,6 +139,120 @@ describe("OpenAIClient", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("serializes assistant tool calls and tool result messages with ids", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as {
+        messages: Array<Record<string, unknown>>;
+      };
+
+      expect(payload.messages).toEqual([
+        { role: "user", content: "find" },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: {
+                name: "web_search",
+                arguments: JSON.stringify({ query: "router contract" })
+              }
+            }
+          ]
+        },
+        {
+          role: "tool",
+          content: JSON.stringify({ hits: [] }),
+          tool_call_id: "call_1"
+        }
+      ]);
+
+      return new Response(
+        JSON.stringify({
+          choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createClient();
+
+    await expect(client.chat({
+      model: "gpt-5-mini",
+      messages: [
+        { role: "user", content: "find" },
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            {
+              id: "call_1",
+              function: {
+                name: "web_search",
+                arguments: { query: "router contract" }
+              }
+            }
+          ]
+        },
+        {
+          role: "tool",
+          content: JSON.stringify({ hits: [] }),
+          name: "web_search",
+          tool_call_id: "call_1"
+        }
+      ]
+    })).resolves.toMatchObject({
+      message: { content: "ok" }
+    });
+  });
+
+  it("parses tool call ids from assistant responses", async () => {
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [{
+                id: "call_99",
+                type: "function",
+                function: {
+                  name: "web_search",
+                  arguments: JSON.stringify({ query: "router contract" })
+                }
+              }]
+            },
+            finish_reason: "tool_calls"
+          }]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createClient();
+    const result = await client.chat({
+      model: "gpt-5-mini",
+      messages: [{ role: "user", content: "find" }]
+    });
+
+    expect(result.message.tool_calls).toEqual([
+      {
+        id: "call_99",
+        function: {
+          name: "web_search",
+          arguments: { query: "router contract" }
+        }
+      }
+    ]);
+  });
+
   it("requests 768-dimensional embeddings by default", async () => {
     const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       const payload = JSON.parse(String(init?.body)) as {
