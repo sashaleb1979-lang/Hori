@@ -55,7 +55,7 @@ export function evaluateSelectiveEngagement(input: SelectiveEngagementInput): Se
   let score = 0.05 + clamp(input.interjectTendency, 0, 5) * 0.025;
 
   if (/(что думаете|как считаете|как думаете|есть мнения)/iu.test(lower)) {
-    score += 0.62;
+    score += 0.46;
     triggers.push("group_opinion");
   }
 

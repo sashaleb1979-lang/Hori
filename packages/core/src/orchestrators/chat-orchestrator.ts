@@ -2,7 +2,7 @@ import type { AppEnv } from "@hori/config";
 import type { AppLogger, AppPrismaClient, BotIntent, BotReplyPayload, BotTrace, LlmCallTrace, LlmChatMessage, MessageEnvelope, SearchHit } from "@hori/shared";
 import { asErrorMessage, botLatencyHistogram, botRepliesCounter, buildMemoryKey, clamp, llmCachedTokensCounter, llmCostCounter, llmTokensCounter, normalizeWhitespace } from "@hori/shared";
 
-import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, calculateCostUsd, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet, getModelProfile } from "@hori/llm";
+import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, calculateCostUsd, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet } from "@hori/llm";
 import type { LlmChatResponse, LlmClient, LlmRequestMetadata, ModelRoutingSlot } from "@hori/llm";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
 import { ContextService, ReflectionService, RelationshipService, RetrievalService } from "@hori/memory";
@@ -294,7 +294,7 @@ export class ChatOrchestrator {
       explicitInvocation: message.explicitInvocation,
       intent: intent.intent,
       routeReason: intent.reason,
-      modelKind: intent.intent === "chat" && contour.contour === "C" ? "smart" : this.deps.modelRouter.pickKind(intent.intent),
+      modelKind: this.deps.modelRouter.pickKind(intent.intent),
       usedSearch: false,
       toolNames: [],
       contextMessages: contextBundle.recentMessages.length,
@@ -430,7 +430,9 @@ export class ChatOrchestrator {
       guildId: message.guildId,
       userId: message.userId,
       messageId: message.messageId,
-      messageKind
+      messageKind,
+      content: intent.cleanedContent,
+      targetedToBot: message.triggerSource === "reply" || message.mentionedBot || message.mentionsBotByName
     });
     await this.recordRelationshipInteraction(message, messageKind, conflict);
     await this.recordMicroReactionRelationshipSignal(microReaction, message);
@@ -672,7 +674,7 @@ export class ChatOrchestrator {
       keepAlive: llm.keepAlive,
       numCtx: llm.numCtx,
       numBatch: llm.numBatch,
-      metadata: this.createLlmMetadata(message, "chat", "chat", "chat", contour === "C" ? "complex" : undefined)
+      metadata: this.createLlmMetadata(message, "chat", "chat", "chat")
     });
     this.recordLlmCall(llmCalls, "chat", llm.model, messages, response);
 
@@ -1196,21 +1198,8 @@ export class ChatOrchestrator {
   }
 
   private getChatSettingsForContour(contour: Contour, runtimeSettings: EffectiveRuntimeSettings, maxTokens?: number) {
-    if (contour === "C") {
-      const profile = getModelProfile("smart");
-      return {
-        model: this.deps.modelRouter.pickModelForSlot("chat", runtimeSettings.modelRouting),
-        temperature: profile.temperature,
-        topP: profile.topP,
-        maxTokens: Math.min(maxTokens ?? profile.maxTokens, profile.maxTokens, runtimeSettings.llmReplyMaxTokens),
-        keepAlive: runtimeSettings.ollamaKeepAlive,
-        numCtx: runtimeSettings.ollamaNumCtx,
-        numBatch: runtimeSettings.ollamaNumBatch,
-      };
-    }
-
     const profile = this.deps.modelRouter.pickProfile("chat");
-    const contourCap = contour === "B" ? 120 : 48;
+    const contourCap = contour === "C" ? profile.maxTokens : contour === "B" ? 120 : 48;
 
     return {
       model: this.deps.modelRouter.pickModelForSlot("chat", runtimeSettings.modelRouting),

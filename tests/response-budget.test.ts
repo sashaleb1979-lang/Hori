@@ -54,7 +54,10 @@ describe("response budget quiet hours", () => {
   });
 
   it("keeps the message-kind mapping outside quiet hours", () => {
-    expect(resolveContour({ messageKind: "info_question", currentHour: 12, quietHoursEnabled: true }).contour).toBe("C");
+    expect(resolveContour({ messageKind: "info_question", currentHour: 12, quietHoursEnabled: true }).contour).toBe("B");
+    expect(resolveContour({ messageKind: "direct_mention", currentHour: 12, quietHoursEnabled: true }).contour).toBe("B");
+    expect(resolveContour({ messageKind: "meta_feedback", currentHour: 12, quietHoursEnabled: true }).contour).toBe("B");
+    expect(resolveContour({ messageKind: "request_for_explanation", currentHour: 12, quietHoursEnabled: true }).contour).toBe("C");
     expect(resolveContour({ messageKind: "smalltalk_hangout", currentHour: 12, quietHoursEnabled: true }).contour).toBe("B");
     expect(resolveContour({ messageKind: "low_signal_noise", currentHour: 12, quietHoursEnabled: true }).contour).toBe("A");
   });

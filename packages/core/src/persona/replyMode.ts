@@ -78,6 +78,24 @@ export function resolveReplyMode(options: {
 
   const warmRelationship = options.relationship && options.relationship.toneBias !== "neutral" && options.relationship.praiseBias > 0;
 
+  if (options.messageKind === "info_question") {
+    return warmRelationship
+      ? weightedPick(["dry", "surprisingly_helpful", "brief_warm"], [4, 4, 3])
+      : weightedPick(["dry", "surprisingly_helpful", "brief_warm"], [6, 4, 1]);
+  }
+
+  if (options.messageKind === "reply_to_bot" || options.messageKind === "direct_mention") {
+    return warmRelationship
+      ? weightedPick(["dry", "brief_warm", "surprisingly_helpful"], [4, 4, 2])
+      : weightedPick(["dry", "surprisingly_helpful", "brief_warm"], [6, 3, 1]);
+  }
+
+  if (options.messageKind === "casual_address") {
+    return warmRelationship
+      ? weightedPick(["dry", "brief_warm", "lazy"], [4, 4, 2])
+      : weightedPick(["dry", "lazy", "brief_warm"], [6, 3, 1]);
+  }
+
   if (warmRelationship) {
     return weightedPick(["dry", "brief_warm", "lazy", "mocking", "sharp"], [3, 4, 2, 1, 1]);
   }

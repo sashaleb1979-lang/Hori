@@ -65,6 +65,53 @@ describe("few-shot tone anchors", () => {
     expect(observed.has("weird_but_relevant")).toBe(false);
   });
 
+  it("keeps light live-chat turns out of mocking or sharp drift", () => {
+    const observed = new Set<string>();
+
+    for (let index = 0; index < 1000; index += 1) {
+      observed.add(
+        resolveReplyMode({
+          intent: "chat",
+          mode: "normal",
+          messageKind: "info_question",
+          relationship: null,
+          isSelfInitiated: false
+        })
+      );
+      observed.add(
+        resolveReplyMode({
+          intent: "chat",
+          mode: "normal",
+          messageKind: "direct_mention",
+          relationship: null,
+          isSelfInitiated: false
+        })
+      );
+      observed.add(
+        resolveReplyMode({
+          intent: "chat",
+          mode: "normal",
+          messageKind: "reply_to_bot",
+          relationship: null,
+          isSelfInitiated: false
+        })
+      );
+      observed.add(
+        resolveReplyMode({
+          intent: "chat",
+          mode: "normal",
+          messageKind: "casual_address",
+          relationship: null,
+          isSelfInitiated: false
+        })
+      );
+    }
+
+    expect(observed.has("mocking")).toBe(false);
+    expect(observed.has("sharp")).toBe(false);
+    expect(observed.has("weird_but_relevant")).toBe(false);
+  });
+
   it("keeps affection and explanation density restrained by default", () => {
     expect(defaultHoriPersonaConfig.styleRules.allowedAffectionLevel).toBeLessThanOrEqual(0.1);
     expect(defaultHoriPersonaConfig.styleRules.explanationDensity).toBeLessThan(0.4);

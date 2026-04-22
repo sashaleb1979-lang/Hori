@@ -183,6 +183,37 @@ function createOrchestrator(overrides: Partial<ChatOrchestratorDeps> = {}) {
 }
 
 describe("chat orchestrator quiet hours", () => {
+  it("keeps the tighter chat profile even when chat escalates to contour C", async () => {
+    const { orchestrator, chat } = createOrchestrator();
+
+    const result = await orchestrator.handleMessage(baseMessage({
+      content: "хори объясни почему так",
+      createdAt: new Date("2026-04-19T09:22:00.000Z")
+    }), {
+      guildSettings,
+      featureFlags,
+      channelPolicy: {
+        allowBotReplies: true,
+        allowInterjections: false,
+        isMuted: false,
+        topicInterestTags: [],
+        responseLengthOverride: null
+      },
+      runtimeSettings
+    });
+
+    expect(result.trace.responseBudget).toBeDefined();
+    expect(result.trace.responseBudget?.contour).toBe("C");
+    expect(result.trace.modelKind).toBe("fast");
+    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.temperature === 0.38 && call.topP === 0.85)).toBe(true);
+
+    const chatCall = chat.mock.calls
+      .map(([options]) => options)
+      .find((options) => options.metadata?.purpose === "chat");
+
+    expect(chatCall?.metadata?.complexityHint).toBeUndefined();
+  });
+
   it("routes direct name invocations through chat LLM during quiet hours", async () => {
     const { orchestrator, chat } = createOrchestrator();
 

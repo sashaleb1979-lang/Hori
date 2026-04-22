@@ -7,13 +7,13 @@ import type { BotIntent, ContextBundle, ContextBundleV2, ContextTrace, MemoryLay
 // ---------------------------------------------------------------------------
 
 const CONTEXT_CATEGORIES_BY_KIND: Record<string, Set<string>> = {
-  direct_mention:    new Set(["reply_chain", "active_topic", "user_profile", "relationship", "recent_messages", "active_memory", "entities", "entity_memory"]),
+  direct_mention:    new Set(["reply_chain", "active_topic", "recent_messages"]),
   opinion_question:  new Set(["active_topic", "user_profile", "relationship", "recent_messages", "entities", "entity_memory"]),
-  info_question:     new Set(["reply_chain", "active_topic", "entities", "entity_memory", "server_memory", "recent_messages"]),
+  info_question:     new Set(["reply_chain", "active_topic", "entities", "recent_messages"]),
   provocation:       new Set(["user_profile", "relationship", "recent_messages"]),
   meta_feedback:     new Set(["user_profile", "relationship", "reply_chain"]),
-  casual_address:    new Set(["reply_chain", "user_profile", "recent_messages"]),
-  smalltalk_hangout: new Set(["user_profile", "recent_messages"]),
+  casual_address:    new Set(["reply_chain", "recent_messages"]),
+  smalltalk_hangout: new Set(["recent_messages"]),
   meme_bait:         new Set(["relationship", "recent_messages"]),
   reply_to_bot:      new Set(["reply_chain", "active_topic", "user_profile", "recent_messages"]),
   request_for_explanation: new Set(["reply_chain", "active_topic", "entities", "entity_memory", "server_memory", "recent_messages"]),
@@ -29,6 +29,12 @@ const ALL_CATEGORIES = new Set([
 function relevantCategories(messageKind?: string): Set<string> {
   if (!messageKind) return ALL_CATEGORIES;
   return CONTEXT_CATEGORIES_BY_KIND[messageKind] ?? ALL_CATEGORIES;
+}
+
+interface ContextSection {
+  key: string;
+  content: string;
+  memoryLayers: MemoryLayer[];
 }
 
 export class ContextBuilderService {
@@ -110,28 +116,28 @@ export class ContextBuilderService {
   ) {
     const maxChars = options.maxChars ?? defaultRuntimeTuning.CONTEXT_V2_MAX_CHARS;
     const relevant = relevantCategories(options.messageKind);
-    const memoryLayers: MemoryLayer[] = [];
-    const sectionsUsed: string[] = [];
-    const anchorSections: string[] = [];
+    const hotSections: ContextSection[] = [];
+    const warmSections: ContextSection[] = [];
 
     if (relevant.has("reply_chain") && bundle.replyChain.length) {
-      memoryLayers.push("reply_chain");
-      sectionsUsed.push("reply_chain");
-      anchorSections.push(
-        "[REPLY CHAIN]\n" +
+      hotSections.push({
+        key: "reply_chain",
+        memoryLayers: ["reply_chain"],
+        content:
+          "[REPLY CHAIN]\n" +
           bundle.replyChain.map((message) => formatMessage(message.author, message.content)).join("\n")
-      );
+      });
     }
 
     if (relevant.has("active_topic") && bundle.activeTopic) {
-      memoryLayers.push("active_topic");
-      sectionsUsed.push("active_topic");
       const facts = asStringArray(bundle.activeTopic.summaryFacts)
         .slice(0, 6)
         .map((fact) => `- ${fact}`)
         .join("\n");
-      anchorSections.push(
-        [
+      hotSections.push({
+        key: "active_topic",
+        memoryLayers: ["active_topic"],
+        content: [
           "[ACTIVE TOPIC]",
           `Тема: ${bundle.activeTopic.title}`,
           `Коротко: ${bundle.activeTopic.summaryShort}`,
@@ -140,36 +146,36 @@ export class ContextBuilderService {
         ]
           .filter(Boolean)
           .join("\n")
-      );
+      });
     }
 
     if (relevant.has("entities") && bundle.entities.length) {
-      sectionsUsed.push("entities");
-      anchorSections.push(
-        "[ENTITY TRIGGERS]\n" +
+      warmSections.push({
+        key: "entities",
+        memoryLayers: [],
+        content:
+          "[ENTITY TRIGGERS]\n" +
           bundle.entities
             .slice(0, 5)
             .map((entity) => `- ${entity.surface}${entity.canonical ? ` -> ${entity.canonical}` : ""} (${entity.score})`)
             .join("\n")
-      );
+      });
     }
 
     if (relevant.has("entity_memory") && bundle.entityMemories.length) {
-      memoryLayers.push("entity_memory");
-      sectionsUsed.push("entity_memory");
-      anchorSections.push(
-        "[ENTITY MEMORY]\n" +
+      warmSections.push({
+        key: "entity_memory",
+        memoryLayers: ["entity_memory"],
+        content:
+          "[ENTITY MEMORY]\n" +
           bundle.entityMemories
             .slice(0, 3)
             .map((memory) => `- ${memory.key}: ${memory.value}`)
             .join("\n")
-      );
+      });
     }
 
     if (relevant.has("active_memory") && bundle.activeMemory?.entries.length) {
-      memoryLayers.push("active_memory");
-      sectionsUsed.push("active_memory");
-
       const activeLines = bundle.activeMemory.entries.slice(0, 8).map((entry) => {
         if (entry.scope === "message") {
           return `- [similar message/${entry.reason}/${entry.score}] ${entry.value}`;
@@ -178,62 +184,65 @@ export class ContextBuilderService {
         return `- [${entry.scope}/${entry.type}/${entry.reason}/${entry.score}] ${entry.key}: ${entry.value}`;
       });
 
-      anchorSections.push("[ACTIVE MEMORY]\n" + activeLines.join("\n"));
-
       const scopes = new Set(bundle.activeMemory.entries.map((entry) => entry.scope));
-      if (scopes.has("user")) memoryLayers.push("user_memory");
-      if (scopes.has("channel")) memoryLayers.push("channel_memory");
-      if (scopes.has("event")) memoryLayers.push("event_memory");
-      if (scopes.has("message")) memoryLayers.push("similar_messages");
+      warmSections.push({
+        key: "active_memory",
+        memoryLayers: [
+          "active_memory",
+          ...(scopes.has("user") ? ["user_memory" as const] : []),
+          ...(scopes.has("channel") ? ["channel_memory" as const] : []),
+          ...(scopes.has("event") ? ["event_memory" as const] : []),
+          ...(scopes.has("message") ? ["similar_messages" as const] : [])
+        ],
+        content: "[ACTIVE MEMORY]\n" + activeLines.join("\n")
+      });
     }
 
     if (relevant.has("user_profile") && bundle.userProfile) {
-      memoryLayers.push("user_profile");
-      sectionsUsed.push("user_profile");
-      anchorSections.push(
-        `Профиль юзера: ${bundle.userProfile.summaryShort}. Стиль: ${bundle.userProfile.styleTags.join(", ")}. Темы: ${bundle.userProfile.topicTags.join(", ")}. Confidence: ${bundle.userProfile.confidenceScore}.`
-      );
+      warmSections.push({
+        key: "user_profile",
+        memoryLayers: ["user_profile"],
+        content: `Профиль юзера: ${bundle.userProfile.summaryShort}. Стиль: ${bundle.userProfile.styleTags.join(", ")}. Темы: ${bundle.userProfile.topicTags.join(", ")}. Confidence: ${bundle.userProfile.confidenceScore}.`
+      });
     }
 
     if (relevant.has("relationship") && bundle.relationship) {
-      memoryLayers.push("relationship");
-      sectionsUsed.push("relationship");
-      anchorSections.push(
-        `Отношение к юзеру: tone=${bundle.relationship.toneBias}, roast=${bundle.relationship.roastLevel}, do_not_mock=${bundle.relationship.doNotMock}.`
-      );
+      warmSections.push({
+        key: "relationship",
+        memoryLayers: ["relationship"],
+        content: `Отношение к юзеру: tone=${bundle.relationship.toneBias}, roast=${bundle.relationship.roastLevel}, do_not_mock=${bundle.relationship.doNotMock}.`
+      });
     }
 
     if (relevant.has("channel_summaries") && bundle.summaries.length) {
-      memoryLayers.push("channel_summaries");
-      sectionsUsed.push("channel_summaries");
-      anchorSections.push("Сводки канала:\n" + bundle.summaries.slice(0, 2).map((summary) => `- ${summary.summaryShort}`).join("\n"));
+      warmSections.push({
+        key: "channel_summaries",
+        memoryLayers: ["channel_summaries"],
+        content: "Сводки канала:\n" + bundle.summaries.slice(0, 2).map((summary) => `- ${summary.summaryShort}`).join("\n")
+      });
     }
 
     if (relevant.has("server_memory") && bundle.serverMemories.length) {
-      memoryLayers.push("server_memory");
-      sectionsUsed.push("server_memory");
-      anchorSections.push(
-        "Долгая память сервера:\n" +
+      warmSections.push({
+        key: "server_memory",
+        memoryLayers: ["server_memory"],
+        content:
+          "Долгая память сервера:\n" +
           bundle.serverMemories
             .slice(0, 3)
             .map((memory) => `- ${memory.key}: ${memory.value}`)
             .join("\n")
-      );
+      });
     }
 
     const recentMessages = relevant.has("recent_messages") ? uniqueRecentMessages(bundle) : [];
     let recentLines = recentMessages.map((message) => formatMessage(message.author, message.content));
+    let activeWarmSections = [...warmSections];
     let droppedRecentMessages = 0;
-
-    if (recentLines.length) {
-      memoryLayers.push("recent_messages");
-      sectionsUsed.push("recent_messages");
-    }
-
-    if (bundle.topicWindow.length) {
-      memoryLayers.push("topic_window");
-      sectionsUsed.push("topic_window");
-    }
+    let droppedWarmSections = 0;
+    const hasTopicWindowContext = recentMessages.some((message) =>
+      bundle.topicWindow.some((topicMessage) => (topicMessage.id && message.id ? topicMessage.id === message.id : topicMessage === message))
+    );
 
     const questionAnchor = [
       "[QUESTION ANCHOR]",
@@ -246,21 +255,40 @@ export class ContextBuilderService {
     const compose = () =>
       [
         "[CONTEXT ANCHORS]",
-        anchorSections.length ? anchorSections.join("\n\n") : "Нет сильных якорей контекста.",
+        hotSections.length ? hotSections.map((section) => section.content).join("\n\n") : "Нет сильных якорей контекста.",
         recentLines.length ? "[RECENT CONTEXT]\n" + recentLines.join("\n") : "",
+        activeWarmSections.length ? "[WARM CONTEXT SUPPORT]\n" + activeWarmSections.map((section) => section.content).join("\n\n") : "",
         questionAnchor
       ]
         .filter(Boolean)
         .join("\n\n");
+
+    while (activeWarmSections.length && compose().length > maxChars) {
+      activeWarmSections = activeWarmSections.slice(0, -1);
+      droppedWarmSections += 1;
+    }
 
     while (recentLines.length && compose().length > maxChars) {
       recentLines = recentLines.slice(1);
       droppedRecentMessages += 1;
     }
 
+    const finalMemoryLayers = new Set<MemoryLayer>([
+      ...hotSections.flatMap((section) => section.memoryLayers),
+      ...(recentLines.length ? (["recent_messages"] as MemoryLayer[]) : []),
+      ...(recentLines.length && hasTopicWindowContext ? (["topic_window"] as MemoryLayer[]) : []),
+      ...activeWarmSections.flatMap((section) => section.memoryLayers)
+    ]);
+    const finalSections = new Set<string>([
+      ...hotSections.map((section) => section.key),
+      ...(recentLines.length ? ["recent_messages"] : []),
+      ...(recentLines.length && hasTopicWindowContext ? ["topic_window"] : []),
+      ...activeWarmSections.map((section) => section.key)
+    ]);
+
     return {
       contextText: compose(),
-      memoryLayers: [...new Set(memoryLayers)],
+      memoryLayers: [...finalMemoryLayers],
       trace: {
         version: "v2",
         activeTopicId: bundle.activeTopic?.topicId ?? null,
@@ -268,9 +296,10 @@ export class ContextBuilderService {
         entityTriggers: bundle.entities.map((entity) => entity.surface),
         truncation: {
           maxChars,
-          droppedRecentMessages
+          droppedRecentMessages,
+          droppedWarmSections
         },
-        sections: [...new Set(sectionsUsed)]
+        sections: [...finalSections]
       } satisfies ContextTrace
     };
   }

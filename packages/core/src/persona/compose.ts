@@ -233,6 +233,27 @@ function hasUsableRelationshipHook(input: ComposeBehaviorPromptInput) {
   return relationship.roastLevel > 0 || relationship.praiseBias > 0 || (toneBias.length > 0 && !["neutral", "normal", "default", "none"].includes(toneBias));
 }
 
+function hasWarmRelationship(input: ComposeBehaviorPromptInput) {
+  const relationship = input.relationship;
+
+  if (!relationship) {
+    return false;
+  }
+
+  const toneBias = normalizeHookText(relationship.toneBias);
+  return relationship.praiseBias > 0 || ["friendly", "familiar", "warm"].includes(toneBias);
+}
+
+function hasSharpRelationship(input: ComposeBehaviorPromptInput) {
+  const relationship = input.relationship;
+
+  if (!relationship) {
+    return false;
+  }
+
+  return normalizeHookText(relationship.toneBias) === "sharp";
+}
+
 function detectSmalltalkContextHook(input: ComposeBehaviorPromptInput, messageKind: MessageKind) {
   if (messageKind !== "smalltalk_hangout") {
     return false;
@@ -367,6 +388,7 @@ function resolveMode(options: {
   messageKind: MessageKind;
   requestedDepth: RequestedDepth;
   staleTakeDetected: boolean;
+  smalltalkContextHook: boolean;
 }) {
   if (options.messageKind === "meta_feedback") {
     return "dry";
@@ -380,6 +402,21 @@ function resolveMode(options: {
   const taggedMode = modeTagValue(tags);
   const channelModeBias = options.channelKind === "general" ? undefined : options.persona.channelOverrides[options.channelKind]?.modeBias;
   const messageModeBias = messageKindModeBias[options.messageKind];
+  const warmRelationshipBias = hasWarmRelationship(options.input)
+    ? options.messageKind === "smalltalk_hangout" && options.smalltalkContextHook
+      ? "playful"
+      : undefined
+    : undefined;
+  const sharpRelationshipBias = hasSharpRelationship(options.input)
+    && (
+      options.messageKind === "reply_to_bot"
+      || options.messageKind === "direct_mention"
+      || options.messageKind === "casual_address"
+      || options.messageKind === "info_question"
+    )
+      ? "dry"
+      : undefined;
+  const relationshipModeBias = sharpRelationshipBias ?? warmRelationshipBias;
   const staleTakeModeBias =
     options.staleTakeDetected && (options.messageKind === "opinion_question" || options.messageKind === "info_question")
       ? "dry"
@@ -389,8 +426,8 @@ function resolveMode(options: {
     options.messageKind === "command_like_request" ||
     options.messageKind === "info_question";
   const contextualMode = taskFirst
-    ? messageModeBias ?? staleTakeModeBias ?? channelModeBias
-    : channelModeBias ?? staleTakeModeBias ?? messageModeBias;
+    ? messageModeBias ?? staleTakeModeBias ?? relationshipModeBias ?? channelModeBias
+    : relationshipModeBias ?? channelModeBias ?? staleTakeModeBias ?? messageModeBias;
   const explicitMode =
     options.input.debugOverrides?.activeMode ??
     options.input.activeMode ??
@@ -449,6 +486,14 @@ function resolveLimits(options: {
 
   if (options.messageKind === "smalltalk_hangout") {
     resolved.maxChars = Math.min(resolved.maxChars, options.smalltalkContextHook ? 220 : 170);
+    resolved.maxSentences = Math.min(resolved.maxSentences, 2);
+    resolved.maxParagraphs = 1;
+    resolved.bulletListAllowed = false;
+    resolved.followUpAllowed = false;
+  }
+
+  if (options.messageKind === "direct_mention") {
+    resolved.maxChars = Math.min(resolved.maxChars, 220);
     resolved.maxSentences = Math.min(resolved.maxSentences, 2);
     resolved.maxParagraphs = 1;
     resolved.bulletListAllowed = false;
@@ -871,6 +916,15 @@ function buildRelationshipOverlay(input: ComposeBehaviorPromptInput): BlockResul
     `User relation: tone_bias=${relationship.toneBias}, roast_level=${relationship.roastLevel}, praise_bias=${relationship.praiseBias}, do_not_mock=${relationship.doNotMock}, do_not_initiate=${relationship.doNotInitiate}.`
   ];
 
+  const toneBias = normalizeHookText(relationship.toneBias);
+  if (["friendly", "familiar", "warm"].includes(toneBias) || relationship.praiseBias > 0) {
+    lines.push("Можно быть чуть теплее или игривее, но не длиннее и не мягче по сути.");
+  }
+
+  if (toneBias === "sharp") {
+    lines.push("Можно быть холоднее и суше обычного, но без лекции и без лишнего разгона агрессии.");
+  }
+
   if (relationship.protectedTopics.length) {
     lines.push(`Protected topics for this user: ${relationship.protectedTopics.join(", ")}.`);
   }
@@ -912,7 +966,7 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   const constraintFollowUp = detectConstraintFollowUp(input, messageKind);
   const emotionalAdviceContext = detectEmotionalAdviceContext(input, messageKind);
   const requestedDepth = resolveRequestedDepth({ input, channelKind, messageKind, smalltalkContextHook, staleTakeDetected, persona });
-  const mode = resolveMode({ input, persona, channelKind, messageKind, requestedDepth, staleTakeDetected });
+  const mode = resolveMode({ input, persona, channelKind, messageKind, requestedDepth, staleTakeDetected, smalltalkContextHook });
   const staleTakeStyleOverride =
     staleTakeDetected && (messageKind === "opinion_question" || messageKind === "info_question") ? "dismissive_short" : undefined;
   const resolvedStylePreset = resolveStylePreset({
@@ -966,6 +1020,14 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   const mediaReactionEligible =
     !["focused", "serious", "help"].includes(mode) &&
     (isSelfInitiated || staleTakeDetected || messageKind === "meme_bait" || channelKind === "memes");
+  const isLightMessage =
+    messageKind === "smalltalk_hangout" ||
+    messageKind === "casual_address" ||
+    messageKind === "low_signal_noise" ||
+    messageKind === "reply_to_bot" ||
+    messageKind === "direct_mention" ||
+    messageKind === "meta_feedback" ||
+    messageKind === "info_question";
   const snarkConfidenceThreshold = isSelfInitiated
     ? persona.contextualBehavior.selfInitiatedSnarkConfidenceThreshold
     : persona.contextualBehavior.snarkConfidenceThreshold;
@@ -995,9 +1057,11 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   addStatic(buildStyleRulesBlock(persona, { isDirectMessage }));
   addStatic(buildAntiSlopBlock({ profile: antiSlopProfile, rules: persona.antiSlopRules, forbiddenPatterns: persona.forbiddenPatterns }));
   addStatic(buildAnalogySuppressionBlock(analogyBan));
-  addStatic(
-    buildFewShotBlock({ contour: input.contour === "B" ? "B" : "C" })
-  );
+  if (!isLightMessage) {
+    addStatic(
+      buildFewShotBlock({ contour: input.contour === "B" ? "B" : "C" })
+    );
+  }
   addStatic(buildLegacyServerOverlay(input));
 
   // --- Dynamic blocks (vary per message) ---
@@ -1016,7 +1080,7 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   if (messageKind === "meta_feedback") {
     add(buildFewShotBlock({ includeMetaFeedbackAnchors: true, skipBaseAnchors: true }));
   }
-  if (messageKind !== "smalltalk_hangout" && messageKind !== "low_signal_noise") {
+  if (!isLightMessage || messageKind === "reply_to_bot") {
     add(buildContextUsageBlock(input));
   }
   add(buildMemoryUsageBlock());
@@ -1027,7 +1091,6 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   if (messageKind === "smalltalk_hangout") {
     add(buildLowPressureSmalltalkBlock({ hasContextHook: smalltalkContextHook }));
   }
-  const isLightMessage = messageKind === "smalltalk_hangout" || messageKind === "casual_address" || messageKind === "low_signal_noise" || messageKind === "reply_to_bot";
   if (!isLightMessage) {
     add(
       buildSnarkConfidenceBlock({

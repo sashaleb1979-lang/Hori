@@ -1,5 +1,10 @@
 import type { AppPrismaClient, MessageKind, RelationshipOverlay } from "@hori/shared";
 
+const RECENT_NEGATIVE_THRESHOLD = -0.9;
+const STRONG_NEGATIVE_THRESHOLD = -1.4;
+const RECENT_POSITIVE_THRESHOLD = 0.9;
+const STRONG_POSITIVE_THRESHOLD = 1.4;
+
 export class AffinityService {
   constructor(private readonly prisma: AppPrismaClient) {}
 
@@ -8,6 +13,8 @@ export class AffinityService {
     userId: string;
     messageId: string;
     messageKind: MessageKind;
+    content?: string;
+    targetedToBot?: boolean;
   }) {
     const valueByKind: Partial<Record<MessageKind, number>> = {
       provocation: -0.35,
@@ -18,7 +25,7 @@ export class AffinityService {
       casual_address: 0.03,
       meme_bait: 0.02
     };
-    const value = valueByKind[input.messageKind] ?? 0;
+    const value = (valueByKind[input.messageKind] ?? 0) + detectDirectedToneSignal(input.content, input.targetedToBot);
 
     if (value === 0) {
       return null;
@@ -63,15 +70,31 @@ export class AffinityService {
         protectedTopics: []
       };
 
-    if (score <= -2) {
+    if (score <= STRONG_NEGATIVE_THRESHOLD) {
       return {
         ...base,
-        toneBias: base.toneBias === "friendly" ? "neutral" : "sharp",
+        toneBias: "sharp",
         roastLevel: Math.min(5, base.roastLevel + 1)
       };
     }
 
-    if (score >= 2) {
+    if (score <= RECENT_NEGATIVE_THRESHOLD) {
+      return {
+        ...base,
+        toneBias: base.toneBias === "friendly" ? "neutral" : base.toneBias,
+        roastLevel: Math.min(5, base.roastLevel + 1)
+      };
+    }
+
+    if (score >= STRONG_POSITIVE_THRESHOLD) {
+      return {
+        ...base,
+        toneBias: base.toneBias === "sharp" ? "neutral" : "friendly",
+        praiseBias: Math.min(5, base.praiseBias + 1)
+      };
+    }
+
+    if (score >= RECENT_POSITIVE_THRESHOLD) {
       return {
         ...base,
         toneBias: base.toneBias === "sharp" ? "neutral" : base.toneBias,
@@ -81,4 +104,22 @@ export class AffinityService {
 
     return base;
   }
+}
+
+function detectDirectedToneSignal(content?: string, targetedToBot?: boolean) {
+  if (!targetedToBot || !content) {
+    return 0;
+  }
+
+  const normalized = content.toLowerCase().replace(/ё/g, "е");
+
+  if (/(ты\s+(?:норм|нормальная|нормальный|права|прав|хороша|хороший|умная|умный|топ)|спасибо\s*,?\s*хори|люблю\s+тебя|обожаю\s+тебя|ты\s+сегодня\s+норм|ты\s+база)/iu.test(normalized)) {
+    return 0.24;
+  }
+
+  if (/(ты\s+(?:меня\s+)?бесишь|ты\s+достала|ты\s+достал|ты\s+раздражаешь|ненавижу\s+тебя|тупая\s+ты|тупой\s+ты|заебала\s+ты|заебал\s+ты)/iu.test(normalized)) {
+    return -0.3;
+  }
+
+  return 0;
 }

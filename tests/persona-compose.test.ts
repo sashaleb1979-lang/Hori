@@ -111,7 +111,7 @@ describe("composeBehaviorPrompt", () => {
     expect(result.trace.blocksUsed[0]).toBe("STABLE IDENTITY BLOCK");
     expect(result.trace.blocksUsed).toContain("IDENTITY & CORE");
     expect(result.trace.blocksUsed).toContain("REPLY MODE");
-    expect(result.trace.blocksUsed).toContain("FEW-SHOT TONE ANCHORS");
+    expect(result.trace.blocksUsed).not.toContain("FEW-SHOT TONE ANCHORS");
     expect(result.trace.replyMode).toBeDefined();
     expect(uniqueBlocks.size).toBe(result.trace.blocksUsed.length);
   });
@@ -142,6 +142,7 @@ describe("composeBehaviorPrompt", () => {
     expect(result.trace.stylePreset).toBe("focused_compact");
     expect(result.limits.maxChars).toBeGreaterThan(550);
     expect(result.trace.analogyBan).toBe(true);
+    expect(result.trace.blocksUsed).toContain("FEW-SHOT TONE ANCHORS");
     expect(memeChannelResult.trace.channelKind).toBe("memes");
     expect(memeChannelResult.trace.activeMode).toBe("focused");
     expect(memeChannelResult.trace.stylePreset).toBe("focused_compact");
@@ -154,6 +155,8 @@ describe("composeBehaviorPrompt", () => {
     expect(result.trace.activeMode).toBe("normal");
     expect(result.trace.requestedDepth).toBe("short");
     expect(result.limits.maxChars).toBeLessThanOrEqual(320);
+    expect(result.trace.blocksUsed).not.toContain("FEW-SHOT TONE ANCHORS");
+    expect(result.prompt).not.toContain("[CONTEXT USAGE BLOCK]");
   });
 
   it("preserves reply continuity instead of escalating short reply questions", () => {
@@ -166,6 +169,23 @@ describe("composeBehaviorPrompt", () => {
     expect(result.trace.messageKind).toBe("reply_to_bot");
     expect(result.trace.activeMode).toBe("normal");
     expect(result.limits.maxChars).toBeLessThanOrEqual(220);
+    expect(result.prompt).toContain("[CONTEXT USAGE BLOCK]");
+  });
+
+  it("keeps bare direct mentions compact", () => {
+    const result = compose("хори", {
+      message: {
+        triggerSource: "mention",
+        mentionedBot: true,
+        explicitInvocation: false
+      }
+    });
+
+    expect(result.trace.messageKind).toBe("direct_mention");
+    expect(result.limits.maxChars).toBeLessThanOrEqual(220);
+    expect(result.limits.maxSentences).toBeLessThanOrEqual(2);
+    expect(result.limits.bulletListAllowed).toBe(false);
+    expect(result.prompt).not.toContain("[CONTEXT USAGE BLOCK]");
   });
 
   it("adds concrete grounding and constraint continuation for narrowing replies", () => {
@@ -368,8 +388,34 @@ describe("composeBehaviorPrompt", () => {
 
     expect(result.trace.messageKind).toBe("smalltalk_hangout");
     expect(result.trace.smalltalkContextHook).toBe(true);
+    expect(result.trace.activeMode).toBe("playful");
+    expect(result.trace.stylePreset).toBe("playful_short");
     expect(result.prompt).toContain("[LOW-PRESSURE SMALLTALK BLOCK]");
     expect(result.prompt).toContain("можно оставить больше привычной теплоты или колкости");
+    expect(result.prompt).toContain("Можно быть чуть теплее или игривее, но не длиннее");
+  });
+
+  it("lets sharp rapport make reply continuations drier without growing them", () => {
+    const result = compose("ну и что", {
+      relationship: {
+        toneBias: "sharp",
+        roastLevel: 2,
+        praiseBias: 0,
+        interruptPriority: 0,
+        doNotMock: false,
+        doNotInitiate: false,
+        protectedTopics: []
+      },
+      message: {
+        triggerSource: "reply"
+      }
+    });
+
+    expect(result.trace.messageKind).toBe("reply_to_bot");
+    expect(result.trace.activeMode).toBe("dry");
+    expect(result.trace.stylePreset).toBe("curt");
+    expect(result.limits.maxChars).toBeLessThanOrEqual(220);
+    expect(result.prompt).toContain("Можно быть холоднее и суше обычного");
   });
 
   it("does not misclassify utility, opinion, search or provocation as hangout smalltalk", () => {

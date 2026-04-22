@@ -411,6 +411,7 @@ export interface ContextTrace {
   truncation?: {
     maxChars: number;
     droppedRecentMessages: number;
+    droppedWarmSections?: number;
   };
   sections: string[];
 }

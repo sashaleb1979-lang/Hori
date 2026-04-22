@@ -3,7 +3,7 @@
  *
  * Контур A: 0 токенов — emoji, стикер, шаблонная фраза. БЕЗ LLM.
  * Контур B: fast model (~50 токенов) — короткий контекстный ответ.
- * Контур C: smart model (полный pipeline) — глубокий ответ с persona + emotion.
+ * Контур C: fuller LLM budget (полный pipeline) — ответ только там, где реально нужен более плотный разбор.
  *
  * quiet_hours из AICO agency.yaml: ночью (22:00–08:00) → контур A
  * только для фоновой инициативы. Прямой диалог всегда идет в LLM-контур.
@@ -30,17 +30,18 @@ export const QUIET_HOURS_TIME_ZONE = "Europe/Moscow";
 
 /** Типы сообщений, уже определённые в Hori messageKinds.ts */
 const CONTOUR_C_KINDS = new Set([
-  "direct_mention",
   "opinion_question",
-  "info_question",
+  "request_for_explanation",
   "provocation",
-  "meta_feedback",
 ]);
 
 const CONTOUR_B_KINDS = new Set([
+  "direct_mention",
+  "meta_feedback",
   "casual_address",
   "smalltalk_hangout",
   "reply_to_bot",
+  "info_question",
 ]);
 
 const CONTOUR_A_KINDS = new Set([

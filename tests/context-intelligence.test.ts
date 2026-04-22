@@ -135,6 +135,158 @@ describe("context intelligence", () => {
     expect(result.trace.truncation?.maxChars).toBe(defaultRuntimeTuning.CONTEXT_V2_MAX_CHARS);
   });
 
+  it("drops warm support before recent continuity under tight budgets", () => {
+    const service = new ContextBuilderService();
+    const tightBundle: ContextBundleV2 = {
+      ...bundle,
+      recentMessages: [
+        { id: "m1", author: "a", userId: "a", content: "свежий локальный контекст", createdAt: new Date("2026-04-12T09:59:00Z") },
+        { id: "m2", author: "b", userId: "b", content: "ключевая реплика", createdAt: new Date("2026-04-12T09:59:30Z") }
+      ],
+      serverMemories: [
+        { key: "old-politics", value: "Это старая длинная серверная память, которая должна отвалиться раньше локальной continuity при tight budget.", type: "note", score: 0.7 }
+      ]
+    };
+    const result = service.buildPromptContext(tightBundle, {
+      message,
+      intent: "chat",
+      contextV2Enabled: true,
+      messageKind: "info_question",
+      maxChars: 420
+    });
+
+    expect(result.contextText).toContain("[RECENT CONTEXT]");
+    expect(result.contextText).toContain("свежий локальный контекст");
+    expect(result.contextText).not.toContain("[WARM CONTEXT SUPPORT]");
+    expect(result.contextText).not.toContain("Долгая память сервера");
+    expect(result.contextText).not.toContain("[ENTITY MEMORY]");
+    expect(result.trace.truncation?.droppedWarmSections).toBeGreaterThan(0);
+    expect(result.trace.truncation?.droppedRecentMessages).toBe(0);
+    expect(result.memoryLayers).toContain("recent_messages");
+    expect(result.memoryLayers).not.toContain("server_memory");
+    expect(result.memoryLayers).not.toContain("entity_memory");
+  });
+
+  it("keeps plain info questions free of distant memory layers even with room left", () => {
+    const service = new ContextBuilderService();
+    const richBundle: ContextBundleV2 = {
+      ...bundle,
+      serverMemories: [
+        { key: "old-politics", value: "Это старая серверная память, которая нужна для explicit explanation, но не для обычного вопроса.", type: "note", score: 0.7 }
+      ]
+    };
+    const result = service.buildPromptContext(richBundle, {
+      message,
+      intent: "chat",
+      contextV2Enabled: true,
+      messageKind: "info_question",
+      maxChars: 1200
+    });
+
+    expect(result.contextText).not.toContain("Долгая память сервера");
+    expect(result.contextText).not.toContain("[ENTITY MEMORY]");
+    expect(result.memoryLayers).not.toContain("server_memory");
+    expect(result.memoryLayers).not.toContain("entity_memory");
+  });
+
+  it("keeps direct mentions free of deep memory layers", () => {
+    const service = new ContextBuilderService();
+    const richBundle: ContextBundleV2 = {
+      ...bundle,
+      userProfile: {
+        userId: "user",
+        guildId: "guild",
+        summaryShort: "любит спорить и душнить",
+        styleTags: ["dry"],
+        topicTags: ["politics"],
+        confidenceScore: 0.8,
+        isEligible: true
+      },
+      relationship: {
+        toneBias: "friendly",
+        roastLevel: 1,
+        praiseBias: 1,
+        interruptPriority: 0,
+        doNotMock: false,
+        doNotInitiate: false,
+        protectedTopics: []
+      },
+      activeMemory: {
+        entries: [
+          {
+            scope: "user",
+            key: "vibe",
+            value: "любит спорить",
+            type: "note",
+            score: 0.8,
+            reason: "hybrid_recall"
+          }
+        ],
+        trace: {
+          enabled: true,
+          layers: ["user"],
+          reason: "test"
+        }
+      }
+    };
+    const result = service.buildPromptContext(richBundle, {
+      message,
+      intent: "chat",
+      contextV2Enabled: true,
+      messageKind: "direct_mention",
+      maxChars: 1200
+    });
+
+    expect(result.contextText).not.toContain("[ACTIVE MEMORY]");
+    expect(result.contextText).not.toContain("[ENTITY MEMORY]");
+    expect(result.contextText).not.toContain("Профиль юзера");
+    expect(result.contextText).not.toContain("Отношение к юзеру");
+    expect(result.memoryLayers).not.toContain("active_memory");
+    expect(result.memoryLayers).not.toContain("user_memory");
+    expect(result.memoryLayers).not.toContain("entity_memory");
+    expect(result.memoryLayers).not.toContain("user_profile");
+    expect(result.memoryLayers).not.toContain("relationship");
+  });
+
+  it("keeps low-pressure smalltalk free of profile baggage", () => {
+    const service = new ContextBuilderService();
+    const richBundle: ContextBundleV2 = {
+      ...bundle,
+      userProfile: {
+        userId: "user",
+        guildId: "guild",
+        summaryShort: "любит спорить и душнить",
+        styleTags: ["dry"],
+        topicTags: ["politics"],
+        confidenceScore: 0.8,
+        isEligible: true
+      },
+      relationship: {
+        toneBias: "friendly",
+        roastLevel: 1,
+        praiseBias: 1,
+        interruptPriority: 0,
+        doNotMock: false,
+        doNotInitiate: false,
+        protectedTopics: []
+      }
+    };
+    const result = service.buildPromptContext(richBundle, {
+      message,
+      intent: "chat",
+      contextV2Enabled: true,
+      messageKind: "smalltalk_hangout",
+      maxChars: 1200
+    });
+
+    expect(result.contextText).toContain("[RECENT CONTEXT]");
+    expect(result.contextText).not.toContain("Профиль юзера");
+    expect(result.contextText).not.toContain("Отношение к юзеру");
+    expect(result.memoryLayers).toContain("recent_messages");
+    expect(result.memoryLayers).not.toContain("user_profile");
+    expect(result.memoryLayers).not.toContain("relationship");
+  });
+
   it("scores context and mockery confidence from reply-chain and low-signal penalties", () => {
     const scorer = new ContextScoringService();
     const strong = scorer.score({ bundle, message, messageKind: "reply_to_bot" });
