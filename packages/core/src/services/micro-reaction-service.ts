@@ -2,7 +2,7 @@ import { normalizeWhitespace } from "@hori/shared";
 import type { MessageEnvelope, MessageKind } from "@hori/shared";
 
 export interface MicroReactionResult {
-  kind: "toxicity" | "praise";
+  kind: "toxicity" | "praise" | "meta_feedback";
   reply: string;
   rule: string;
   confidence: number;
@@ -33,6 +33,27 @@ const praiseReplies = [
   { reply: "спасибо, пушисто вышло", chunks: ["спасибо", "пушисто вышло"] }
 ] as const;
 
+const metaFeedbackPatterns = [
+  /(?:^|[^\p{L}\p{N}_])(?:галлюцинируешь|выдумываешь|сочиняешь)(?=$|[^\p{L}\p{N}_])/iu,
+  /(?:^|[^\p{L}\p{N}_])(?:не\s+по\s+теме|не\s+в\s+тему|это\s+не\s+ответ|не\s+ответ|бессмысленный\s+текст)(?=$|[^\p{L}\p{N}_])/iu,
+  /^(?:что\s+именно\s+)?мимо$/iu
+];
+
+const selfSlurQuestionPattern = /^(?:ну\s+)?я\s+(?:что\s+)?(?:прям\s+)?(?:полный\s+)?(?:выблядок|ублюдок|долбоеб|долбаеб|еблан|идиот|дебил|мудак|мразь)\?*$/iu;
+
+const metaFeedbackReplies = [
+  { reply: "Где именно?", chunks: ["Где", "именно?"] },
+  { reply: "Ткни в фразу.", chunks: ["Ткни", "в фразу."] },
+  { reply: "Что именно мимо?", chunks: ["Что именно", "мимо?"] },
+  { reply: "Ок. Где сбой?", chunks: ["Ок.", "Где сбой?"] }
+] as const;
+
+const selfSlurReplies = [
+  { reply: "По этой фразе нет.", chunks: ["По этой фразе", "нет."] },
+  { reply: "Не по этой фразе.", chunks: ["Не по этой", "фразе."] },
+  { reply: "Не знаю. По этому нет.", chunks: ["Не знаю.", "По этому нет."] }
+] as const;
+
 export class MicroReactionService {
   detect(input: {
     content: string;
@@ -47,6 +68,14 @@ export class MicroReactionService {
 
     if (input.messageKind === "command_like_request" || input.messageKind === "info_question" || input.messageKind === "request_for_explanation") {
       return null;
+    }
+
+    if (selfSlurQuestionPattern.test(content)) {
+      return this.pick("meta_feedback", content, selfSlurReplies, "self_slur_question");
+    }
+
+    if (input.messageKind === "meta_feedback" && metaFeedbackPatterns.some((pattern) => pattern.test(content))) {
+      return this.pick("meta_feedback", content, metaFeedbackReplies, "direct_meta_feedback");
     }
 
     const toxicityHit = toxicityPatterns.some((pattern) => pattern.test(content));

@@ -1455,12 +1455,16 @@ export class ChatOrchestrator {
     }
 
     try {
-      if (microReaction.kind === "toxicity") {
-        await this.deps.relationships.recordToxicBehavior(message.guildId, message.userId);
-        return;
+      switch (microReaction.kind) {
+        case "toxicity":
+          await this.deps.relationships.recordToxicBehavior(message.guildId, message.userId);
+          return;
+        case "praise":
+          await this.deps.relationships.recordInteraction(message.guildId, message.userId, 0.22);
+          return;
+        case "meta_feedback":
+          return;
       }
-
-      await this.deps.relationships.recordInteraction(message.guildId, message.userId, 0.22);
     } catch (error) {
       this.deps.logger.warn({ error }, "failed to record micro reaction relationship signal");
     }

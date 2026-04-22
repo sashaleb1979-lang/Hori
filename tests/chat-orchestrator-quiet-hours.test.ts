@@ -280,6 +280,43 @@ describe("chat orchestrator quiet hours", () => {
     expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.model === "gpt-5.4-nano")).toBe(true);
   });
 
+  it("short-circuits hostile meta replies before the normal chat path", async () => {
+    const relationships = {
+      recordInteraction: vi.fn(async () => undefined),
+      recordToxicBehavior: vi.fn(async () => undefined)
+    };
+    const { orchestrator, chat } = createOrchestrator({ relationships: relationships as never });
+
+    const result = await orchestrator.handleMessage(baseMessage({
+      content: "ты галлюцинируешь",
+      explicitInvocation: false,
+      mentionsBotByName: false,
+      mentionedBot: false,
+      triggerSource: "reply",
+      replyToMessageId: "bot-message-1"
+    }), {
+      guildSettings,
+      featureFlags,
+      channelPolicy: {
+        allowBotReplies: true,
+        allowInterjections: false,
+        isMuted: false,
+        topicInterestTags: [],
+        responseLengthOverride: null
+      },
+      runtimeSettings
+    });
+
+    expect(result.trace.microReaction?.kind).toBe("meta_feedback");
+    expect(result.trace.microReaction?.rule).toBe("direct_meta_feedback");
+    expect(result.trace.modelKind).toBeUndefined();
+    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat")).toBe(false);
+    expect(chat.mock.calls.some(([options]) => options.metadata?.purpose === "chat")).toBe(false);
+    expect(relationships.recordInteraction.mock.calls.some(([, , sentiment]) => sentiment === 0.22)).toBe(false);
+    expect(relationships.recordInteraction.mock.calls.some(([, , sentiment]) => typeof sentiment === "number" && sentiment < 0)).toBe(true);
+    expect(relationships.recordToxicBehavior).not.toHaveBeenCalled();
+  });
+
   it("does not pretend contour-A auto-interjects used a chat model", async () => {
     const { orchestrator } = createOrchestrator();
 

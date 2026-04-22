@@ -312,7 +312,7 @@ export interface BotTrace {
     reason?: string;
   };
   microReaction?: {
-    kind: "toxicity" | "praise";
+    kind: "toxicity" | "praise" | "meta_feedback";
     rule: string;
     confidence: number;
     splitChunks?: string[];

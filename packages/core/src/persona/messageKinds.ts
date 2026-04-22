@@ -87,6 +87,24 @@ function isLowSignal(content: string) {
   return normalized.length <= 3 || /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s!?.,]+$/u.test(normalized);
 }
 
+function isBotTargetedMessage(message: MessageEnvelope) {
+  return message.triggerSource === "reply" || message.mentionedBot || message.mentionsBotByName;
+}
+
+function isDirectedSelfSlurQuestion(content: string, message: MessageEnvelope) {
+  if (!isBotTargetedMessage(message) || !content.includes("?")) {
+    return false;
+  }
+
+  const normalized = normalizeForMeta(content);
+
+  if (!normalized || normalized.length > 80) {
+    return false;
+  }
+
+  return /^(?:ну\s+)?я\s+(?:что\s+)?(?:прям\s+)?(?:полный\s+)?(?:выблядок|ублюдок|долбоеб|долбаеб|еблан|идиот|дебил|мудак|мразь)$/.test(normalized);
+}
+
 function isMetaFeedback(content: string, message: MessageEnvelope) {
   const normalized = normalizeForMeta(content);
 
@@ -112,7 +130,7 @@ function isMetaFeedback(content: string, message: MessageEnvelope) {
     return true;
   }
 
-  const isBotTargeted = message.triggerSource === "reply" || message.mentionedBot || message.mentionsBotByName;
+  const isBotTargeted = isBotTargetedMessage(message);
 
   if (!isBotTargeted) {
     return false;
@@ -123,7 +141,18 @@ function isMetaFeedback(content: string, message: MessageEnvelope) {
     normalized.startsWith("что за хрень") ||
     normalized.startsWith("что за ерунда") ||
     normalized.startsWith("что за нейрослоп") ||
-    normalized.includes("нейрослоп")
+    normalized.includes("нейрослоп") ||
+    normalized.includes("галлюцинируешь") ||
+    normalized.includes("галлюцинируешь опять") ||
+    normalized.includes("выдумываешь") ||
+    normalized.includes("сочиняешь") ||
+    normalized.includes("не по теме") ||
+    normalized.includes("не в тему") ||
+    normalized.includes("это не ответ") ||
+    normalized.includes("не ответ") ||
+    normalized.includes("бессмысленный текст") ||
+    normalized.includes("просто бессмысленный") ||
+    normalized.includes("мимо")
   );
 }
 
@@ -197,6 +226,10 @@ export function detectMessageKind(options: {
 
   if (isLowSignal(content)) {
     return "low_signal_noise";
+  }
+
+  if (isDirectedSelfSlurQuestion(content, options.message)) {
+    return "provocation";
   }
 
   if (/(заткнись|тупая|ботяра|провокац|слабый бот|ты вообще|чушь нес[её]шь|идиот|дура)/i.test(content)) {
