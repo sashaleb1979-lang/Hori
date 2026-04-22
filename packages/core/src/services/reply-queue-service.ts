@@ -20,7 +20,8 @@ interface ReplyQueueItemSnapshot {
 export class ReplyQueueService {
   constructor(
     private readonly prisma: AppPrismaClient,
-    private readonly busyTtlSec = 45
+    private readonly busyTtlSec = 45,
+    private readonly maxQueuedAgeSec = 180
   ) {}
 
   async claimOrQueue(input: {
@@ -195,6 +196,7 @@ export class ReplyQueueService {
     }
 
     const queue = new PriorityTaskQueue(Math.max(queued.length + 4, 16));
+    const staleCutoff = new Date(Date.now() - this.maxQueuedAgeSec * 1000);
 
     for (const item of queued) {
       queue.enqueue(
@@ -206,25 +208,38 @@ export class ReplyQueueService {
       );
     }
 
-    const selected = queue.dequeue();
-    if (!selected) {
-      return null;
-    }
-
-    const next = queued.find((item) => item.id === selected.taskId) ?? null;
-    if (!next) {
-      return null;
-    }
-
-    await this.prisma.replyQueueItem.update({
-      where: { id: next.id },
-      data: {
-        status: "processing",
-        lockedUntil: new Date(Date.now() + this.busyTtlSec * 1000)
+    while (true) {
+      const selected = queue.dequeue();
+      if (!selected) {
+        return null;
       }
-    });
 
-    return next;
+      const next = queued.find((item) => item.id === selected.taskId) ?? null;
+      if (!next) {
+        return null;
+      }
+
+      if (next.createdAt <= staleCutoff) {
+        await this.prisma.replyQueueItem.update({
+          where: { id: next.id },
+          data: {
+            status: "dropped",
+            lockedUntil: null
+          }
+        });
+        continue;
+      }
+
+      await this.prisma.replyQueueItem.update({
+        where: { id: next.id },
+        data: {
+          status: "processing",
+          lockedUntil: new Date(Date.now() + this.busyTtlSec * 1000)
+        }
+      });
+
+      return next;
+    }
   }
 
   async status(guildId: string, channelId?: string | null): Promise<{ queued: number; processing: number; dropped: number }> {

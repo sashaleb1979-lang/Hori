@@ -197,7 +197,7 @@ export class ChatOrchestrator {
           relationship: affinityRelationship
         })
       : undefined;
-    const contourMaxChars = contour.contour === "C" ? runtimeSettings.contextMaxChars : Math.min(runtimeSettings.contextMaxChars, 1000);
+    const contourMaxChars = this.resolveContextMaxChars(contour.contour, messageKind, runtimeSettings);
     const { contextText, memoryLayers, trace: contextTrace } = this.contextBuilder.buildPromptContext(contextBundle, {
       message,
       intent: intent.intent,
@@ -294,7 +294,7 @@ export class ChatOrchestrator {
       explicitInvocation: message.explicitInvocation,
       intent: intent.intent,
       routeReason: intent.reason,
-      modelKind: this.deps.modelRouter.pickKind(intent.intent),
+      modelKind: intent.intent === "chat" && contour.contour === "A" ? undefined : this.deps.modelRouter.pickKind(intent.intent),
       usedSearch: false,
       toolNames: [],
       contextMessages: contextBundle.recentMessages.length,
@@ -1210,6 +1210,52 @@ export class ChatOrchestrator {
       numCtx: runtimeSettings.ollamaNumCtx,
       numBatch: runtimeSettings.ollamaNumBatch,
     };
+  }
+
+  private resolveContextMaxChars(
+    contour: Contour,
+    messageKind: ReturnType<typeof detectMessageKind>,
+    runtimeSettings: EffectiveRuntimeSettings
+  ) {
+    const hardCap = runtimeSettings.contextMaxChars;
+
+    if (contour === "C") {
+      if (messageKind === "request_for_explanation") {
+        return hardCap;
+      }
+
+      if (messageKind === "opinion_question") {
+        return Math.min(hardCap, 1400);
+      }
+
+      if (messageKind === "provocation") {
+        return Math.min(hardCap, 900);
+      }
+
+      return Math.min(hardCap, 1100);
+    }
+
+    if (contour === "A") {
+      return Math.min(hardCap, 450);
+    }
+
+    switch (messageKind) {
+      case "reply_to_bot":
+      case "info_question":
+      case "command_like_request":
+        return Math.min(hardCap, 850);
+      case "direct_mention":
+      case "casual_address":
+      case "smalltalk_hangout":
+      case "meta_feedback":
+        return Math.min(hardCap, 650);
+      case "low_signal_noise":
+      case "repeated_question":
+      case "meme_bait":
+        return Math.min(hardCap, 450);
+      default:
+        return Math.min(hardCap, 1000);
+    }
   }
 
   private buildEmotionalState(input: {

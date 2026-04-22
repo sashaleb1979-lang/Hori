@@ -426,4 +426,61 @@ describe("ReplyQueueService", () => {
     expect(rows[0]?.status).toBe("dropped");
     expect(rows[0]?.lockedUntil).toBeNull();
   });
+
+  it("drops stale queued work before selecting a fresher queued reply", async () => {
+    const rows: Array<Record<string, unknown>> = [
+      {
+        id: "queue-stale",
+        guildId: "guild-1",
+        channelId: "channel-1",
+        targetUserId: "user-old",
+        sourceMsgId: "msg-stale",
+        priority: 980,
+        status: "queued",
+        lockedUntil: null,
+        createdAt: new Date(Date.now() - 10 * 60_000),
+        updatedAt: new Date(Date.now() - 10 * 60_000),
+      },
+      {
+        id: "queue-fresh",
+        guildId: "guild-1",
+        channelId: "channel-1",
+        targetUserId: "user-fresh",
+        sourceMsgId: "msg-fresh",
+        priority: 920,
+        status: "queued",
+        lockedUntil: null,
+        createdAt: new Date(Date.now() - 30_000),
+        updatedAt: new Date(Date.now() - 30_000),
+      },
+    ];
+
+    const prisma = {
+      replyQueueItem: {
+        async updateMany() {
+          return { count: 0 };
+        },
+        async findMany(args: { where: Record<string, unknown> }) {
+          return rows.filter(
+            (row) =>
+              row.guildId === args.where.guildId &&
+              row.channelId === args.where.channelId &&
+              row.status === args.where.status
+          ) as Record<string, unknown>[];
+        },
+        async update(args: { where: { id: string }; data: Record<string, unknown> }) {
+          const row = rows.find((entry) => entry.id === args.where.id)!;
+          Object.assign(row, args.data, { updatedAt: new Date() });
+          return row;
+        },
+      },
+    } as unknown as AppPrismaClient;
+
+    const service = new ReplyQueueService(prisma, 45, 180);
+    const next = await service.nextQueued("guild-1", "channel-1");
+
+    expect(next?.sourceMsgId).toBe("msg-fresh");
+    expect(rows.find((row) => row.id === "queue-stale")?.status).toBe("dropped");
+    expect(rows.find((row) => row.id === "queue-fresh")?.status).toBe("processing");
+  });
 });

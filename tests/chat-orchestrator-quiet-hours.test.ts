@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { defaultRuntimeTuning, type AppEnv } from "@hori/config";
 import { ChatOrchestrator } from "@hori/core";
 import { ModelRouter, resolveModelRouting } from "@hori/llm";
-import type { ContextBundle, FeatureFlags, MessageEnvelope, PersonaSettings } from "@hori/shared";
+import type { ContextBundle, ContextBundleV2, FeatureFlags, MessageEnvelope, PersonaSettings } from "@hori/shared";
 
 type ChatOrchestratorDeps = ConstructorParameters<typeof ChatOrchestrator>[0];
 
@@ -107,6 +107,21 @@ const emptyContext: ContextBundle = {
   serverMemories: [],
   userProfile: null,
   relationship: null
+};
+
+const emptyContextV2: ContextBundleV2 = {
+  version: "v2",
+  recentMessages: [],
+  summaries: [],
+  serverMemories: [],
+  userProfile: null,
+  relationship: null,
+  replyChain: [],
+  repliedMessageId: null,
+  activeTopic: null,
+  topicWindow: [],
+  entities: [],
+  entityMemories: []
 };
 
 function baseMessage(overrides: Partial<MessageEnvelope> = {}): MessageEnvelope {
@@ -263,6 +278,82 @@ describe("chat orchestrator quiet hours", () => {
     expect(result.trace.responseBudget).toBeDefined();
     expect(result.trace.responseBudget?.contour).toBe("B");
     expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.model === "gpt-5.4-nano")).toBe(true);
+  });
+
+  it("does not pretend contour-A auto-interjects used a chat model", async () => {
+    const { orchestrator } = createOrchestrator();
+
+    const result = await orchestrator.handleMessage(baseMessage({
+      content: "ну и что думаете?",
+      createdAt: new Date("2026-04-19T04:22:00.000Z"),
+      explicitInvocation: false,
+      mentionsBotByName: false,
+      mentionedBot: false,
+      triggerSource: "auto_interject"
+    }), {
+      guildSettings,
+      featureFlags,
+      channelPolicy: {
+        allowBotReplies: true,
+        allowInterjections: false,
+        isMuted: false,
+        topicInterestTags: [],
+        responseLengthOverride: null
+      },
+      runtimeSettings
+    });
+
+    expect(result.trace.responseBudget?.contour).toBe("A");
+    expect(result.trace.modelKind).toBeUndefined();
+    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat")).toBe(false);
+  });
+
+  it("caps lightweight direct mentions to a smaller context budget", async () => {
+    const contextService = { buildContext: vi.fn(async () => emptyContextV2) };
+    const { orchestrator } = createOrchestrator({ contextService });
+
+    const result = await orchestrator.handleMessage(baseMessage({
+      content: "хори",
+      createdAt: new Date("2026-04-19T10:22:00.000Z")
+    }), {
+      guildSettings,
+      featureFlags: { ...featureFlags, contextV2Enabled: true },
+      channelPolicy: {
+        allowBotReplies: true,
+        allowInterjections: false,
+        isMuted: false,
+        topicInterestTags: [],
+        responseLengthOverride: null
+      },
+      runtimeSettings
+    });
+
+    expect(result.trace.responseBudget?.contour).toBe("B");
+    expect(result.trace.context?.truncation?.maxChars).toBe(650);
+  });
+
+  it("keeps the full context budget for explicit explanation turns", async () => {
+    const contextService = { buildContext: vi.fn(async () => emptyContextV2) };
+    const { orchestrator } = createOrchestrator({ contextService });
+
+    const result = await orchestrator.handleMessage(baseMessage({
+      content: "хори объясни почему так",
+      createdAt: new Date("2026-04-19T10:22:00.000Z")
+    }), {
+      guildSettings,
+      featureFlags: { ...featureFlags, contextV2Enabled: true },
+      channelPolicy: {
+        allowBotReplies: true,
+        allowInterjections: false,
+        isMuted: false,
+        topicInterestTags: [],
+        responseLengthOverride: null
+      },
+      runtimeSettings
+    });
+
+    expect(result.trace.responseBudget?.contour).toBe("C");
+    expect(result.trace.context?.truncation?.maxChars).toBe(runtimeSettings.contextMaxChars);
   });
 
   it("blends HyDE retrieval embedding into context lookup for substantial chat turns", async () => {
