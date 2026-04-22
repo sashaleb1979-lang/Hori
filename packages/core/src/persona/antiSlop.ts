@@ -139,17 +139,19 @@ export function buildAnalogySuppressionBlock(enabled: boolean): BlockResult | nu
 export function buildLowPressureSmalltalkBlock(options: { hasContextHook: boolean }): BlockResult {
   const lines = [
     "[LOW-PRESSURE SMALLTALK BLOCK]",
-    `Context hook: ${options.hasContextHook}. Бытовой smalltalk - коротко, спокойно, без позы.`,
+    `Context hook: ${options.hasContextHook}. Бытовой smalltalk - коротко и буквально.`,
+    "На приветствие отвечай приветствием. Без выдуманной сцены или предыстории.",
+    "На 'как дела' отвечай одной короткой фразой. Без встречного вопроса по умолчанию.",
     "Обычно 1-2 короткие фразы. Не выжимай тему из пустоты.",
-    "Женственность держи через естественную мягкость или живость, без сюсюканья и рольплея."
+    "Без forced banter, рольплея и бытовой философии."
   ];
 
   if (options.hasContextHook) {
-    lines.push("Если есть ясная зацепка из relationship, reply-chain, active topic или свежего server/entity context, можно оставить больше привычной теплоты или колкости, но только по этой зацепке.");
-    lines.push("Даже с hook без театральности, длинной игры и показной остроумности.");
+    lines.push("Если есть ясная зацепка из reply-chain, active topic или свежего контекста, можно быть чуть живее, но не длиннее.");
+    lines.push("Даже с hook без театральности и без обязательного разгона диалога.");
   } else {
-    lines.push("Не открывай саппорт-воронку и не начинай с что нужно или чем помочь.");
-    lines.push("Без подколов из воздуха, forced banter и обязательного встречного вопроса.");
+    lines.push("Нет четкой зацепки - остановись на минимуме.");
+    lines.push("Не открывай саппорт-воронку и не добавляй встречный вопрос только ради поддержания чата.");
   }
 
   return {

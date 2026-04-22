@@ -111,6 +111,7 @@ describe("context intelligence", () => {
     });
 
     expect(result.contextText.indexOf("[CONTEXT ANCHORS]")).toBeLessThan(result.contextText.indexOf("[QUESTION ANCHOR]"));
+  expect(result.contextText).toContain("[DIALOGUE CAPSULE]");
     expect(result.contextText).toContain("[REPLY CHAIN]");
     expect(result.contextText).toContain("[ACTIVE TOPIC]");
     expect(result.contextText).toContain("[ENTITY MEMORY]");
@@ -118,6 +119,21 @@ describe("context intelligence", () => {
     expect(result.trace.replyChainCount).toBe(1);
     expect(result.memoryLayers).toContain("reply_chain");
     expect(result.memoryLayers).toContain("active_topic");
+  });
+
+  it("keeps a compact dialogue capsule even when warm support is trimmed", () => {
+    const service = new ContextBuilderService();
+    const result = service.buildPromptContext(bundle, {
+      message,
+      intent: "chat",
+      contextV2Enabled: true,
+      messageKind: "reply_to_bot",
+      maxChars: 360
+    });
+
+    expect(result.contextText).toContain("[DIALOGUE CAPSULE]");
+    expect(result.contextText).toContain("Это продолжение текущей ветки");
+    expect(result.contextText).toContain("Последняя опорная реплика");
   });
 
   it("uses the runtime default context budget when maxChars is omitted", () => {
@@ -187,6 +203,35 @@ describe("context intelligence", () => {
     expect(result.contextText).not.toContain("[ENTITY MEMORY]");
     expect(result.memoryLayers).not.toContain("server_memory");
     expect(result.memoryLayers).not.toContain("entity_memory");
+  });
+
+  it("drops lower-signal recent chatter before ranked topical continuity", () => {
+    const service = new ContextBuilderService();
+    const topicalMessage: MessageEnvelope = {
+      ...message,
+      content: "налоги и анкап опять"
+    };
+    const rankedBundle: ContextBundleV2 = {
+      ...bundle,
+      recentMessages: [
+        { id: "m1", author: "a", userId: "a", content: "вообще оффтоп про кино и музыку", createdAt: new Date("2026-04-12T09:58:00Z") },
+        { id: "m2", author: "b", userId: "b", content: "спор опять ушел в налоги", createdAt: new Date("2026-04-12T09:59:00Z") },
+        { id: "m3", author: "c", userId: "c", content: "анкап тут опять всплыл", createdAt: new Date("2026-04-12T09:59:30Z") }
+      ]
+    };
+
+    const result = service.buildPromptContext(rankedBundle, {
+      message: topicalMessage,
+      intent: "chat",
+      contextV2Enabled: true,
+      messageKind: "info_question",
+      maxChars: 440
+    });
+
+    expect(result.contextText).toContain("спор опять ушел в налоги");
+    expect(result.contextText).toContain("анкап тут опять всплыл");
+    expect(result.contextText).not.toContain("оффтоп про кино и музыку");
+    expect(result.trace.truncation?.droppedRecentMessages).toBeGreaterThan(0);
   });
 
   it("keeps direct mentions free of deep memory layers", () => {

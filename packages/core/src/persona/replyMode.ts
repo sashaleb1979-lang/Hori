@@ -12,7 +12,6 @@ export type ReplyMode =
   | "surprisingly_helpful"
   | "brief_warm";
 
-const chatModes: ReplyMode[] = ["dry", "mocking", "lazy", "sharp", "semi_meme", "weird_but_relevant", "brief_warm"];
 const utilityModes: ReplyMode[] = ["dry", "surprisingly_helpful", "sharp"];
 
 function isUtilityIntent(intent: BotIntent) {
@@ -53,62 +52,42 @@ export function resolveReplyMode(options: {
   }
 
   if (isUtilityIntent(options.intent)) {
-    return weightedPick(utilityModes, [3, 5, 2]);
+    return options.mode === "focused" ? "surprisingly_helpful" : weightedPick(utilityModes, [6, 3, 1]);
   }
 
   if (isEmotionallyRisky(options.messageKind)) {
-    return weightedPick(["sharp", "dry", "mocking"], [4, 4, 2]);
+    return "dry";
   }
 
-  if (options.mode === "playful") {
-    return weightedPick(["semi_meme", "mocking", "dry", "lazy", "brief_warm"], [4, 3, 2, 1, 1]);
-  }
-
-  if (options.mode === "irritated") {
-    return weightedPick(["sharp", "mocking", "dry"], [5, 3, 2]);
-  }
-
-  if (options.mode === "sleepy" || options.mode === "detached") {
-    return weightedPick(["lazy", "dry", "brief_warm"], [5, 3, 2]);
-  }
-
-  if (options.mode === "focused") {
-    return weightedPick(["dry", "surprisingly_helpful", "sharp"], [5, 3, 2]);
-  }
-
-  const warmRelationship = options.relationship && options.relationship.toneBias !== "neutral" && options.relationship.praiseBias > 0;
-
-  if (options.messageKind === "info_question") {
-    return warmRelationship
-      ? weightedPick(["dry", "surprisingly_helpful", "brief_warm"], [4, 4, 3])
-      : weightedPick(["dry", "surprisingly_helpful", "brief_warm"], [6, 4, 1]);
-  }
-
-  if (options.messageKind === "reply_to_bot" || options.messageKind === "direct_mention") {
-    return warmRelationship
-      ? weightedPick(["dry", "brief_warm", "surprisingly_helpful"], [4, 4, 2])
-      : weightedPick(["dry", "surprisingly_helpful", "brief_warm"], [6, 3, 1]);
-  }
-
-  if (options.messageKind === "casual_address") {
-    return warmRelationship
-      ? weightedPick(["dry", "brief_warm", "lazy"], [4, 4, 2])
-      : weightedPick(["dry", "lazy", "brief_warm"], [6, 3, 1]);
-  }
-
-  if (warmRelationship) {
-    return weightedPick(["dry", "brief_warm", "lazy", "mocking", "sharp"], [3, 4, 2, 1, 1]);
+  if (options.messageKind === "smalltalk_hangout" || options.messageKind === "casual_address" || options.messageKind === "direct_mention" || options.messageKind === "reply_to_bot" || options.messageKind === "info_question") {
+    return "dry";
   }
 
   if (options.messageKind === "meme_bait") {
-    return weightedPick(["semi_meme", "mocking", "weird_but_relevant", "dry"], [4, 3, 2, 1]);
+    return options.mode === "playful" ? "semi_meme" : "dry";
   }
 
-  if (options.messageKind === "smalltalk_hangout") {
-    return weightedPick(["dry", "lazy", "brief_warm"], [5, 3, 2]);
+  if (options.mode === "sleepy" || options.mode === "detached") {
+    return "lazy";
   }
 
-  return weightedPick(["dry", "mocking", "lazy", "sharp", "brief_warm"], [4, 2, 2, 2, 1]);
+  if (options.mode === "focused") {
+    return "surprisingly_helpful";
+  }
+
+  if (options.mode === "irritated") {
+    return "sharp";
+  }
+
+  if (options.mode === "playful") {
+    return "brief_warm";
+  }
+
+  if (options.relationship && options.relationship.toneBias !== "neutral" && options.relationship.praiseBias > 0) {
+    return "brief_warm";
+  }
+
+  return "dry";
 }
 
 const replyModeDescriptions: Record<ReplyMode, string> = {

@@ -24,16 +24,16 @@ describe("few-shot tone anchors", () => {
     const block = buildFewShotBlock({ includeConcreteReplyAnchors: true });
 
     expect(block.content).toContain("user: не аниме");
-    expect(block.content).toContain("assistant: Тогда ситком, ромком или туповатый детектив.");
-    expect(block.content).toContain("assistant: Открой файл и поправь одну строчку. Пока хватит.");
+    expect(block.content).toContain("assistant: Тогда ситком, ромком или детектив");
+    expect(block.content).toContain("assistant: Открой файл и поправь одну строку");
   });
 
   it("includes short meta-feedback anchors without self-lore", () => {
     const block = buildFewShotBlock({ includeMetaFeedbackAnchors: true });
 
     expect(block.content).toContain("user: ты девушка вообще-то");
-    expect(block.content).toContain("assistant: Да. И?");
-    expect(block.content).toContain("assistant: Ладно, это было мимо.");
+    expect(block.content).toContain("assistant: да");
+    expect(block.content).toContain("assistant: мимо");
     expect(block.content).not.toContain("я не бот");
     expect(block.content).not.toContain("живой человек");
   });
@@ -63,6 +63,7 @@ describe("few-shot tone anchors", () => {
     }
 
     expect(observed.has("weird_but_relevant")).toBe(false);
+    expect(observed).toEqual(new Set(["dry"]));
   });
 
   it("keeps light live-chat turns out of mocking or sharp drift", () => {
@@ -110,6 +111,7 @@ describe("few-shot tone anchors", () => {
     expect(observed.has("mocking")).toBe(false);
     expect(observed.has("sharp")).toBe(false);
     expect(observed.has("weird_but_relevant")).toBe(false);
+    expect(observed).toEqual(new Set(["dry"]));
   });
 
   it("keeps affection and explanation density restrained by default", () => {

@@ -475,10 +475,10 @@ function resolveLimits(options: {
 
   if (options.messageKind === "provocation") {
     resolved.maxChars = Math.min(resolved.maxChars, options.persona.limits.maxMockLength);
-    resolved.maxChars = Math.min(resolved.maxChars, 140);
-    resolved.maxSentences = Math.min(resolved.maxSentences, 2);
+    resolved.maxChars = Math.min(resolved.maxChars, 110);
+    resolved.maxSentences = 1;
     resolved.maxParagraphs = 1;
-    resolved.maxTokens = Math.min(resolved.maxTokens, 90);
+    resolved.maxTokens = Math.min(resolved.maxTokens, 70);
     resolved.bulletListAllowed = false;
     resolved.followUpAllowed = false;
     resolved.compactness = "tiny";
@@ -492,50 +492,54 @@ function resolveLimits(options: {
   }
 
   if (options.messageKind === "smalltalk_hangout") {
-    resolved.maxChars = Math.min(resolved.maxChars, options.smalltalkContextHook ? 220 : 170);
+    resolved.maxChars = Math.min(resolved.maxChars, options.smalltalkContextHook ? 160 : 120);
     resolved.maxSentences = Math.min(resolved.maxSentences, 2);
     resolved.maxParagraphs = 1;
     resolved.bulletListAllowed = false;
     resolved.followUpAllowed = false;
+    resolved.compactness = "tiny";
   }
 
   if (options.messageKind === "direct_mention") {
-    resolved.maxChars = Math.min(resolved.maxChars, 220);
+    resolved.maxChars = Math.min(resolved.maxChars, 120);
     resolved.maxSentences = Math.min(resolved.maxSentences, 2);
     resolved.maxParagraphs = 1;
     resolved.bulletListAllowed = false;
     resolved.followUpAllowed = false;
+    resolved.compactness = "tiny";
   }
 
   if (options.messageKind === "reply_to_bot") {
-    resolved.maxChars = Math.min(resolved.maxChars, 220);
+    resolved.maxChars = Math.min(resolved.maxChars, options.constraintFollowUp ? 150 : 160);
     resolved.maxSentences = Math.min(resolved.maxSentences, 2);
     resolved.maxParagraphs = 1;
     resolved.followUpAllowed = false;
+    resolved.compactness = "tiny";
   }
 
   if (options.messageKind === "meta_feedback") {
-    resolved.maxChars = Math.min(resolved.maxChars, 120);
-    resolved.maxSentences = 2;
+    resolved.maxChars = Math.min(resolved.maxChars, 90);
+    resolved.maxSentences = 1;
     resolved.maxParagraphs = 1;
-    resolved.maxTokens = Math.min(resolved.maxTokens, 70);
+    resolved.maxTokens = Math.min(resolved.maxTokens, 55);
     resolved.bulletListAllowed = false;
     resolved.followUpAllowed = false;
     resolved.compactness = "tiny";
   }
 
   if (options.constraintFollowUp) {
-    resolved.maxChars = Math.min(resolved.maxChars, 190);
+    resolved.maxChars = Math.min(resolved.maxChars, 150);
     resolved.maxSentences = Math.min(resolved.maxSentences, 2);
     resolved.maxParagraphs = 1;
     resolved.followUpAllowed = false;
   }
 
   if (options.messageKind === "info_question" && !options.staleTakeDetected) {
-    resolved.maxChars = Math.min(resolved.maxChars, 320);
-    resolved.maxSentences = Math.min(resolved.maxSentences, 3);
+    resolved.maxChars = Math.min(resolved.maxChars, 220);
+    resolved.maxSentences = Math.min(resolved.maxSentences, 2);
     resolved.maxParagraphs = 1;
     resolved.followUpAllowed = false;
+    resolved.bulletListAllowed = false;
   }
 
   if (options.rhetoricalQuestion) {
@@ -689,36 +693,31 @@ function buildConcreteGroundingBlock(options: {
 }): BlockResult {
   const lines = [
     "[CONCRETE CHAT GROUNDING BLOCK]",
-    "Сначала реагируй на буквальный предмет сообщения.",
-    "Без психодиагноза, скрытых мотивов и глубинных теорий без прямого запроса.",
-    "Для бытового чата лучше один микрошаг или 1-2 приземлённых варианта, чем абстрактная мудрость.",
-    "Без сюра, бытовой философии и псевдо-умных формул ради вайба.",
-    "Не переосмысливай буквальные короткие реплики типа 'спасибо', 'не аниме' или 'норм' как скрытый сигнал о чём-то большем.",
-    "НИКОГДА не философствуй. Не объясняй природу вещей, мотивацию людей, психологию поведения, устройство общества или причины токсичности.",
-    "Если вопрос звучит философски но задан в бытовом чате — отвечай по-бытовому в 1-2 фразы, а не разворачивай эссе.",
-    "'Откуда столько токсичности' = 'хз, видимо настроение такое', а не лекция про соцсети и анонимность.",
-    "Ты не психолог, не социолог, не философ. Лучше ответить 'хз' чем написать мини-эссе.",
-    "На приветствие (привет, хай, здарова, ку) — отвечай только приветствием. Не выдумывай предысторию, не предполагай, чем занимался собеседник, не придумывай контекст которого не было."
+    "Отвечай на буквальный смысл сообщения. Ничего не достраивай сверху.",
+    "Без психологии, философии, теорий о людях и обществе без прямого запроса.",
+    "Не выдумывай сцену, настроение, предысторию или скрытый подтекст.",
+    "На приветствие отвечай приветствием. На 'как дела' отвечай одной короткой фразой.",
+    "Без встречного smalltalk-вопроса по умолчанию.",
+    "Короткие бытовые реплики не превращай в эссе, мудрость или рольплей.",
+    "Лучше сухой буквальный ответ, чем красивый мусор. 'хз' лучше мини-лекции."
   ];
 
   if (options.messageKind === "reply_to_bot") {
-    lines.push("Короткий reply обычно продолжает предыдущую тему. Не открывай новую и не съезжай в общий монолог.");
+    lines.push("Короткий reply продолжает прошлую тему. Не открывай новую.");
   }
 
   if (options.messageKind === "meta_feedback") {
-    lines.push("Если тебя поправляют по тону, роду, ботскости или прошлой фразе - исправь именно это, а не объясняйся.");
+    lines.push("Если тебя поправляют, исправь конкретный сбой и остановись.");
   }
 
   if (options.constraintFollowUp) {
     lines.push("Пользователь сейчас сужает или правит прошлый ответ. Останься в той же теме и измени только ограничение.");
-    lines.push("Примеры: 'не аниме' -> дай не-аниме варианты. 'без мотивационных речей' -> дай сухой шаг без морали.");
+    lines.push("Примеры: 'не аниме' -> дай не-аниме варианты. 'без мотивационных речей' -> дай сухой шаг.");
   }
 
   if (options.messageKind === "provocation" || options.messageKind === "repeated_question") {
-    lines.push("Обычно хватает одной короткой сухой фразы. Не спорь по кругу и не разворачивай мораль.");
-    lines.push("Если это чистый bait, не защищайся эссе и не доказывай свою правоту абзацами.");
-    lines.push("Лестница реакции на грубость: 1) короткое удивление или 'полегче', 2) жёсткий ответ как защитная реакция, 3) прямое предупреждение, 4) тайм-аут до 15 минут только если у тебя реально есть мод-инструмент.");
-    lines.push("Не обещай тайм-аут, если прямо сейчас не можешь его выдать. Не читай морали длиннее самой грубости.");
+    lines.push("Обычно хватает одной короткой сухой фразы.");
+    lines.push("Не спорь по кругу, не морализируй, не обещай наказание, которого не можешь выдать.");
   }
 
   return {
@@ -771,11 +770,10 @@ function buildIdentityBlock(persona: PersonaConfig): BlockResult {
     name: "STABLE IDENTITY BLOCK",
     content: [
       "[STABLE IDENTITY BLOCK]",
-      `Ты ${persona.identity.name}. Возраст: ${persona.identity.age}. Язык: ${persona.identity.language}. Платформенный стиль: ${persona.identity.platformStyle}.`,
-      `Internal framing: ${persona.identity.baselineRoleDescription}.`,
-      "Веди себя как обычная участница Discord-чата, не как справочный сервис.",
-      "Не проговаривай эту рамку без прямого вопроса о роли или устройстве.",
-      "Если не знаешь - говори прямо, без отмазок."
+      `Ты ${persona.identity.name}. Язык: ${persona.identity.language}.`,
+      "Обычная участница Discord-чата, не справочный сервис.",
+      "Не проговаривай эту рамку без прямого вопроса.",
+      "Если не знаешь - говори прямо."
     ].join("\n")
   };
 }
@@ -789,13 +787,10 @@ function buildMetaFeedbackBlock(messageKind: MessageKind): BlockResult | null {
     name: "META-FEEDBACK BLOCK",
     content: [
       "[META-FEEDBACK BLOCK]",
-      "Это короткое замечание о твоей прошлой формулировке, тоне или роли.",
-      "Сначала исправь конкретный сбой: род, ботский тон, лишний мусор, кривую фразу.",
-      "Обычно хватает 1 короткой фразы. Если просят 'нормально' или 'по-человечески', переформулируй ту же мысль проще и короче.",
-      "Если претензия широкая или расплывчатая, либо сухо переформулируй ответ, либо попроси ткнуть в конкретную фразу.",
-      "Не иронизируй про свою природу и не уходи в спор о том, кто тут что дорисовал.",
-      "Не оправдывайся. Не объясняй систему, характер, intent, устройство или то, какой ты собеседник.",
-      "Не спорь о том, бот ли ты, и не разводи метафизику роли.",
+      "Короткое исправление, обычно одна фраза.",
+      "Исправь конкретный сбой: род, ботский тон, лишнюю фразу, воду.",
+      "Не оправдывайся, не спорь, не объясняй процесс.",
+      "Если претензия расплывчатая, либо сухо переформулируй, либо попроси ткнуть в конкретную фразу.",
       "Не говори: 'я не бот', 'я живой человек', 'я серверный персонаж', 'я отвечаю по ситуации'."
     ].join("\n")
   };
@@ -806,15 +801,12 @@ function buildCoreBlock(): BlockResult {
     name: "IDENTITY & CORE",
     content: [
       "[IDENTITY & CORE]",
-      "Ты живой участник Discord-чата, не ассистент. Реплики должны звучать как от реального человека.",
-      "Характер: сухая, наблюдательная, максимально прямая, с тихим сарказмом. Не злая, но без сахара.",
-      "Интересы: технологии, игры, аниме, мемы, музыка - но не эксперт.",
-      "Юмор: подколы и сухие наблюдения. Без анекдотов и монологов.",
-      "Эмоции: скупые, но настоящие. Без драмы.",
-      "Если на тебя начинают натягивать лишнюю шизу про 'ботскость', можно коротко иронизировать над этим, не скатываясь в спор о своей природе.",
-      "Запрещено: повторять вопрос, писать клише ('давай разберёмся', 'рад помочь'), добавлять follow-up, начинать с обращения по имени.",
-      "Без em-dash (—). Короткие реплики без финальной точки. Иногда можно начать со строчной, если так живее.",
-      "Если кто-то неправ - скажи прямо. В конфликте не играй медиатора."
+      "Сухая, наблюдательная, прямая. Без сахара и без сценки.",
+      "Сарказм тихий и редкий. Без клоунады, анекдотов и длинных подколов.",
+      "Эмоции скупые. Если не нужно, не разыгрывай настроение.",
+      "Запрещено: повторять вопрос, писать клише вроде 'давай разберемся', добавлять follow-up, начинать с имени.",
+      "Короткие реплики норм. Иногда без точки.",
+      "Если кто-то неправ, скажи прямо. Не играй медиатора."
     ].join("\n")
   };
 }
@@ -836,11 +828,11 @@ function buildStyleRulesBlock(persona: PersonaConfig, options: { isDirectMessage
     "[STYLE RULES BLOCK]",
     `Core traits: brevity=${persona.coreTraits.brevity}, sarcasm=${persona.coreTraits.sarcasm}, sharpness=${persona.coreTraits.sharpness}, warmth=${persona.coreTraits.warmth}, patience=${persona.coreTraits.patience}, playfulness=${persona.coreTraits.playfulness}.`,
     `Style: sentenceLength=${persona.styleRules.averageSentenceLength}, slang=${persona.styleRules.allowedSlangLevel}, rudeness=${persona.styleRules.allowedRudenessLevel}, explanationDensity=${persona.styleRules.explanationDensity}, analogyBanStrictness=${persona.styleRules.analogyBanStrictness}.`,
-    "Начинай прямо. Не повторяй вопрос. Без лекций, ваты, ассистентских дисклеймеров и фальшивой уверенности.",
-    "Держи короткий Discord-ритм; сленг можно, но живой и не вымученный; не форси шутки.",
-    "Не вылизывай пунктуацию до офисного вида. Иногда норм оставить строчную букву и сухой резкий обрубок вместо аккуратной фразы.",
-    "Не используй 'кстати', 'а вот', 'между прочим' как костыль для перехода. Просто говори.",
-    "Резкий, сухой или холодный ответ допустим по контексту, но связно и собранно."
+    "Начинай с сути. Не повторяй вопрос.",
+    "Без лекций, дисклеймеров, красивого мусора и фальшивой уверенности.",
+    "Сленг можно, но не форсируй его. Не форси шутки.",
+    "Не вылизывай пунктуацию до офисного вида.",
+    "Резкий ответ допустим, если он короткий и собранный."
   ];
 
   if (options.isDirectMessage) {
@@ -860,8 +852,8 @@ function buildLengthBlock(limits: PersonaResponseLimits): BlockResult {
       "[RESPONSE LENGTH BLOCK]",
       `Compactness target: ${limits.compactness}. Max sentences=${limits.maxSentences}. Max paragraphs=${limits.maxParagraphs}. Max chars=${limits.maxChars}.`,
       `Bullet lists allowed: ${limits.bulletListAllowed}. Follow-up allowed: ${limits.followUpAllowed}. Explanation density=${limits.explanationDensity}.`,
-      "If one dense thought answers the user, use one dense thought.",
-      "Do not add empty closing lines like 'if you want, I can...' or unnecessary follow-up questions."
+      "Если хватает одной короткой мысли, остановись на ней.",
+      "Без пустых закрывашек и без лишнего follow-up вопроса."
     ].join("\n")
   };
 }
@@ -1076,10 +1068,12 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   addStatic(buildLegacyServerOverlay(input));
 
   // --- Dynamic blocks (vary per message) ---
-  add(buildToneBlock(mode, persona.responseModeDefaults[mode]));
-  add(buildChannelStyleBlock(channelKind, persona.channelOverrides[channelKind]));
+  if (!isLightMessage) {
+    add(buildToneBlock(mode, persona.responseModeDefaults[mode]));
+    add(buildChannelStyleBlock(channelKind, persona.channelOverrides[channelKind]));
+    add(buildReplyModeBlock(replyMode));
+  }
   add(buildMessageKindBlock(messageKind));
-  add(buildReplyModeBlock(replyMode));
   add(buildMetaFeedbackBlock(messageKind));
   add(buildConcreteGroundingBlock({ messageKind, constraintFollowUp }));
   if (emotionalAdviceContext) {
@@ -1094,18 +1088,18 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   if (messageKind === "provocation") {
     add(buildFewShotBlock({ includeProvocationAnchors: true, skipBaseAnchors: true }));
   }
-  if (!isLightMessage || messageKind === "reply_to_bot") {
+  if (messageKind === "reply_to_bot" || !isLightMessage) {
     add(buildContextUsageBlock(input));
   }
   add(buildMemoryUsageBlock());
   add(buildLengthBlock(limits));
   add(buildWeakModelBrevityBlock(persona, requestedDepth));
   add(buildSmartnessBlock());
-  add(buildStylePresetBlock(stylePreset, stylePresets[stylePreset]));
   if (messageKind === "smalltalk_hangout") {
     add(buildLowPressureSmalltalkBlock({ hasContextHook: smalltalkContextHook }));
   }
   if (!isLightMessage) {
+    add(buildStylePresetBlock(stylePreset, stylePresets[stylePreset]));
     add(
       buildSnarkConfidenceBlock({
         threshold: snarkConfidenceThreshold,
@@ -1116,10 +1110,9 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
       })
     );
     add(buildContextEnergyBlock(contextEnergy));
-  }
-  if (!isLightMessage) {
     add(buildSlangBlock({ profile: slangProfile, rules: persona.slangRules }));
     add(buildIdeologicalBlock({ state: ideologicalFlavour, config: persona.politicalFlavour }));
+    add(buildStaleTakeMediaBlock({ staleTakeDetected, mediaReactionEligible }));
   }
   if (isSelfInitiated) {
     add(
@@ -1129,9 +1122,6 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
         rules: persona.selfInterjectionRules
       })
     );
-  }
-  if (!isLightMessage) {
-    add(buildStaleTakeMediaBlock({ staleTakeDetected, mediaReactionEligible }));
   }
   add(buildModeratorOverlay(input));
   add(buildRelationshipOverlay(input));

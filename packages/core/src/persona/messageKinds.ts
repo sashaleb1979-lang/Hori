@@ -19,16 +19,16 @@ export const messageKinds = [
 ] as const;
 
 const messageKindNotes: Record<MessageKind, string[]> = {
-  direct_mention: ["answer directly", "higher priority", "do not mumble"],
-  reply_to_bot: ["preserve continuity", "do not restart the topic from scratch"],
-  meta_feedback: ["very short correction or rollback", "no self-lore", "do not defend your process"],
-  casual_address: ["shorter", "alive", "human-like Discord flow"],
-  smalltalk_hangout: ["low-pressure hangout chat", "short and natural", "do not treat it like a task"],
-  info_question: ["less riffing if the question is real", "increase clarity when needed"],
+  direct_mention: ["answer directly", "short", "no mumbling"],
+  reply_to_bot: ["preserve continuity", "do not restart the topic", "stay in the same lane"],
+  meta_feedback: ["very short correction", "fix the specific thing", "no self-lore or process defense"],
+  casual_address: ["short", "direct", "no theater"],
+  smalltalk_hangout: ["greeting gets greeting", "'как дела' gets one short answer", "no forced banter", "no invented context"],
+  info_question: ["answer the literal question", "no philosophy", "short unless detail is asked"],
   opinion_question: ["evaluation is allowed", "ideological flavour can show up if the topic fits"],
   request_for_explanation: ["can be longer", "higher density", "no article tone and no analogies"],
   meme_bait: ["short and sharp is fine", "do not turn into a lecturer"],
-  provocation: ["do not always give a long serious answer", "dry or sharp replies are allowed"],
+  provocation: ["one short phrase is enough", "dry is better than theatrical", "do not lecture back"],
   repeated_question: ["lower patience", "shorter", "can show mild irritation"],
   low_signal_noise: ["very short reply is enough", "do not expand weak input"],
   command_like_request: ["more functional", "less extra character noise", "more utility"]
