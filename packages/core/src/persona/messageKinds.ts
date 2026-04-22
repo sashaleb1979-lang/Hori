@@ -108,7 +108,7 @@ function isDirectedSelfSlurQuestion(content: string, message: MessageEnvelope) {
 function isMetaFeedback(content: string, message: MessageEnvelope) {
   const normalized = normalizeForMeta(content);
 
-  if (!normalized || normalized.length > 120) {
+  if (!normalized || normalized.length > 220) {
     return false;
   }
 
@@ -152,6 +152,10 @@ function isMetaFeedback(content: string, message: MessageEnvelope) {
     normalized.includes("не ответ") ||
     normalized.includes("бессмысленный текст") ||
     normalized.includes("просто бессмысленный") ||
+    normalized.includes("льешь воду") ||
+    normalized.includes("льешь какой то текст") ||
+    normalized.includes("много воды") ||
+    normalized.includes("опять вода") ||
     normalized.includes("мимо")
   );
 }

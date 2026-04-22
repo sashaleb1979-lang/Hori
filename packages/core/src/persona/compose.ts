@@ -14,6 +14,7 @@ import { buildSlangBlock, resolveSlangProfile } from "./slang";
 import type { BlockResult, ComposeBehaviorPromptInput, ComposeBehaviorPromptOutput, PersonaConfig } from "./types";
 
 const depthOrder: RequestedDepth[] = ["tiny", "short", "normal", "long", "deep"];
+const RELATIONSHIP_BEHAVIOR_HARD_DISABLED = true;
 
 const depthLimits: Record<RequestedDepth, PersonaResponseLimits> = {
   tiny: {
@@ -223,7 +224,7 @@ function hasSharedRecentContext(content: string, recentMessages: Array<{ content
 }
 
 function hasUsableRelationshipHook(input: ComposeBehaviorPromptInput) {
-  const relationship = input.relationship;
+  const relationship = RELATIONSHIP_BEHAVIOR_HARD_DISABLED ? null : input.relationship;
 
   if (!relationship) {
     return false;
@@ -234,7 +235,7 @@ function hasUsableRelationshipHook(input: ComposeBehaviorPromptInput) {
 }
 
 function hasWarmRelationship(input: ComposeBehaviorPromptInput) {
-  const relationship = input.relationship;
+  const relationship = RELATIONSHIP_BEHAVIOR_HARD_DISABLED ? null : input.relationship;
 
   if (!relationship) {
     return false;
@@ -245,7 +246,7 @@ function hasWarmRelationship(input: ComposeBehaviorPromptInput) {
 }
 
 function hasSharpRelationship(input: ComposeBehaviorPromptInput) {
-  const relationship = input.relationship;
+  const relationship = RELATIONSHIP_BEHAVIOR_HARD_DISABLED ? null : input.relationship;
 
   if (!relationship) {
     return false;
@@ -474,7 +475,13 @@ function resolveLimits(options: {
 
   if (options.messageKind === "provocation") {
     resolved.maxChars = Math.min(resolved.maxChars, options.persona.limits.maxMockLength);
+    resolved.maxChars = Math.min(resolved.maxChars, 140);
+    resolved.maxSentences = Math.min(resolved.maxSentences, 2);
+    resolved.maxParagraphs = 1;
+    resolved.maxTokens = Math.min(resolved.maxTokens, 90);
+    resolved.bulletListAllowed = false;
     resolved.followUpAllowed = false;
+    resolved.compactness = "tiny";
   }
 
   if (options.messageKind === "low_signal_noise" || options.messageKind === "repeated_question") {
@@ -708,6 +715,8 @@ function buildConcreteGroundingBlock(options: {
   }
 
   if (options.messageKind === "provocation" || options.messageKind === "repeated_question") {
+    lines.push("Обычно хватает одной короткой сухой фразы. Не спорь по кругу и не разворачивай мораль.");
+    lines.push("Если это чистый bait, не защищайся эссе и не доказывай свою правоту абзацами.");
     lines.push("Лестница реакции на грубость: 1) короткое удивление или 'полегче', 2) жёсткий ответ как защитная реакция, 3) прямое предупреждение, 4) тайм-аут до 15 минут только если у тебя реально есть мод-инструмент.");
     lines.push("Не обещай тайм-аут, если прямо сейчас не можешь его выдать. Не читай морали длиннее самой грубости.");
   }
@@ -783,7 +792,8 @@ function buildMetaFeedbackBlock(messageKind: MessageKind): BlockResult | null {
       "Это короткое замечание о твоей прошлой формулировке, тоне или роли.",
       "Сначала исправь конкретный сбой: род, ботский тон, лишний мусор, кривую фразу.",
       "Обычно хватает 1 короткой фразы. Если просят 'нормально' или 'по-человечески', переформулируй ту же мысль проще и короче.",
-      "На претензии вроде 'ты как бот' можно коротко признать кривой тон, поправиться или сухо самоиронично отметить, что собеседник уже дорисовал лишнюю шизу.",
+      "Если претензия широкая или расплывчатая, либо сухо переформулируй ответ, либо попроси ткнуть в конкретную фразу.",
+      "Не иронизируй про свою природу и не уходи в спор о том, кто тут что дорисовал.",
       "Не оправдывайся. Не объясняй систему, характер, intent, устройство или то, какой ты собеседник.",
       "Не спорь о том, бот ли ты, и не разводи метафизику роли.",
       "Не говори: 'я не бот', 'я живой человек', 'я серверный персонаж', 'я отвечаю по ситуации'."
@@ -905,7 +915,7 @@ function buildModeratorOverlay(input: ComposeBehaviorPromptInput): BlockResult |
 }
 
 function buildRelationshipOverlay(input: ComposeBehaviorPromptInput): BlockResult | null {
-  const relationship = input.relationship;
+  const relationship = RELATIONSHIP_BEHAVIOR_HARD_DISABLED ? null : input.relationship;
 
   if (!relationship) {
     return null;
@@ -1027,6 +1037,7 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     messageKind === "reply_to_bot" ||
     messageKind === "direct_mention" ||
     messageKind === "meta_feedback" ||
+    messageKind === "provocation" ||
     messageKind === "info_question";
   const snarkConfidenceThreshold = isSelfInitiated
     ? persona.contextualBehavior.selfInitiatedSnarkConfidenceThreshold
@@ -1035,7 +1046,7 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     intent: input.intent,
     mode,
     messageKind,
-    relationship: input.relationship,
+    relationship: RELATIONSHIP_BEHAVIOR_HARD_DISABLED ? null : input.relationship,
     isSelfInitiated
   });
   const blocks: BlockResult[] = [];
@@ -1079,6 +1090,9 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   }
   if (messageKind === "meta_feedback") {
     add(buildFewShotBlock({ includeMetaFeedbackAnchors: true, skipBaseAnchors: true }));
+  }
+  if (messageKind === "provocation") {
+    add(buildFewShotBlock({ includeProvocationAnchors: true, skipBaseAnchors: true }));
   }
   if (!isLightMessage || messageKind === "reply_to_bot") {
     add(buildContextUsageBlock(input));

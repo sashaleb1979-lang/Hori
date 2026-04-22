@@ -1,6 +1,8 @@
 import { defaultRuntimeTuning } from "@hori/config";
 import type { BotIntent, ContextBundle, ContextBundleV2, ContextTrace, MemoryLayer, MessageEnvelope } from "@hori/shared";
 
+const RELATIONSHIP_CONTEXT_HARD_DISABLED = true;
+
 // ---------------------------------------------------------------------------
 // Selective context: which categories matter for each messageKind.
 // Categories not listed are skipped → fewer input tokens for cheap messages.
@@ -86,7 +88,7 @@ export class ContextBuilderService {
       );
     }
 
-    if (bundle.relationship) {
+    if (!RELATIONSHIP_CONTEXT_HARD_DISABLED && bundle.relationship) {
       memoryLayers.push("relationship");
       sections.push(
         `Отношение к юзеру: tone=${bundle.relationship.toneBias}, roast=${bundle.relationship.roastLevel}, do_not_mock=${bundle.relationship.doNotMock}.`
@@ -206,7 +208,7 @@ export class ContextBuilderService {
       });
     }
 
-    if (relevant.has("relationship") && bundle.relationship) {
+    if (!RELATIONSHIP_CONTEXT_HARD_DISABLED && relevant.has("relationship") && bundle.relationship) {
       warmSections.push({
         key: "relationship",
         memoryLayers: ["relationship"],

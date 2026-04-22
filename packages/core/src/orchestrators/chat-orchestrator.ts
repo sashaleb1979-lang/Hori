@@ -83,6 +83,10 @@ export class ChatOrchestrator {
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
+  private relationshipsHardDisabled() {
+    return true;
+  }
+
   private getLlmSettings(
     intent: Parameters<ModelRouter["pickModel"]>[0],
     runtimeSettings: EffectiveRuntimeSettings,
@@ -144,7 +148,7 @@ export class ChatOrchestrator {
     const queryEmbedding = intent.intent !== "help"
       ? await this.buildContextQueryEmbedding(intent.cleanedContent, intent.intent, runtimeSettings, llmCalls, message)
       : undefined;
-    const contextBundle = await this.deps.contextService.buildContext({
+    const rawContextBundle = await this.deps.contextService.buildContext({
       guildId: message.guildId,
       channelId: message.channelId,
       userId: message.userId,
@@ -153,6 +157,9 @@ export class ChatOrchestrator {
       message,
       intent: intent.intent
     });
+    const contextBundle = this.relationshipsHardDisabled()
+      ? { ...rawContextBundle, relationship: null }
+      : rawContextBundle;
     const messageKind = runtimeConfig.featureFlags.messageKindAwareMode
       ? detectMessageKind({
           content: intent.cleanedContent,
@@ -175,9 +182,11 @@ export class ChatOrchestrator {
           mentionsBotByName: message.mentionsBotByName
         })
       : { contour: "C" as const, reason: `intent:${intent.intent}` };
-    const affinityRelationship = runtimeConfig.featureFlags.affinitySignalsEnabled
-      ? await this.deps.affinity?.applyRecentOverlay(message.guildId, message.userId, contextBundle.relationship)
-      : contextBundle.relationship;
+    const affinityRelationship = this.relationshipsHardDisabled()
+      ? null
+      : runtimeConfig.featureFlags.affinitySignalsEnabled
+        ? await this.deps.affinity?.applyRecentOverlay(message.guildId, message.userId, contextBundle.relationship)
+        : contextBundle.relationship;
     const conflict = detectConflict(
       contextBundle.recentMessages.map((entry) => ({ userId: entry.userId ?? "unknown", content: entry.content }))
     );
@@ -241,7 +250,7 @@ export class ChatOrchestrator {
           toolNames: [],
           contextMessages: contextBundle.recentMessages.length,
           memoryLayers,
-          relationshipApplied: Boolean(affinityRelationship),
+          relationshipApplied: false,
           responded: false,
           queue: queueTrace,
           context: {
@@ -299,7 +308,7 @@ export class ChatOrchestrator {
       toolNames: [],
       contextMessages: contextBundle.recentMessages.length,
       memoryLayers,
-      relationshipApplied: Boolean(affinityRelationship),
+      relationshipApplied: false,
       responded: true,
       responseBudget: contour,
       conflict,
@@ -1186,7 +1195,7 @@ export class ChatOrchestrator {
     enabled: boolean,
     input: Parameters<AffinityService["recordMessageSignal"]>[0]
   ) {
-    if (!enabled || !this.deps.affinity) {
+    if (this.relationshipsHardDisabled() || !enabled || !this.deps.affinity) {
       return;
     }
 
@@ -1406,7 +1415,7 @@ export class ChatOrchestrator {
     messageKind: ReturnType<typeof detectMessageKind>,
     conflict: ConflictDetection,
   ) {
-    if (!this.deps.relationships) {
+    if (this.relationshipsHardDisabled() || !this.deps.relationships) {
       return;
     }
 
@@ -1450,7 +1459,7 @@ export class ChatOrchestrator {
     microReaction: MicroReactionResult | null,
     message: MessageEnvelope
   ) {
-    if (!microReaction || !this.deps.relationships) {
+    if (this.relationshipsHardDisabled() || !microReaction || !this.deps.relationships) {
       return;
     }
 

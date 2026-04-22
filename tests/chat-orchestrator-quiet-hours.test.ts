@@ -317,6 +317,69 @@ describe("chat orchestrator quiet hours", () => {
     expect(relationships.recordToxicBehavior).not.toHaveBeenCalled();
   });
 
+  it("hard-disables relationship and affinity influence even when context has it", async () => {
+    const contextService = {
+      buildContext: vi.fn(async () => ({
+        ...emptyContext,
+        relationship: {
+          toneBias: "friendly",
+          roastLevel: 1,
+          praiseBias: 1,
+          interruptPriority: 0,
+          doNotMock: false,
+          doNotInitiate: false,
+          protectedTopics: []
+        }
+      }))
+    };
+    const affinity = {
+      applyRecentOverlay: vi.fn(async () => ({
+        toneBias: "sharp",
+        roastLevel: 2,
+        praiseBias: 0,
+        interruptPriority: 0,
+        doNotMock: false,
+        doNotInitiate: false,
+        protectedTopics: []
+      })),
+      recordMessageSignal: vi.fn(async () => undefined)
+    };
+    const relationships = {
+      recordInteraction: vi.fn(async () => undefined),
+      recordToxicBehavior: vi.fn(async () => undefined)
+    };
+    const { orchestrator, chat } = createOrchestrator({
+      contextService,
+      affinity: affinity as never,
+      relationships: relationships as never
+    });
+
+    const result = await orchestrator.handleMessage(baseMessage(), {
+      guildSettings,
+      featureFlags: { ...featureFlags, affinitySignalsEnabled: true },
+      channelPolicy: {
+        allowBotReplies: true,
+        allowInterjections: false,
+        isMuted: false,
+        topicInterestTags: [],
+        responseLengthOverride: null
+      },
+      runtimeSettings
+    });
+
+    const chatCall = chat.mock.calls
+      .map(([options]) => options)
+      .find((options) => options.metadata?.purpose === "chat");
+
+    expect(result.trace.relationshipApplied).toBe(false);
+    expect(affinity.applyRecentOverlay).not.toHaveBeenCalled();
+    expect(affinity.recordMessageSignal).not.toHaveBeenCalled();
+    expect(relationships.recordInteraction).not.toHaveBeenCalled();
+    expect(relationships.recordToxicBehavior).not.toHaveBeenCalled();
+    expect(chatCall?.messages?.[0]?.content).not.toContain("[RELATIONSHIP OVERLAY]");
+    expect(chatCall?.messages?.[0]?.content).not.toContain("Отношение к юзеру");
+  });
+
   it("does not pretend contour-A auto-interjects used a chat model", async () => {
     const { orchestrator } = createOrchestrator();
 

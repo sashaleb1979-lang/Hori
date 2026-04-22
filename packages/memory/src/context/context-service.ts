@@ -9,6 +9,7 @@ import { ActiveMemoryService } from "../active/active-memory-service";
 
 const PROFILE_CACHE_TTL = 300;       // 5 min
 const RELATIONSHIP_CACHE_TTL = 300;  // 5 min
+const RELATIONSHIP_CONTEXT_HARD_DISABLED = true;
 
 export class ContextService {
   constructor(
@@ -43,7 +44,7 @@ export class ContextService {
       }),
       this.summaries.getRecentSummaries(options.guildId, options.channelId, 3),
       this.getCachedProfile(options.guildId, options.userId),
-      this.getCachedRelationship(options.guildId, options.userId),
+      RELATIONSHIP_CONTEXT_HARD_DISABLED ? Promise.resolve(null) : this.getCachedRelationship(options.guildId, options.userId),
       this.retrieval.findRelevantServerMemory(options.guildId, options.queryEmbedding),
       this.getReplyChain(options.guildId, options.channelId, options.message?.replyToMessageId ?? null),
       this.getActiveTopic(options.guildId, options.channelId),

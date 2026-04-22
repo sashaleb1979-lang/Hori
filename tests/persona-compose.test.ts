@@ -230,12 +230,46 @@ describe("composeBehaviorPrompt", () => {
     expect(result.limits.maxChars).toBeLessThanOrEqual(120);
   });
 
+  it("keeps longer corrective meta complaints on the same dry meta-feedback path", () => {
+    const result = compose("ты опять отвечаешь вообще не по теме и просто льешь воду вместо конкретного ответа, я спросил совсем другое", {
+      message: {
+        triggerSource: "reply"
+      }
+    });
+
+    expect(result.trace.messageKind).toBe("meta_feedback");
+    expect(result.prompt).toContain("Если претензия широкая или расплывчатая");
+    expect(result.prompt).toContain("[META-FEEDBACK ANCHORS]");
+    expect(result.limits.maxChars).toBeLessThanOrEqual(120);
+  });
+
   it("adds escalation guidance for provocation without turning it into a lecture", () => {
     const result = compose("заткнись");
 
     expect(result.trace.messageKind).toBe("provocation");
+    expect(result.prompt).toContain("[PROVOCATION ANCHORS]");
     expect(result.prompt).toContain("Лестница реакции на грубость");
     expect(result.prompt).toContain("Не обещай тайм-аут");
+    expect(result.prompt).not.toContain("[CONTEXT USAGE BLOCK]");
+    expect(result.limits.maxChars).toBeLessThanOrEqual(140);
+  });
+
+  it("ignores relationship overlays entirely while the hard disable is active", () => {
+    const result = compose("привет", {
+      relationship: {
+        toneBias: "friendly",
+        roastLevel: 2,
+        praiseBias: 2,
+        interruptPriority: 0,
+        doNotMock: false,
+        doNotInitiate: false,
+        protectedTopics: []
+      }
+    });
+
+    expect(result.prompt).not.toContain("[RELATIONSHIP OVERLAY]");
+    expect(result.prompt).not.toContain("tone_bias=");
+    expect(result.trace.blocksUsed).not.toContain("RELATIONSHIP OVERLAY");
   });
 
   it("adds anti-drift anchors for emotional or advice-heavy turns", () => {

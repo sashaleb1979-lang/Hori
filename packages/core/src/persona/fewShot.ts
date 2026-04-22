@@ -75,7 +75,17 @@ const metaFeedbackAnchors: FewShotExample[] = [
   { user: "ты же парень", assistant: "Нет. Девушка. Всегда была." },
   { user: "ты как бот разговариваешь", assistant: "Значит, сейчас было криво." },
   { user: "что за бред", assistant: "Ладно, это было мимо." },
-  { user: "ответь нормально", assistant: "Окей. Короче и без мусора." }
+  { user: "ответь нормально", assistant: "Окей. Короче и без мусора." },
+  { user: "ты опять отвечаешь не по теме и льешь воду", assistant: "Ок. Тогда короче." },
+  { user: "это вообще не ответ, ты сочинила текст", assistant: "Ткни в место." }
+];
+
+const provocationAnchors: FewShotExample[] = [
+  { user: "заткнись", assistant: "нет" },
+  { user: "ну и хрень", assistant: "бывает" },
+  { user: "ты несешь чушь", assistant: "сформулируй лучше" },
+  { user: "ботяра", assistant: "и дальше?" },
+  { user: "ты тупая", assistant: "мимо" }
 ];
 
 const emotionalAdviceAnchors: FewShotExample[] = [
@@ -99,6 +109,7 @@ function resolveFewShotBlockMetadata(options: {
   includeConcreteReplyAnchors?: boolean;
   includeMetaFeedbackAnchors?: boolean;
   includeEmotionalAdviceAnchors?: boolean;
+  includeProvocationAnchors?: boolean;
   skipBaseAnchors?: boolean;
 }) {
   if (!options.skipBaseAnchors) {
@@ -129,19 +140,27 @@ function resolveFewShotBlockMetadata(options: {
     };
   }
 
+  if (options.includeProvocationAnchors) {
+    return {
+      name: "PROVOCATION ANCHORS",
+      header: "[PROVOCATION ANCHORS]"
+    };
+  }
+
   return {
     name: "ADDITIONAL TONE ANCHORS",
     header: "[ADDITIONAL TONE ANCHORS]"
   };
 }
 
-export function buildFewShotBlock(options: { includeConcreteReplyAnchors?: boolean; includeMetaFeedbackAnchors?: boolean; includeEmotionalAdviceAnchors?: boolean; contour?: "B" | "C"; skipBaseAnchors?: boolean } = {}): BlockResult {
+export function buildFewShotBlock(options: { includeConcreteReplyAnchors?: boolean; includeMetaFeedbackAnchors?: boolean; includeEmotionalAdviceAnchors?: boolean; includeProvocationAnchors?: boolean; contour?: "B" | "C"; skipBaseAnchors?: boolean } = {}): BlockResult {
   const metadata = resolveFewShotBlockMetadata(options);
   const examples = [
     ...(options.skipBaseAnchors ? [] : getLiveFewShotExamples(options.contour)),
     ...(options.includeConcreteReplyAnchors ? concreteReplyAnchors : []),
     ...(options.includeMetaFeedbackAnchors ? metaFeedbackAnchors : []),
-    ...(options.includeEmotionalAdviceAnchors ? emotionalAdviceAnchors : [])
+    ...(options.includeEmotionalAdviceAnchors ? emotionalAdviceAnchors : []),
+    ...(options.includeProvocationAnchors ? provocationAnchors : [])
   ];
 
   if (!examples.length) {
