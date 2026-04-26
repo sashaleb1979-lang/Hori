@@ -61,6 +61,7 @@ export function normalizeOutput(text: string): string {
   }
 
   result = removeRepeatedSentences(result);
+  result = result.replace(/(?:^|[\s.,!?;:()"'`-])агрессивно(?=$|[\s.,!?;:()"'`-])/giu, " ");
 
   result = result.replace(/ +([.!?,;:)])/g, "$1");
   result = result.replace(/([.!?])\1{2,}/g, "$1$1");

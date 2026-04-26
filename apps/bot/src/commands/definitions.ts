@@ -37,6 +37,34 @@ const powerProfileChoices = [
   { name: "max", value: "max" }
 ] as const;
 
+const relationshipStateChoices = [
+  { name: "base", value: "base" },
+  { name: "warm", value: "warm" },
+  { name: "close", value: "close" },
+  { name: "teasing", value: "teasing" },
+  { name: "sweet", value: "sweet" },
+  { name: "serious", value: "serious" },
+  { name: "cold_lowest", value: "cold_lowest" }
+] as const;
+
+const memoryModeChoices = [
+  { name: "OFF", value: "OFF" },
+  { name: "TRUSTED_ONLY", value: "TRUSTED_ONLY" },
+  { name: "ACTIVE_OPT_IN", value: "ACTIVE_OPT_IN" },
+  { name: "ADMIN_SELECTED", value: "ADMIN_SELECTED" }
+] as const;
+
+const relationshipGrowthModeChoices = [
+  { name: "OFF", value: "OFF" },
+  { name: "MANUAL_REVIEW", value: "MANUAL_REVIEW" },
+  { name: "TRUSTED_AUTO", value: "TRUSTED_AUTO" },
+  { name: "FULL_AUTO", value: "FULL_AUTO" }
+] as const;
+
+const stylePresetModeChoices = [
+  { name: "manual_only", value: "manual_only" }
+] as const;
+
 const replyLengthChoices = [
   { name: "short", value: "short" },
   { name: "medium", value: "medium" },
@@ -99,30 +127,6 @@ const horiCommandDefinition = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand
-      .setName("memory-build")
-      .setDescription("Долго собрать active memory из уже сохранённых сообщений")
-      .addStringOption((option) =>
-        option
-          .setName("scope")
-          .setDescription("Область")
-          .setRequired(true)
-          .addChoices(
-            { name: "текущий канал", value: "channel" },
-            { name: "весь сервер", value: "server" }
-          )
-      )
-      .addStringOption((option) =>
-        option
-          .setName("depth")
-          .setDescription("Глубина")
-          .addChoices(
-            { name: "recent", value: "recent" },
-            { name: "deep", value: "deep" }
-          )
-      )
-  )
-  .addSubcommand((subcommand) =>
-    subcommand
       .setName("profile")
       .setDescription("Показать краткий профиль/память")
       .addUserOption((option) => option.setName("user").setDescription("Пользователь"))
@@ -145,10 +149,72 @@ const horiCommandDefinition = new SlashCommandBuilder()
       .addBooleanOption((option) => option.setName("do-not-mock").setDescription("Не подкалывать"))
       .addBooleanOption((option) => option.setName("do-not-initiate").setDescription("Не инициировать общение"))
       .addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics"))
+      .addStringOption((option) => option.setName("relationship-state").setDescription("V5 relationship state").addChoices(...relationshipStateChoices))
       .addNumberOption((option) => option.setName("closeness").setDescription("Близость 0-1").setMinValue(0).setMaxValue(1))
       .addNumberOption((option) => option.setName("trust").setDescription("Доверие 0-1").setMinValue(0).setMaxValue(1))
       .addNumberOption((option) => option.setName("familiarity").setDescription("Знакомость 0-1").setMinValue(0).setMaxValue(1))
       .addNumberOption((option) => option.setName("proactivity").setDescription("Желательность инициативы 0-1").setMinValue(0).setMaxValue(1))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("runtime")
+      .setDescription("Owner: V5 runtime modes и лимиты модерации")
+      .addStringOption((option) => option.setName("memory-mode").setDescription("Режим памяти").addChoices(...memoryModeChoices))
+      .addStringOption((option) =>
+        option
+          .setName("relationship-growth-mode")
+          .setDescription("Режим роста отношений")
+          .addChoices(...relationshipGrowthModeChoices)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("style-preset-mode")
+          .setDescription("Режим style preset")
+          .addChoices(...stylePresetModeChoices)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("max-timeout-minutes")
+          .setDescription("Максимум минут тайм-аута")
+          .setMinValue(1)
+          .setMaxValue(15)
+      )
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("aggression")
+      .setDescription("Owner: escalation, cold state и aggression events")
+      .addUserOption((option) => option.setName("user").setDescription("Пользователь").setRequired(true))
+      .addStringOption((option) =>
+        option
+          .setName("action")
+          .setDescription("Действие")
+          .setRequired(true)
+          .addChoices(
+            { name: "events", value: "events" },
+            { name: "reset-escalation", value: "reset-escalation" },
+            { name: "reset-cold", value: "reset-cold" }
+          )
+      )
+      .addIntegerOption((option) => option.setName("limit").setDescription("Сколько событий показать").setMinValue(1).setMaxValue(20))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("memory-cards")
+      .setDescription("Owner/mod: list или remove user memory cards")
+      .addUserOption((option) => option.setName("user").setDescription("Пользователь").setRequired(true))
+      .addStringOption((option) =>
+        option
+          .setName("action")
+          .setDescription("Действие")
+          .setRequired(true)
+          .addChoices(
+            { name: "list", value: "list" },
+            { name: "remove", value: "remove" }
+          )
+      )
+      .addIntegerOption((option) => option.setName("limit").setDescription("Сколько показать").setMinValue(1).setMaxValue(20))
+      .addStringOption((option) => option.setName("id").setDescription("ID memory card для remove"))
   )
   .addSubcommand((subcommand) =>
     subcommand

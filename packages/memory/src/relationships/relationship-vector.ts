@@ -67,6 +67,13 @@ export function createDefaultVector(
     doNotMock: overlay?.doNotMock ?? false,
     doNotInitiate: overlay?.doNotInitiate ?? false,
     protectedTopics: [...(overlay?.protectedTopics ?? [])],
+    relationshipState: overlay?.relationshipState ?? "base",
+    relationshipScore: overlay?.relationshipScore ?? 0,
+    positiveMarks: overlay?.positiveMarks ?? 0,
+    escalationStage: overlay?.escalationStage ?? 0,
+    escalationUpdatedAt: overlay?.escalationUpdatedAt ?? null,
+    coldUntil: overlay?.coldUntil ?? null,
+    coldPermanent: overlay?.coldPermanent ?? false,
     // AICO signal defaults
     closeness: signals?.closeness ?? DEFAULT_SIGNALS.closeness,
     trustLevel: signals?.trustLevel ?? DEFAULT_SIGNALS.trustLevel,

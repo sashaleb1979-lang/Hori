@@ -17,7 +17,7 @@ import {
   type ModelRoutingSlot,
   type ResolvedModelRouting
 } from "@hori/llm";
-import type { AppPrismaClient, FeatureFlags, PersonaSettings } from "@hori/shared";
+import type { AppPrismaClient, FeatureFlags, MemoryMode, PersonaSettings, RelationshipGrowthMode, StylePresetMode } from "@hori/shared";
 
 export const FEATURE_KEY_MAP = {
   web_search: "webSearch",
@@ -68,7 +68,11 @@ const RUNTIME_OVERRIDE_DEFINITIONS: Record<string, { field: keyof Omit<Effective
   "runtime.media.auto_min_confidence": { field: "mediaAutoMinConfidence", parse: parseUnitFloat },
   "runtime.media.auto_min_intensity": { field: "mediaAutoMinIntensity", parse: parseUnitFloat },
   [OPENAI_EMBED_DIMENSIONS_SETTING_KEY]: { field: "openaiEmbedDimensions", parse: parseOpenAIEmbeddingDimensions },
-  [MEMORY_HYDE_SETTING_KEY]: { field: "memoryHydeEnabled", parse: parseBooleanValue }
+  [MEMORY_HYDE_SETTING_KEY]: { field: "memoryHydeEnabled", parse: parseBooleanValue },
+  "runtime.memory.mode": { field: "memoryMode", parse: parseMemoryMode },
+  "runtime.relationship.growth_mode": { field: "relationshipGrowthMode", parse: parseRelationshipGrowthMode },
+  "runtime.style.preset_mode": { field: "stylePresetMode", parse: parseStylePresetMode },
+  "runtime.moderation.max_timeout_minutes": { field: "maxTimeoutMinutes", parse: parseMaxTimeoutMinutes }
 };
 
 export interface EffectiveChannelPolicy {
@@ -94,6 +98,10 @@ export interface EffectiveRuntimeSettings {
   mediaAutoGlobalCooldownSec: number;
   mediaAutoMinConfidence: number;
   mediaAutoMinIntensity: number;
+  memoryMode: MemoryMode;
+  relationshipGrowthMode: RelationshipGrowthMode;
+  stylePresetMode: StylePresetMode;
+  maxTimeoutMinutes: number;
 }
 
 export interface PowerProfileStatus {
@@ -196,6 +204,35 @@ export class RuntimeConfigService {
 
   async getRuntimeSettings(): Promise<EffectiveRuntimeSettings> {
     return (await this.resolveRuntimeSettings()).effective;
+  }
+
+  async setRuntimeOverride(key: keyof typeof RUNTIME_OVERRIDE_DEFINITIONS, value: string, updatedBy?: string) {
+    const definition = RUNTIME_OVERRIDE_DEFINITIONS[key];
+    if (!definition) {
+      throw new Error(`Unsupported runtime override: ${key}`);
+    }
+
+    const parsed = definition.parse(value);
+    if (parsed === undefined) {
+      throw new Error(`Invalid value for ${key}: ${value}`);
+    }
+
+    await this.prisma.runtimeSetting.upsert({
+      where: { key },
+      update: {
+        value: String(parsed),
+        updatedBy: updatedBy ?? null,
+        updatedAt: new Date()
+      },
+      create: {
+        key,
+        value: String(parsed),
+        updatedBy: updatedBy ?? null
+      }
+    });
+
+    this.invalidate();
+    return this.getRuntimeSettings();
   }
 
   async getPowerProfileStatus(): Promise<PowerProfileStatus> {
@@ -561,7 +598,11 @@ export class RuntimeConfigService {
       ollamaNumBatch: this.env.OLLAMA_NUM_BATCH,
       mediaAutoGlobalCooldownSec: this.env.MEDIA_AUTO_GLOBAL_COOLDOWN_SEC,
       mediaAutoMinConfidence: this.env.MEDIA_AUTO_MIN_CONFIDENCE,
-      mediaAutoMinIntensity: this.env.MEDIA_AUTO_MIN_INTENSITY
+      mediaAutoMinIntensity: this.env.MEDIA_AUTO_MIN_INTENSITY,
+      memoryMode: "OFF",
+      relationshipGrowthMode: "OFF",
+      stylePresetMode: "manual_only",
+      maxTimeoutMinutes: 15
     };
   }
 
@@ -716,6 +757,23 @@ function parseOpenAIEmbeddingDimensions(value: string) {
     : undefined;
 }
 
+function parseMemoryMode(value: string) {
+  return ["OFF", "TRUSTED_ONLY", "ACTIVE_OPT_IN", "ADMIN_SELECTED"].includes(value) ? value : undefined;
+}
+
+function parseRelationshipGrowthMode(value: string) {
+  return ["OFF", "MANUAL_REVIEW", "TRUSTED_AUTO", "FULL_AUTO"].includes(value) ? value : undefined;
+}
+
+function parseStylePresetMode(value: string) {
+  return value === "manual_only" ? value : undefined;
+}
+
+function parseMaxTimeoutMinutes(value: string) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? Math.max(1, Math.min(15, parsed)) : undefined;
+}
+
 function applyRuntimeOverride(
   target: EffectiveRuntimeSettings,
   field: keyof Omit<EffectiveRuntimeSettings, "powerProfile" | "modelRouting">,
@@ -757,6 +815,18 @@ function applyRuntimeOverride(
       return;
     case "mediaAutoMinIntensity":
       target.mediaAutoMinIntensity = Number(value);
+      return;
+    case "memoryMode":
+      target.memoryMode = value as MemoryMode;
+      return;
+    case "relationshipGrowthMode":
+      target.relationshipGrowthMode = value as RelationshipGrowthMode;
+      return;
+    case "stylePresetMode":
+      target.stylePresetMode = value as StylePresetMode;
+      return;
+    case "maxTimeoutMinutes":
+      target.maxTimeoutMinutes = Number(value);
       return;
   }
 }

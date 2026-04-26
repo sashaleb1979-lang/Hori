@@ -555,46 +555,19 @@ export class RetrievalService {
     return rankRows([...server, ...user, ...channel, ...events, ...messages], "vector", compareVectorRows);
   }
 
+  private async invalidateEmbedding(entityType: MemoryEmbeddingEntityType, entityId: string) {
+    return this.prisma.$executeRawUnsafe(
+      `UPDATE "${resolveEmbeddingTable(entityType)}" SET embedding = NULL, dimensions = NULL WHERE id = $1`,
+      entityId
+    );
+  }
+
   private async getLexicalHybridRows(input: HybridRecallInput, limit: number): Promise<HybridRow[]> {
     const terms = extractLexicalTerms(input.query);
     if (!terms.length) {
       return [];
     }
 
-    private async invalidateEmbedding(entityType: MemoryEmbeddingEntityType, entityId: string) {
-      return this.prisma.$executeRawUnsafe(
-        `UPDATE "${resolveEmbeddingTable(entityType)}" SET embedding = NULL, dimensions = NULL WHERE id = $1`,
-        entityId
-      );
-    }
-
-
-  function resolveEmbeddingTable(entityType: MemoryEmbeddingEntityType) {
-    if (entityType === "server_memory") {
-      return "ServerMemory";
-    }
-
-    if (entityType === "channel_memory") {
-      return "ChannelMemoryNote";
-    }
-
-    if (entityType === "event_memory") {
-      return "EventMemory";
-    }
-
-    return "UserMemoryNote";
-  }
-
-  function parseVectorLiteralDimensions(vectorLiteral: string) {
-    const trimmed = vectorLiteral.trim();
-    const payload = trimmed.replace(/^\[/, "").replace(/\]$/, "").trim();
-
-    if (!payload) {
-      return 0;
-    }
-
-    return payload.split(",").length;
-  }
     const perScopeLimit = Math.max(2, Math.ceil(limit / 2));
     const serverOr = terms.flatMap((term) => [
       { key: { contains: term, mode: "insensitive" as const } },
@@ -763,6 +736,33 @@ export class RetrievalService {
       return fallback();
     }
   }
+}
+
+function resolveEmbeddingTable(entityType: MemoryEmbeddingEntityType) {
+  if (entityType === "server_memory") {
+    return "ServerMemory";
+  }
+
+  if (entityType === "channel_memory") {
+    return "ChannelMemoryNote";
+  }
+
+  if (entityType === "event_memory") {
+    return "EventMemory";
+  }
+
+  return "UserMemoryNote";
+}
+
+function parseVectorLiteralDimensions(vectorLiteral: string) {
+  const trimmed = vectorLiteral.trim();
+  const payload = trimmed.replace(/^\[/, "").replace(/\]$/, "").trim();
+
+  if (!payload) {
+    return 0;
+  }
+
+  return payload.split(",").length;
 }
 
 function isVectorDimensionError(error: unknown) {

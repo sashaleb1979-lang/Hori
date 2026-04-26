@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import type { AppPrismaClient, PersonaMode } from "@hori/shared";
+import type { AppPrismaClient, MemoryMode, PersonaMode, RelationshipGrowthMode, RelationshipState, StylePresetMode } from "@hori/shared";
 import { parseCsv, toVectorLiteral } from "@hori/shared";
 
 import { defaultPersonaSettings, type PowerProfileName } from "@hori/config";
@@ -33,6 +33,8 @@ export class SlashAdminService {
       "Owner master panel: `/hori panel`.",
       "Частые ветки: `/hori profile`, `/hori search`, `/hori memory`, `/hori channel`, `/hori mood`, `/hori queue`, `/hori album`.",
       "Owner: `/hori state`, `/hori ai-status`, `/hori relationship`, `/hori power`, `/hori lockdown`, `/hori ai-url`, `/hori import`.",
+      "Owner: `/hori state`, `/hori ai-status`, `/hori relationship`, `/hori runtime`, `/hori aggression`, `/hori power`, `/hori lockdown`, `/hori ai-url`, `/hori import`.",
+      "Admin: `/hori memory-cards` для просмотра и удаления user memory cards.",
       "Legacy `/bot-*` команды скрыты из регистрации по умолчанию; их можно вернуть флагом `DISCORD_REGISTER_LEGACY_COMMANDS=true`."
     ].join("\n");
   }
@@ -187,6 +189,56 @@ export class SlashAdminService {
     return `${formatPowerProfileStatus(status)}\n\nПресет применён.`;
   }
 
+  async runtimeModesStatus() {
+    if (!this.runtimeConfig) {
+      return "Runtime settings недоступны.";
+    }
+
+    const runtime = await this.runtimeConfig.getRuntimeSettings();
+    return [
+      `memoryMode=${runtime.memoryMode}`,
+      `relationshipGrowthMode=${runtime.relationshipGrowthMode}`,
+      `stylePresetMode=${runtime.stylePresetMode}`,
+      `maxTimeoutMinutes=${runtime.maxTimeoutMinutes}`
+    ].join("\n");
+  }
+
+  async setMemoryMode(mode: MemoryMode, updatedBy?: string) {
+    if (!this.runtimeConfig) {
+      return "Runtime settings недоступны.";
+    }
+
+    const runtime = await this.runtimeConfig.setRuntimeOverride("runtime.memory.mode", mode, updatedBy);
+    return `memoryMode=${runtime.memoryMode}`;
+  }
+
+  async setRelationshipGrowthMode(mode: RelationshipGrowthMode, updatedBy?: string) {
+    if (!this.runtimeConfig) {
+      return "Runtime settings недоступны.";
+    }
+
+    const runtime = await this.runtimeConfig.setRuntimeOverride("runtime.relationship.growth_mode", mode, updatedBy);
+    return `relationshipGrowthMode=${runtime.relationshipGrowthMode}`;
+  }
+
+  async setStylePresetMode(mode: StylePresetMode, updatedBy?: string) {
+    if (!this.runtimeConfig) {
+      return "Runtime settings недоступны.";
+    }
+
+    const runtime = await this.runtimeConfig.setRuntimeOverride("runtime.style.preset_mode", mode, updatedBy);
+    return `stylePresetMode=${runtime.stylePresetMode}`;
+  }
+
+  async setMaxTimeoutMinutes(minutes: number, updatedBy?: string) {
+    if (!this.runtimeConfig) {
+      return "Runtime settings недоступны.";
+    }
+
+    const runtime = await this.runtimeConfig.setRuntimeOverride("runtime.moderation.max_timeout_minutes", String(minutes), updatedBy);
+    return `maxTimeoutMinutes=${runtime.maxTimeoutMinutes}`;
+  }
+
   async updateRelationship(
     guildId: string,
     userId: string,
@@ -199,6 +251,7 @@ export class SlashAdminService {
       doNotMock?: boolean;
       doNotInitiate?: boolean;
       protectedTopics?: string[];
+      relationshipState?: RelationshipState;
       closeness?: number;
       trustLevel?: number;
       familiarity?: number;
@@ -221,6 +274,13 @@ export class SlashAdminService {
       doNotMock: input.doNotMock ?? current?.doNotMock ?? false,
       doNotInitiate: input.doNotInitiate ?? current?.doNotInitiate ?? false,
       protectedTopics: input.protectedTopics ?? current?.protectedTopics ?? [],
+      relationshipState: input.relationshipState ?? current?.relationshipState ?? "base",
+      relationshipScore: current?.relationshipScore ?? 0,
+      positiveMarks: current?.positiveMarks ?? 0,
+      escalationStage: current?.escalationStage ?? 0,
+      escalationUpdatedAt: current?.escalationUpdatedAt ?? null,
+      coldUntil: current?.coldUntil ?? null,
+      coldPermanent: current?.coldPermanent ?? false,
       closeness: input.closeness ?? current?.closeness ?? 0.5,
       trustLevel: input.trustLevel ?? current?.trustLevel ?? 0.5,
       familiarity: input.familiarity ?? current?.familiarity ?? 0.5,
@@ -607,12 +667,118 @@ export class SlashAdminService {
 
     return [
       `Relationship для ${userId}`,
+      `state=${vector.relationshipState}, score=${vector.relationshipScore}, positiveMarks=${vector.positiveMarks}`,
+      `escalationStage=${vector.escalationStage}, coldPermanent=${vector.coldPermanent}, coldUntil=${vector.coldUntil?.toISOString() ?? "none"}`,
       `toneBias=${vector.toneBias}, roast=${vector.roastLevel}, praise=${vector.praiseBias}, interrupt=${vector.interruptPriority}`,
       `doNotMock=${vector.doNotMock}, doNotInitiate=${vector.doNotInitiate}`,
       `closeness=${formatSignal(vector.closeness)}, trust=${formatSignal(vector.trustLevel)}, familiarity=${formatSignal(vector.familiarity)}, proactivity=${formatSignal(vector.proactivityPreference)}`,
       `interactionCount=${vector.interactionCount}`,
       vector.protectedTopics.length ? `protectedTopics: ${vector.protectedTopics.join(", ")}` : "protectedTopics: none"
     ].join("\n");
+  }
+
+  async resetRelationshipEscalation(guildId: string, userId: string) {
+    const vector = await this.relationships.clearEscalation(guildId, userId);
+    return `Escalation reset: stage=${vector.escalationStage}`;
+  }
+
+  async resetRelationshipCold(guildId: string, userId: string, updatedBy?: string) {
+    const vector = await this.relationships.resetColdState(guildId, userId, updatedBy);
+    return `Cold reset: state=${vector.relationshipState}, score=${vector.relationshipScore}`;
+  }
+
+  async setRelationshipState(guildId: string, userId: string, relationshipState: RelationshipState, updatedBy?: string) {
+    const vector = await this.relationships.setRelationshipState(guildId, userId, relationshipState, updatedBy);
+    return `Relationship state=${vector.relationshipState}, score=${vector.relationshipScore}`;
+  }
+
+  async aggressionEvents(guildId: string, userId: string, limit = 8) {
+    const events = await this.prisma.botEventLog.findMany({
+      where: {
+        guildId,
+        userId,
+        OR: [
+          { eventType: "reply" },
+          { eventType: "relationship_session_eval" }
+        ]
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit
+    });
+
+    const relevant = events.filter((event) => {
+      const trace = event.debugTrace as { aggression?: { markerDetected?: boolean; checkerVerdict?: string } } | null;
+      return trace?.aggression?.markerDetected || event.eventType === "relationship_session_eval";
+    });
+
+    if (!relevant.length) {
+      return "Aggression events пока нет.";
+    }
+
+    return relevant
+      .map((event) => {
+        const trace = event.debugTrace as {
+          aggression?: {
+            stageAfter?: number;
+            checkerVerdict?: string;
+            replacementText?: string | null;
+          };
+          relationshipVerdict?: string;
+        } | null;
+        return `- ${event.createdAt.toISOString()} ${event.eventType} ${trace?.aggression?.checkerVerdict ?? trace?.relationshipVerdict ?? "n/a"} stage=${trace?.aggression?.stageAfter ?? "n/a"} ${trace?.aggression?.replacementText ?? ""}`.trim();
+      })
+      .join("\n");
+  }
+
+  async listMemoryCards(guildId: string, userId: string, limit = 8) {
+    const cards = await this.prisma.horiUserMemoryCard.findMany({
+      where: {
+        guildId,
+        userId,
+        active: true
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit
+    });
+
+    if (!cards.length) {
+      return "Memory cards пусты.";
+    }
+
+    return cards
+      .map((card) => `- ${card.id}: ${card.title} [${card.importance}] ${card.createdAt.toISOString()}`)
+      .join("\n");
+  }
+
+  async removeMemoryCard(guildId: string, userId: string, cardId: string) {
+    const card = await this.prisma.horiUserMemoryCard.findFirst({
+      where: {
+        id: cardId,
+        guildId,
+        userId
+      }
+    });
+
+    if (!card) {
+      return "Такую memory card не нашла.";
+    }
+
+    await this.prisma.horiUserMemoryCard.update({
+      where: { id: card.id },
+      data: { active: false }
+    });
+    await this.prisma.horiRestoredContext.updateMany({
+      where: {
+        guildId,
+        userId,
+        memoryCardId: card.id
+      },
+      data: {
+        consumedAt: new Date()
+      }
+    });
+
+    return `Удалила memory card: ${card.title}`;
   }
 
   async personalMemory(guildId: string, userId: string, ownerView = false) {

@@ -2,29 +2,17 @@ import { normalizeWhitespace } from "@hori/shared";
 import type { MessageEnvelope, MessageKind } from "@hori/shared";
 
 export interface MicroReactionResult {
-  kind: "toxicity" | "praise" | "meta_feedback";
+  kind: "praise" | "meta_feedback";
   reply: string;
   rule: string;
   confidence: number;
   splitChunks?: string[];
 }
 
-const toxicityPatterns = [
-  /(?:^|[^\p{L}\p{N}_])(?:тупая|дура|дурак|идиотка?|дебилка?|ботяра|заткнись|мразь|придурок|тупой\s+бот)(?=$|[^\p{L}\p{N}_])/iu,
-  /(?:^|[^\p{L}\p{N}_])(?:stupid|idiot|moron|dumb|shut\s+up|bad\s+bot)(?=$|[^\p{L}\p{N}_])/iu
-];
-
 const praisePatterns = [
   /(?:^|[^\p{L}\p{N}_])(?:умница|молодец|хорошая|милая|классная|лучшая|спасибо|пасиб|красиво|годно|люблю\s+тебя|ты\s+топ)(?=$|[^\p{L}\p{N}_])/iu,
   /(?:^|[^\p{L}\p{N}_])(?:good\s+bot|thanks|thank\s+you|nice|cute|great)(?=$|[^\p{L}\p{N}_])/iu
 ];
-
-const toxicityReplies = [
-  { reply: "сам такой", chunks: ["сам такой", "я запомню"] },
-  { reply: "ну зачем обзываться", chunks: ["ну зачем", "обзываться-то"] },
-  { reply: "ах ты", chunks: ["ах ты", "ладно, записала"] },
-  { reply: "я это запомню", chunks: ["я это", "запомню"] }
-] as const;
 
 const praiseReplies = [
   { reply: "хех, приятно", chunks: ["хех", "приятно"] },
@@ -77,12 +65,6 @@ export class MicroReactionService {
     if (input.messageKind === "meta_feedback" && metaFeedbackPatterns.some((pattern) => pattern.test(content))) {
       return this.pick("meta_feedback", content, metaFeedbackReplies, "direct_meta_feedback");
     }
-
-    const toxicityHit = toxicityPatterns.some((pattern) => pattern.test(content));
-    if (toxicityHit) {
-      return this.pick("toxicity", content, toxicityReplies, "direct_toxicity");
-    }
-
     const praiseHit = praisePatterns.some((pattern) => pattern.test(content));
     if (praiseHit) {
       return this.pick("praise", content, praiseReplies, "direct_praise");

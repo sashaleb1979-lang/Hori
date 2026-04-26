@@ -12,6 +12,7 @@ import type {
   PersonaMode,
   PersonaResponseLimits,
   PersonaSettings,
+  RelationshipState,
   RelationshipOverlay,
   RequestedDepth,
   StylePresetName
@@ -265,6 +266,12 @@ export interface ComposeBehaviorPromptOutput {
   staticPrefix: string;
   trace: import("@hori/shared").PersonaBehaviorTrace;
   limits: PersonaResponseLimits;
+  assembly: {
+    commonCore: string;
+    relationshipTail: string;
+    turnInstruction: string;
+    relationshipState: RelationshipState;
+  };
 }
 
 export interface BlockResult {

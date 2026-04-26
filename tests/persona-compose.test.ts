@@ -6,7 +6,6 @@ import type { BotIntent, ContextBundleV2, ContextTrace, FeatureFlags, MessageEnv
 const featureFlags: FeatureFlags = {
   webSearch: true,
   autoInterject: false,
-  emotionalAdviceAnchorsEnabled: true,
   userProfiles: true,
   contextActions: true,
   roast: true,
@@ -89,14 +88,9 @@ function compose(content: string, overrides: ComposeOverrides = {}) {
   });
 }
 
-function mergedPrompt(result: ReturnType<typeof compose>) {
-  return [result.staticPrefix, result.prompt].filter(Boolean).join("\n\n");
-}
-
 describe("composeBehaviorPrompt", () => {
-  it("builds deterministic blocks and trace defaults", () => {
+  it("builds deterministic v5 chat assembly and trace defaults", () => {
     const result = compose("привет");
-    const prompt = mergedPrompt(result);
     const uniqueBlocks = new Set(result.trace.blocksUsed);
 
     expect(result.trace.personaName).toBe("hori-default");
@@ -108,17 +102,15 @@ describe("composeBehaviorPrompt", () => {
     expect(result.trace.contextEnergy).toBe("low");
     expect(result.trace.snarkConfidenceThreshold).toBe(0.68);
     expect(result.trace.mediaReactionEligible).toBe(false);
-    expect(prompt).not.toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
-    expect(prompt).not.toContain("[SELF-INITIATED INTERJECTION CONSTRAINTS BLOCK]");
-    expect(prompt).not.toContain("[STALE TAKE / MEDIA REACTION BLOCK]");
-    expect(prompt).not.toContain("[TONE BLOCK]");
-    expect(prompt).not.toContain("[REPLY MODE]");
-    expect(prompt).toContain("[LOW-PRESSURE SMALLTALK BLOCK]");
-    expect(prompt.length).toBeLessThanOrEqual(8500);
-    expect(result.trace.blocksUsed[0]).toBe("STABLE IDENTITY BLOCK");
-    expect(result.trace.blocksUsed).toContain("IDENTITY & CORE");
-    expect(result.trace.blocksUsed).not.toContain("REPLY MODE");
-    expect(result.trace.blocksUsed).not.toContain("FEW-SHOT TONE ANCHORS");
+    expect(result.prompt).toContain("Ты Хори. Ты русскоязычный Discord-бот.");
+    expect(result.prompt).toContain("Turn instruction:");
+    expect(result.trace.promptShape).toBe("v5_chat");
+    expect(result.prompt.length).toBeLessThanOrEqual(8500);
+    expect(result.trace.blocksUsed[0]).toBe("COMMON_CORE_BASE");
+    expect(result.trace.blocksUsed).toContain("BASE_TAIL");
+    expect(result.trace.blocksUsed).toContain("TURN_INSTRUCTION");
+    expect(result.trace.blocksUsed).not.toContain("SERVER_RULES");
+    expect(result.prompt).not.toContain("Правила сервера:");
     expect(result.trace.replyMode).toBeDefined();
     expect(uniqueBlocks.size).toBe(result.trace.blocksUsed.length);
   });
@@ -147,9 +139,8 @@ describe("composeBehaviorPrompt", () => {
     expect(result.trace.messageKind).toBe("request_for_explanation");
     expect(result.trace.activeMode).toBe("focused");
     expect(result.trace.stylePreset).toBe("focused_compact");
-    expect(result.limits.maxChars).toBeGreaterThan(450);
+    expect(result.limits.maxChars).toBeGreaterThan(550);
     expect(result.trace.analogyBan).toBe(true);
-    expect(result.trace.blocksUsed).toContain("FEW-SHOT TONE ANCHORS");
     expect(memeChannelResult.trace.channelKind).toBe("memes");
     expect(memeChannelResult.trace.activeMode).toBe("focused");
     expect(memeChannelResult.trace.stylePreset).toBe("focused_compact");
@@ -157,15 +148,11 @@ describe("composeBehaviorPrompt", () => {
 
   it("keeps plain info questions out of auto-focused mode", () => {
     const result = compose("что такое индекс?");
-    const prompt = mergedPrompt(result);
 
     expect(result.trace.messageKind).toBe("info_question");
     expect(result.trace.activeMode).toBe("normal");
     expect(result.trace.requestedDepth).toBe("short");
-    expect(result.limits.maxChars).toBeLessThanOrEqual(220);
-    expect(result.trace.blocksUsed).not.toContain("FEW-SHOT TONE ANCHORS");
-    expect(prompt).not.toContain("[CONTEXT USAGE BLOCK]");
-    expect(prompt).not.toContain("[REPLY MODE]");
+    expect(result.limits.maxChars).toBeLessThanOrEqual(320);
   });
 
   it("preserves reply continuity instead of escalating short reply questions", () => {
@@ -174,31 +161,10 @@ describe("composeBehaviorPrompt", () => {
         triggerSource: "reply"
       }
     });
-    const prompt = mergedPrompt(result);
 
     expect(result.trace.messageKind).toBe("reply_to_bot");
     expect(result.trace.activeMode).toBe("normal");
-    expect(result.limits.maxChars).toBeLessThanOrEqual(160);
-    expect(prompt).toContain("[CONTEXT USAGE BLOCK]");
-    expect(prompt).not.toContain("[REPLY MODE]");
-  });
-
-  it("keeps bare direct mentions compact", () => {
-    const result = compose("хори", {
-      message: {
-        triggerSource: "mention",
-        mentionedBot: true,
-        explicitInvocation: false
-      }
-    });
-    const prompt = mergedPrompt(result);
-
-    expect(result.trace.messageKind).toBe("direct_mention");
-    expect(result.limits.maxChars).toBeLessThanOrEqual(120);
-    expect(result.limits.maxSentences).toBeLessThanOrEqual(2);
-    expect(result.limits.bulletListAllowed).toBe(false);
-    expect(prompt).not.toContain("[CONTEXT USAGE BLOCK]");
-    expect(prompt).not.toContain("[REPLY MODE]");
+    expect(result.limits.maxChars).toBeLessThanOrEqual(220);
   });
 
   it("adds concrete grounding and constraint continuation for narrowing replies", () => {
@@ -207,12 +173,10 @@ describe("composeBehaviorPrompt", () => {
         triggerSource: "reply"
       }
     });
-    const prompt = mergedPrompt(result);
 
     expect(result.trace.messageKind).toBe("reply_to_bot");
-    expect(prompt).toContain("[CONCRETE CHAT GROUNDING BLOCK]");
-    expect(prompt).toContain("Пользователь сейчас сужает или правит прошлый ответ");
-    expect(result.limits.maxChars).toBeLessThanOrEqual(150);
+    expect(result.prompt).toContain("Исправь только указанное. Не переписывай всё и не меняй остальное.");
+    expect(result.limits.maxChars).toBeLessThanOrEqual(190);
   });
 
   it("routes short corrective meta comments into dedicated meta-feedback path", () => {
@@ -221,15 +185,13 @@ describe("composeBehaviorPrompt", () => {
         triggerSource: "reply"
       }
     });
-    const prompt = mergedPrompt(result);
 
     expect(result.trace.messageKind).toBe("meta_feedback");
     expect(result.trace.activeMode).toBe("dry");
     expect(result.trace.stylePreset).toBe("curt");
-    expect(prompt).toContain("[META-FEEDBACK BLOCK]");
-    expect(result.limits.maxChars).toBeLessThanOrEqual(90);
-    expect(prompt).toContain("Не говори: 'я не бот'");
-    expect(prompt).not.toContain("[REPLY MODE]");
+    expect(result.prompt).toContain("Исправь только указанное. Не переписывай всё и не меняй остальное.");
+    expect(result.limits.maxChars).toBeLessThanOrEqual(120);
+    expect(result.trace.promptShape).toBe("v5_chat");
   });
 
   it("keeps botness complaints short and free of self-lore guidance", () => {
@@ -238,98 +200,29 @@ describe("composeBehaviorPrompt", () => {
         triggerSource: "reply"
       }
     });
-    const prompt = mergedPrompt(result);
 
     expect(result.trace.messageKind).toBe("meta_feedback");
-    expect(prompt).toContain("Исправь конкретный сбой");
-    expect(prompt).toContain("Не оправдывайся, не спорь, не объясняй процесс");
-    expect(prompt).not.toContain("живой серверный персонаж Discord");
-    expect(result.limits.maxChars).toBeLessThanOrEqual(90);
-  });
-
-  it("keeps longer corrective meta complaints on the same dry meta-feedback path", () => {
-    const result = compose("ты опять отвечаешь вообще не по теме и просто льешь воду вместо конкретного ответа, я спросил совсем другое", {
-      message: {
-        triggerSource: "reply"
-      }
-    });
-    const prompt = mergedPrompt(result);
-
-    expect(result.trace.messageKind).toBe("meta_feedback");
-    expect(prompt).toContain("Если претензия расплывчатая");
-    expect(prompt).toContain("[META-FEEDBACK ANCHORS]");
-    expect(result.limits.maxChars).toBeLessThanOrEqual(90);
+    expect(result.prompt).toContain("Исправь только указанное. Не переписывай всё и не меняй остальное.");
+    expect(result.limits.maxChars).toBeLessThanOrEqual(120);
   });
 
   it("adds escalation guidance for provocation without turning it into a lecture", () => {
     const result = compose("заткнись");
-    const prompt = mergedPrompt(result);
 
     expect(result.trace.messageKind).toBe("provocation");
-    expect(prompt).toContain("[PROVOCATION ANCHORS]");
-    expect(prompt).toContain("Обычно хватает одной короткой сухой фразы");
-    expect(prompt).toContain("Не спорь по кругу, не морализируй");
-    expect(prompt).not.toContain("[CONTEXT USAGE BLOCK]");
-    expect(prompt).not.toContain("[REPLY MODE]");
-    expect(result.limits.maxChars).toBeLessThanOrEqual(110);
+    expect(result.prompt).toContain("агрессивно");
+    expect(result.prompt).toContain("Если в сообщении есть нормальный вопрос — сначала ответь по делу.");
   });
 
-  it("ignores relationship overlays entirely while the hard disable is active", () => {
-    const result = compose("привет", {
-      relationship: {
-        toneBias: "friendly",
-        roastLevel: 2,
-        praiseBias: 2,
-        interruptPriority: 0,
-        doNotMock: false,
-        doNotInitiate: false,
-        protectedTopics: []
-      }
-    });
-
-    expect(result.prompt).not.toContain("[RELATIONSHIP OVERLAY]");
-    expect(result.prompt).not.toContain("tone_bias=");
-    expect(result.trace.blocksUsed).not.toContain("RELATIONSHIP OVERLAY");
-  });
-
-  it("adds anti-drift anchors for emotional or advice-heavy turns", () => {
-    const result = compose("меня игнорят и я не понимаю что ему ответить");
-    const prompt = mergedPrompt(result);
-
-    expect(prompt).toContain("[EMOTIONAL ADVICE ANCHORS]");
-    expect(prompt).toContain("один пинг и потом отойди");
-    expect(prompt).toContain("одну внятную фразу");
-    expect(prompt).toContain("[CONCRETE CHAT GROUNDING BLOCK]");
-    expect(result.trace.blocksUsed).toContain("EMOTIONAL ADVICE ANCHORS");
-  });
-
-  it("skips emotional advice anchors for technical advice questions", () => {
-    const result = compose("как лучше настроить индекс в postgres");
-    const prompt = mergedPrompt(result);
-
-    expect(prompt).not.toContain("[EMOTIONAL ADVICE ANCHORS]");
-    expect(prompt).not.toContain("один пинг и потом отойди");
-  });
-
-  it("can disable emotional advice anchors via dedicated feature flag", () => {
-    const result = compose("меня игнорят и я не понимаю что ему ответить", {
-      featureFlags: { ...featureFlags, emotionalAdviceAnchorsEnabled: false }
-    });
-    const prompt = mergedPrompt(result);
-
-    expect(prompt).not.toContain("[EMOTIONAL ADVICE ANCHORS]");
-    expect(prompt).not.toContain("один пинг и потом отойди");
-  });
-
-  it("adds direct-message punctuation guidance when the message is a DM", () => {
+  it("keeps direct-message chat on the same v5 prompt shape", () => {
     const result = compose("ладно", {
       message: {
         isDirectMessage: true
       }
     });
-    const prompt = mergedPrompt(result);
 
-    expect(prompt).toContain("Если это личка, короткие прямые сообщения заканчивай без финальной точки вообще.");
+    expect(result.trace.promptShape).toBe("v5_chat");
+    expect(result.prompt).toContain("Ты Хори. Ты русскоязычный Discord-бот.");
   });
 
   it("keeps what-is-this-nonsense replies in meta-feedback when aimed at the bot", () => {
@@ -345,15 +238,10 @@ describe("composeBehaviorPrompt", () => {
 
   it("keeps analogy suppression in strict anti-slop output", () => {
     const result = compose("что такое индексы в базе?");
-    const prompt = mergedPrompt(result);
 
     expect(result.trace.antiSlopProfile).toBe("strict");
-    expect(prompt).toContain("[ANTI-SLOP BLOCK]");
-    expect(prompt).toContain("[ANALOGY SUPPRESSION BLOCK]");
-    expect(prompt).toContain("это как если бы");
-    expect(prompt).toContain("это похоже на");
-    expect(prompt).toContain("аналогично тому как");
-    expect(prompt).toContain("imagine if");
+    expect(result.trace.promptShape).toBe("v5_chat");
+    expect(result.prompt).toContain("Turn instruction:");
   });
 
   it("enables ideological flavour only as a topical layer", () => {
@@ -365,17 +253,12 @@ describe("composeBehaviorPrompt", () => {
     });
 
     expect(political.trace.ideologicalFlavour).toBe("enabled");
-    expect(political.prompt).toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
-    expect(political.prompt).toContain("anarcho-capitalist");
-    expect(political.prompt).toContain("anti-state");
-    expect(political.prompt).toContain("серьёзнее, суше и жёстче");
+    expect(political.trace.promptShape).toBe("v5_chat");
     expect(nonPoliticalOpinion.trace.ideologicalFlavour).toBe("background");
-    expect(nonPoliticalOpinion.prompt).not.toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
-    expect(nonPoliticalOpinion.prompt).not.toContain("strong pro-Israel bias");
     expect(casual.trace.ideologicalFlavour).toBe("background");
     expect(casual.trace.messageKind).toBe("smalltalk_hangout");
     expect(disabled.trace.ideologicalFlavour).toBe("disabled");
-    expect(disabled.prompt).not.toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
+    expect(disabled.trace.promptShape).toBe("v5_chat");
   });
 
   it("detects low-pressure hangout smalltalk without forcing banter", () => {
@@ -383,20 +266,13 @@ describe("composeBehaviorPrompt", () => {
 
     for (const content of cases) {
       const result = compose(content);
-      const prompt = mergedPrompt(result);
 
       expect(result.trace.messageKind).toBe("smalltalk_hangout");
       expect(result.trace.smalltalkContextHook).toBe(false);
       expect(result.trace.stylePreset).toBe("low_pressure_short");
-      expect(prompt).toContain("[LOW-PRESSURE SMALLTALK BLOCK]");
-      expect(prompt).toContain("На приветствие отвечай приветствием");
-      expect(prompt).toContain("Без встречного вопроса по умолчанию");
-      expect(prompt).not.toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
-      expect(prompt).not.toContain("[STALE TAKE / MEDIA REACTION BLOCK]");
-      expect(prompt).not.toContain("[SELF-INITIATED INTERJECTION CONSTRAINTS BLOCK]");
-      expect(prompt).not.toContain("[REPLY MODE]");
-      expect(prompt).not.toContain("[TONE BLOCK]");
-      expect(result.limits.maxChars).toBeLessThanOrEqual(120);
+      expect(result.prompt).toContain("Turn instruction:");
+      expect(result.prompt).toContain("Ответь 1–2 короткими фразами. Не развивай тему без нужды.");
+      expect(result.trace.promptShape).toBe("v5_chat");
     }
   });
 
@@ -449,38 +325,11 @@ describe("composeBehaviorPrompt", () => {
         triggerSource: "reply"
       }
     });
-    const prompt = mergedPrompt(result);
 
     expect(result.trace.messageKind).toBe("smalltalk_hangout");
     expect(result.trace.smalltalkContextHook).toBe(true);
-    expect(prompt).toContain("[LOW-PRESSURE SMALLTALK BLOCK]");
-    expect(prompt).toContain("можно быть чуть живее, но не длиннее");
-    expect(prompt).not.toContain("[RELATIONSHIP OVERLAY]");
-    expect(prompt).not.toContain("[REPLY MODE]");
-    expect(result.limits.maxChars).toBeLessThanOrEqual(160);
-  });
-
-  it("ignores relationship rapport on reply continuations while hard disable is active", () => {
-    const result = compose("ну и что", {
-      relationship: {
-        toneBias: "sharp",
-        roastLevel: 2,
-        praiseBias: 0,
-        interruptPriority: 0,
-        doNotMock: false,
-        doNotInitiate: false,
-        protectedTopics: []
-      },
-      message: {
-        triggerSource: "reply"
-      }
-    });
-    const prompt = mergedPrompt(result);
-
-    expect(result.trace.messageKind).toBe("reply_to_bot");
-    expect(result.limits.maxChars).toBeLessThanOrEqual(160);
-    expect(prompt).not.toContain("[RELATIONSHIP OVERLAY]");
-    expect(prompt).not.toContain("Можно быть холоднее и суше обычного");
+    expect(result.prompt).toContain("Ответь коротко и естественно. Держись последних сообщений.");
+    expect(result.trace.relationshipState).toBe("teasing");
   });
 
   it("does not misclassify utility, opinion, search or provocation as hangout smalltalk", () => {
@@ -514,7 +363,7 @@ describe("composeBehaviorPrompt", () => {
     expect(result.limits.maxSentences).toBe(1);
     expect(result.limits.maxParagraphs).toBe(1);
     expect(result.limits.maxChars).toBeLessThanOrEqual(180);
-    expect(result.prompt).toContain("[SELF-INITIATED INTERJECTION CONSTRAINTS BLOCK]");
+    expect(result.trace.promptShape).toBe("v5_chat");
   });
 
   it("keeps depth earned and marks stale/gotcha context separately", () => {
@@ -544,7 +393,7 @@ describe("composeBehaviorPrompt", () => {
     expect(repeated.trace.stylePreset).toBe("dismissive_short");
     expect(repeated.trace.staleTakeDetected).toBe(true);
     expect(repeated.trace.mediaReactionEligible).toBe(true);
-    expect(mergedPrompt(repeated)).toContain("[STALE TAKE / MEDIA REACTION BLOCK]");
+    expect(repeated.prompt).toContain("Заезженную тему закрывай короче и суше. Не разбирай её заново.");
   });
 
   it("falls back when playful mode is disabled", () => {

@@ -68,6 +68,7 @@ export class ContextService {
           id: message.id,
           author: message.user.globalName || message.user.username || message.userId,
           userId: message.userId,
+          isBot: message.user.isBot,
           content: message.content,
           createdAt: message.createdAt,
           replyToMessageId: message.replyToMessageId
@@ -101,7 +102,7 @@ export class ContextService {
         content: string;
         createdAt: Date;
         replyToMessageId: string | null;
-        user: { globalName: string | null; username: string | null };
+        user: { globalName: string | null; username: string | null; isBot: boolean };
       } | null = await this.prisma.message.findFirst({
         where: {
           id: currentId,
@@ -119,6 +120,7 @@ export class ContextService {
         id: replyMessage.id,
         author: replyMessage.user.globalName || replyMessage.user.username || replyMessage.userId,
         userId: replyMessage.userId,
+        isBot: replyMessage.user.isBot,
         content: replyMessage.content,
         createdAt: replyMessage.createdAt,
         replyToMessageId: replyMessage.replyToMessageId
@@ -171,6 +173,7 @@ export class ContextService {
         id: link.message.id,
         author: link.message.user.globalName || link.message.user.username || link.message.userId,
         userId: link.message.userId,
+        isBot: link.message.user.isBot,
         content: link.message.content,
         createdAt: link.message.createdAt,
         replyToMessageId: link.message.replyToMessageId

@@ -1162,8 +1162,7 @@ function normalizeSemanticText(value: string) {
   return value
     .toLowerCase()
     .replace(/ё/g, "е")
-    .replace(/[^
-  return key || "memory-note";
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }

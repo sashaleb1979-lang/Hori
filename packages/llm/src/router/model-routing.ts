@@ -166,7 +166,7 @@ export function defaultModelRoutingPresetForEnv(env: AppEnv): ModelRoutingPreset
 export function resolveModelRouting(
   env: AppEnv,
   rawStoredValue?: string | null,
-  overrides?: { openaiEmbedDimensions?: number | null }
+  runtimeOverrides?: { openaiEmbedDimensions?: number | null }
 ): ResolvedModelRouting {
   const provider = getProvider(env);
   const legacyFallback = buildLegacyFallback(env);
@@ -177,15 +177,15 @@ export function resolveModelRouting(
   const storedOverrides = parsed.value?.overrides ?? {};
   const preset = controlsEditable ? storedPreset ?? defaultPreset : "legacy_env";
   const baseSlots = buildPresetSlots(env, preset);
-  const overrides = controlsEditable ? storedOverrides : {};
-  const slots = { ...baseSlots, ...overrides };
+  const activeOverrides = controlsEditable ? storedOverrides : {};
+  const slots = { ...baseSlots, ...activeOverrides };
 
   return {
     provider,
     preset,
     source: controlsEditable && parsed.value ? "runtime_setting" : "default",
     slots,
-    overrides,
+    overrides: activeOverrides,
     controlsEditable,
     controlsNote: controlsEditable
       ? undefined
@@ -200,7 +200,7 @@ export function resolveModelRouting(
       : OPENAI_EMBEDDING_MODEL,
     embeddingDimensions: provider === "ollama"
       ? undefined
-      : resolveOpenAIEmbeddingDimensions({ OPENAI_EMBED_DIMENSIONS: overrides?.openaiEmbedDimensions ?? (env as ProviderAwareEnv).OPENAI_EMBED_DIMENSIONS }),
+      : resolveOpenAIEmbeddingDimensions({ OPENAI_EMBED_DIMENSIONS: runtimeOverrides?.openaiEmbedDimensions ?? (env as ProviderAwareEnv).OPENAI_EMBED_DIMENSIONS }),
     parseError: parsed.error
   };
 }

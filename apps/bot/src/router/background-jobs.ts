@@ -15,6 +15,7 @@ interface QueueRuntime {
     embedding: QueueHandle;
     topic: QueueHandle;
     conversationAnalysis: QueueHandle;
+    session: QueueHandle;
   };
   logger: {
     warn(input: unknown, message?: string): void;
@@ -97,6 +98,17 @@ export async function enqueueBackgroundJobs(runtime: QueueRuntime, envelope: {
           }
         );
       })()
+    },
+    {
+      queue: "session",
+      task: runtime.queues.session.add(
+        "session",
+        { guildId: envelope.guildId, channelId: envelope.channelId, userId: envelope.userId },
+        {
+          jobId: buildJobId("session", envelope.guildId, envelope.userId, envelope.channelId),
+          delay: 10 * 60 * 1000
+        }
+      )
     }
   ];
 

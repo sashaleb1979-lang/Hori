@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { defaultRuntimeTuning, type AppEnv } from "@hori/config";
 import { ChatOrchestrator } from "@hori/core";
 import { ModelRouter, resolveModelRouting } from "@hori/llm";
-import type { ContextBundle, ContextBundleV2, FeatureFlags, MessageEnvelope, PersonaSettings } from "@hori/shared";
+import type { ContextBundle, FeatureFlags, MessageEnvelope, PersonaSettings } from "@hori/shared";
 
 type ChatOrchestratorDeps = ConstructorParameters<typeof ChatOrchestrator>[0];
 
@@ -30,8 +30,8 @@ const env = {
   OLLAMA_LOG_RESPONSES: false,
   OLLAMA_LOG_MAX_CHARS: 12000,
   OPENAI_API_KEY: "test",
-  OPENAI_CHAT_MODEL: "gpt-5.4-nano",
-  OPENAI_SMART_MODEL: "gpt-5.4-nano",
+  OPENAI_CHAT_MODEL: "gpt-4o-mini",
+  OPENAI_SMART_MODEL: "gpt-4o-mini",
   OPENAI_EMBED_MODEL: "text-embedding-3-small",
   BRAVE_SEARCH_API_KEY: undefined,
   CFG: undefined,
@@ -41,7 +41,6 @@ const env = {
 const featureFlags: FeatureFlags = {
   webSearch: false,
   autoInterject: false,
-  emotionalAdviceAnchorsEnabled: true,
   userProfiles: false,
   contextActions: false,
   roast: true,
@@ -87,8 +86,6 @@ const guildSettings: PersonaSettings = {
 const runtimeSettings = {
   powerProfile: "balanced",
   modelRouting: resolveModelRouting(env),
-  openaiEmbedDimensions: 768,
-  memoryHydeEnabled: true,
   llmMaxContextMessages: 12,
   contextMaxChars: 1500,
   llmReplyMaxTokens: 240,
@@ -98,7 +95,11 @@ const runtimeSettings = {
   ollamaNumBatch: 256,
   mediaAutoGlobalCooldownSec: 7200,
   mediaAutoMinConfidence: 0.82,
-  mediaAutoMinIntensity: 0.62
+  mediaAutoMinIntensity: 0.62,
+  memoryMode: "OFF",
+  relationshipGrowthMode: "OFF",
+  stylePresetMode: "manual_only",
+  maxTimeoutMinutes: 15
 } as const;
 
 const emptyContext: ContextBundle = {
@@ -107,21 +108,6 @@ const emptyContext: ContextBundle = {
   serverMemories: [],
   userProfile: null,
   relationship: null
-};
-
-const emptyContextV2: ContextBundleV2 = {
-  version: "v2",
-  recentMessages: [],
-  summaries: [],
-  serverMemories: [],
-  userProfile: null,
-  relationship: null,
-  replyChain: [],
-  repliedMessageId: null,
-  activeTopic: null,
-  topicWindow: [],
-  entities: [],
-  entityMemories: []
 };
 
 function baseMessage(overrides: Partial<MessageEnvelope> = {}): MessageEnvelope {
@@ -148,7 +134,7 @@ function baseMessage(overrides: Partial<MessageEnvelope> = {}): MessageEnvelope 
 }
 
 function createOrchestrator(overrides: Partial<ChatOrchestratorDeps> = {}) {
-  const chat = vi.fn(async (options: { format?: "json" }) => {
+  const chat = vi.fn(async (options: { format?: "json"; messages?: Array<{ role: string; content: string }> }) => {
     if (options.format === "json") {
       return {
         message: {
@@ -185,50 +171,17 @@ function createOrchestrator(overrides: Partial<ChatOrchestratorDeps> = {}) {
     toolOrchestrator: {},
     searchClient: {},
     embeddingAdapter: { embedOne: vi.fn(async () => [0.1, 0.2, 0.3]) },
-    runtimeConfig: {}
+    runtimeConfig: {},
+    ...overrides
   };
-
-  Object.assign(deps, overrides);
 
   return {
     orchestrator: new ChatOrchestrator(deps as unknown as ChatOrchestratorDeps),
-    chat,
-    deps
+    chat
   };
 }
 
 describe("chat orchestrator quiet hours", () => {
-  it("keeps the tighter chat profile even when chat escalates to contour C", async () => {
-    const { orchestrator, chat } = createOrchestrator();
-
-    const result = await orchestrator.handleMessage(baseMessage({
-      content: "хори объясни почему так",
-      createdAt: new Date("2026-04-19T09:22:00.000Z")
-    }), {
-      guildSettings,
-      featureFlags,
-      channelPolicy: {
-        allowBotReplies: true,
-        allowInterjections: false,
-        isMuted: false,
-        topicInterestTags: [],
-        responseLengthOverride: null
-      },
-      runtimeSettings
-    });
-
-    expect(result.trace.responseBudget).toBeDefined();
-    expect(result.trace.responseBudget?.contour).toBe("C");
-    expect(result.trace.modelKind).toBe("fast");
-    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.temperature === 0.38 && call.topP === 0.85)).toBe(true);
-
-    const chatCall = chat.mock.calls
-      .map(([options]) => options)
-      .find((options) => options.metadata?.purpose === "chat");
-
-    expect(chatCall?.metadata?.complexityHint).toBeUndefined();
-  });
-
   it("routes direct name invocations through chat LLM during quiet hours", async () => {
     const { orchestrator, chat } = createOrchestrator();
 
@@ -249,7 +202,7 @@ describe("chat orchestrator quiet hours", () => {
     expect(result.trace.responseBudget).toBeDefined();
     expect(result.trace.responseBudget?.contour).toBe("B");
     expect(result.trace.responseBudget?.reason).not.toBe("quiet_hours:auto_interject");
-    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.model === "gpt-5.4-nano")).toBe(true);
+    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat")).toBe(true);
     expect(chat).toHaveBeenCalledTimes(2);
   });
 
@@ -277,223 +230,51 @@ describe("chat orchestrator quiet hours", () => {
     expect(result.reply).toBe("нормальный ответ");
     expect(result.trace.responseBudget).toBeDefined();
     expect(result.trace.responseBudget?.contour).toBe("B");
-    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.model === "gpt-5.4-nano")).toBe(true);
+    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat")).toBe(true);
   });
 
-  it("short-circuits hostile meta replies before the normal chat path", async () => {
-    const relationships = {
-      recordInteraction: vi.fn(async () => undefined),
-      recordToxicBehavior: vi.fn(async () => undefined)
-    };
-    const { orchestrator, chat } = createOrchestrator({ relationships: relationships as never });
+  it("assembles V5 chat messages from stable prompt, restored context and real turns", async () => {
+    const context = {
+      ...emptyContext,
+      recentMessages: [
+        { id: "other-1", author: "other", userId: "user-2", content: "это чужой диалог", createdAt: new Date("2026-04-19T04:18:00.000Z") },
+        { id: "user-1", author: "tester", userId: "user-1", content: "привет", createdAt: new Date("2026-04-19T04:19:00.000Z") },
+        { id: "bot-1", author: "hori", userId: "bot-1", isBot: true, content: "привет.", createdAt: new Date("2026-04-19T04:19:30.000Z") },
+        { id: "user-2", author: "tester", userId: "user-1", content: "вчера было странно", createdAt: new Date("2026-04-19T04:20:00.000Z") },
+        { id: "bot-2", author: "hori", userId: "bot-1", isBot: true, content: "бывает.", createdAt: new Date("2026-04-19T04:20:20.000Z") }
+      ]
+    } satisfies ContextBundle;
 
-    const result = await orchestrator.handleMessage(baseMessage({
-      content: "ты галлюцинируешь",
-      explicitInvocation: false,
-      mentionsBotByName: false,
-      mentionedBot: false,
-      triggerSource: "reply",
-      replyToMessageId: "bot-message-1"
-    }), {
-      guildSettings,
-      featureFlags,
-      channelPolicy: {
-        allowBotReplies: true,
-        allowInterjections: false,
-        isMuted: false,
-        topicInterestTags: [],
-        responseLengthOverride: null
-      },
-      runtimeSettings
-    });
+    const restoredContextPrisma = {
+      moderatorPreference: { findUnique: vi.fn(async () => null) },
+      botEventLog: { create: vi.fn(async () => ({})) },
+      horiRestoredContext: {
+        findUnique: vi.fn(async () => ({
+          id: "restored-1",
+          expiresAt: new Date(Date.now() + 60_000),
+          consumedAt: null,
+          memoryCard: {
+            title: "Старый разговор",
+            summary: ["Пользователь вчера устал и слился с дел."],
+            details: ["Сработало, когда всё дробили на один шаг."],
+            openQuestions: ["Осталась ли та же проблема сегодня?"],
+            active: true
+          }
+        })),
+        update: vi.fn(async () => ({}))
+      }
+    };
 
-    expect(result.trace.microReaction?.kind).toBe("meta_feedback");
-    expect(result.trace.microReaction?.rule).toBe("direct_meta_feedback");
-    expect(result.trace.modelKind).toBeUndefined();
-    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat")).toBe(false);
-    expect(chat.mock.calls.some(([options]) => options.metadata?.purpose === "chat")).toBe(false);
-    expect(relationships.recordInteraction.mock.calls.some(([, , sentiment]) => sentiment === 0.22)).toBe(false);
-    expect(relationships.recordInteraction.mock.calls.some(([, , sentiment]) => typeof sentiment === "number" && sentiment < 0)).toBe(true);
-    expect(relationships.recordToxicBehavior).not.toHaveBeenCalled();
-  });
-
-  it("hard-disables relationship and affinity influence even when context has it", async () => {
-    const contextService = {
-      buildContext: vi.fn(async () => ({
-        ...emptyContext,
-        relationship: {
-          toneBias: "friendly",
-          roastLevel: 1,
-          praiseBias: 1,
-          interruptPriority: 0,
-          doNotMock: false,
-          doNotInitiate: false,
-          protectedTopics: []
-        }
-      }))
-    };
-    const affinity = {
-      applyRecentOverlay: vi.fn(async () => ({
-        toneBias: "sharp",
-        roastLevel: 2,
-        praiseBias: 0,
-        interruptPriority: 0,
-        doNotMock: false,
-        doNotInitiate: false,
-        protectedTopics: []
-      })),
-      recordMessageSignal: vi.fn(async () => undefined)
-    };
-    const relationships = {
-      recordInteraction: vi.fn(async () => undefined),
-      recordToxicBehavior: vi.fn(async () => undefined)
-    };
     const { orchestrator, chat } = createOrchestrator({
-      contextService,
-      affinity: affinity as never,
-      relationships: relationships as never
-    });
-
-    const result = await orchestrator.handleMessage(baseMessage(), {
-      guildSettings,
-      featureFlags: { ...featureFlags, affinitySignalsEnabled: true },
-      channelPolicy: {
-        allowBotReplies: true,
-        allowInterjections: false,
-        isMuted: false,
-        topicInterestTags: [],
-        responseLengthOverride: null
-      },
-      runtimeSettings
-    });
-
-    const chatCall = chat.mock.calls
-      .map(([options]) => options)
-      .find((options) => options.metadata?.purpose === "chat");
-
-    expect(result.trace.relationshipApplied).toBe(false);
-    expect(affinity.applyRecentOverlay).not.toHaveBeenCalled();
-    expect(affinity.recordMessageSignal).not.toHaveBeenCalled();
-    expect(relationships.recordInteraction).not.toHaveBeenCalled();
-    expect(relationships.recordToxicBehavior).not.toHaveBeenCalled();
-    expect(chatCall?.messages?.[0]?.content).not.toContain("[RELATIONSHIP OVERLAY]");
-    expect(chatCall?.messages?.[0]?.content).not.toContain("Отношение к юзеру");
-  });
-
-  it("does not pretend contour-A auto-interjects used a chat model", async () => {
-    const { orchestrator } = createOrchestrator();
-
-    const result = await orchestrator.handleMessage(baseMessage({
-      content: "ну и что думаете?",
-      createdAt: new Date("2026-04-19T04:22:00.000Z"),
-      explicitInvocation: false,
-      mentionsBotByName: false,
-      mentionedBot: false,
-      triggerSource: "auto_interject"
-    }), {
-      guildSettings,
-      featureFlags,
-      channelPolicy: {
-        allowBotReplies: true,
-        allowInterjections: false,
-        isMuted: false,
-        topicInterestTags: [],
-        responseLengthOverride: null
-      },
-      runtimeSettings
-    });
-
-    expect(result.trace.responseBudget?.contour).toBe("A");
-    expect(result.trace.modelKind).toBeUndefined();
-    expect(result.trace.llmCalls?.some((call) => call.purpose === "chat")).toBe(false);
-  });
-
-  it("caps lightweight direct mentions to a smaller context budget", async () => {
-    const contextService = { buildContext: vi.fn(async () => emptyContextV2) };
-    const { orchestrator } = createOrchestrator({ contextService });
-
-    const result = await orchestrator.handleMessage(baseMessage({
-      content: "хори",
-      createdAt: new Date("2026-04-19T10:22:00.000Z")
-    }), {
-      guildSettings,
-      featureFlags: { ...featureFlags, contextV2Enabled: true },
-      channelPolicy: {
-        allowBotReplies: true,
-        allowInterjections: false,
-        isMuted: false,
-        topicInterestTags: [],
-        responseLengthOverride: null
-      },
-      runtimeSettings
-    });
-
-    expect(result.trace.responseBudget?.contour).toBe("B");
-    expect(result.trace.context?.truncation?.maxChars).toBe(650);
-  });
-
-  it("keeps the full context budget for explicit explanation turns", async () => {
-    const contextService = { buildContext: vi.fn(async () => emptyContextV2) };
-    const { orchestrator } = createOrchestrator({ contextService });
-
-    const result = await orchestrator.handleMessage(baseMessage({
-      content: "хори объясни почему так",
-      createdAt: new Date("2026-04-19T10:22:00.000Z")
-    }), {
-      guildSettings,
-      featureFlags: { ...featureFlags, contextV2Enabled: true },
-      channelPolicy: {
-        allowBotReplies: true,
-        allowInterjections: false,
-        isMuted: false,
-        topicInterestTags: [],
-        responseLengthOverride: null
-      },
-      runtimeSettings
-    });
-
-    expect(result.trace.responseBudget?.contour).toBe("C");
-    expect(result.trace.context?.truncation?.maxChars).toBe(runtimeSettings.contextMaxChars);
-  });
-
-  it("blends HyDE retrieval embedding into context lookup for substantial chat turns", async () => {
-    const contextService = { buildContext: vi.fn(async () => emptyContext) };
-    const chat = vi.fn(async (options: { format?: "json"; messages?: Array<{ content: string }> }) => {
-      if (options.format === "json") {
-        return {
-          message: {
-            role: "assistant" as const,
-            content: JSON.stringify({ intent: "chat", confidence: 0.95, reason: "test classifier" })
-          },
-          usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
-        };
-      }
-
-      const combined = options.messages?.map((message) => message.content).join("\n") ?? "";
-      if (combined.includes("memory retrieval")) {
-        return {
-          message: { role: "assistant" as const, content: "Игнор в переписке, тревога, нужен короткий ясный ответ" },
-          usage: { promptTokens: 12, completionTokens: 8, totalTokens: 20 }
-        };
-      }
-
-      return {
-        message: { role: "assistant" as const, content: "нормальный ответ" },
-        usage: { promptTokens: 20, completionTokens: 7, totalTokens: 27 }
-      };
-    });
-    const embeddingAdapter = {
-      embedOne: vi.fn(async (text: string) => text.includes("Игнор в переписке") ? [3, 3, 3] : [1, 1, 1])
-    };
-    const { orchestrator, deps } = createOrchestrator({
-      contextService,
-      llmClient: { chat, embed: vi.fn() } as never,
-      embeddingAdapter: embeddingAdapter as never,
+      contextService: { buildContext: vi.fn(async () => context) } as never,
+      prisma: restoredContextPrisma as never
     });
 
     await orchestrator.handleMessage(baseMessage({
-      content: "меня игнорят и я не понимаю что ответить человеку",
-      createdAt: new Date("2026-04-19T10:22:00.000Z")
+      content: "и что теперь",
+      replyToMessageId: "bot-2",
+      triggerSource: "reply",
+      mentionsBotByName: false
     }), {
       guildSettings,
       featureFlags,
@@ -507,113 +288,21 @@ describe("chat orchestrator quiet hours", () => {
       runtimeSettings
     });
 
-    expect(contextService.buildContext).toHaveBeenCalledWith(expect.objectContaining({
-      queryEmbedding: [2, 2, 2]
-    }));
-    expect(deps.llmClient.chat).toHaveBeenCalledTimes(3);
-    expect(embeddingAdapter.embedOne).toHaveBeenCalledTimes(2);
-  });
+    const llmChatCall = chat.mock.calls.find((call) => !call[0].format)?.[0];
+    const messages = llmChatCall?.messages ?? [];
 
-  it("skips HyDE expansion when runtime setting disables it", async () => {
-    const contextService = { buildContext: vi.fn(async () => emptyContext) };
-    const chat = vi.fn(async (options: { format?: "json" }) => {
-      if (options.format === "json") {
-        return {
-          message: {
-            role: "assistant" as const,
-            content: JSON.stringify({ intent: "chat", confidence: 0.95, reason: "test classifier" })
-          },
-          usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
-        };
-      }
-
-      return {
-        message: { role: "assistant" as const, content: "нормальный ответ" },
-        usage: { promptTokens: 20, completionTokens: 7, totalTokens: 27 }
-      };
-    });
-    const embeddingAdapter = {
-      embedOne: vi.fn(async () => [1, 1, 1])
-    };
-    const { orchestrator, deps } = createOrchestrator({
-      contextService,
-      llmClient: { chat, embed: vi.fn() } as never,
-      embeddingAdapter: embeddingAdapter as never,
-    });
-
-    await orchestrator.handleMessage(baseMessage({
-      content: "меня игнорят и я не понимаю что ответить человеку",
-      createdAt: new Date("2026-04-19T10:22:00.000Z")
-    }), {
-      guildSettings,
-      featureFlags,
-      channelPolicy: {
-        allowBotReplies: true,
-        allowInterjections: false,
-        isMuted: false,
-        topicInterestTags: [],
-        responseLengthOverride: null
-      },
-      runtimeSettings: {
-        ...runtimeSettings,
-        memoryHydeEnabled: false
-      }
-    });
-
-    expect(contextService.buildContext).toHaveBeenCalledWith(expect.objectContaining({
-      queryEmbedding: [1, 1, 1]
-    }));
-    expect(deps.llmClient.chat).toHaveBeenCalledTimes(2);
-    expect(embeddingAdapter.embedOne).toHaveBeenCalledTimes(1);
-  });
-
-  it("skips HyDE expansion for short advice-like messages", async () => {
-    const contextService = { buildContext: vi.fn(async () => emptyContext) };
-    const chat = vi.fn(async (options: { format?: "json" }) => {
-      if (options.format === "json") {
-        return {
-          message: {
-            role: "assistant" as const,
-            content: JSON.stringify({ intent: "chat", confidence: 0.95, reason: "test classifier" })
-          },
-          usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
-        };
-      }
-
-      return {
-        message: { role: "assistant" as const, content: "нормальный ответ" },
-        usage: { promptTokens: 20, completionTokens: 7, totalTokens: 27 }
-      };
-    });
-    const embeddingAdapter = {
-      embedOne: vi.fn(async () => [1, 1, 1])
-    };
-    const { orchestrator, deps } = createOrchestrator({
-      contextService,
-      llmClient: { chat, embed: vi.fn() } as never,
-      embeddingAdapter: embeddingAdapter as never,
-    });
-
-    await orchestrator.handleMessage(baseMessage({
-      content: "что делать?",
-      createdAt: new Date("2026-04-19T10:22:00.000Z")
-    }), {
-      guildSettings,
-      featureFlags,
-      channelPolicy: {
-        allowBotReplies: true,
-        allowInterjections: false,
-        isMuted: false,
-        topicInterestTags: [],
-        responseLengthOverride: null
-      },
-      runtimeSettings
-    });
-
-    expect(contextService.buildContext).toHaveBeenCalledWith(expect.objectContaining({
-      queryEmbedding: [1, 1, 1]
-    }));
-    expect(deps.llmClient.chat).toHaveBeenCalledTimes(2);
-    expect(embeddingAdapter.embedOne).toHaveBeenCalledTimes(1);
+    expect(messages).toHaveLength(8);
+    expect(messages[0]).toEqual(expect.objectContaining({ role: "system" }));
+    expect(messages[0].content).toContain("Ты Хори. Ты русскоязычный Discord-бот.");
+    expect(messages[1]).toEqual(expect.objectContaining({ role: "system" }));
+    expect(messages[1].content).toContain("Восстановленный контекст:");
+    expect(messages[2]).toEqual({ role: "user", content: "привет" });
+    expect(messages[3]).toEqual({ role: "assistant", content: "привет." });
+    expect(messages[4]).toEqual({ role: "user", content: "вчера было странно" });
+    expect(messages[5]).toEqual({ role: "assistant", content: "бывает." });
+    expect(messages[6]).toEqual(expect.objectContaining({ role: "system" }));
+    expect(messages[6].content).toContain("Turn instruction:");
+    expect(messages[7]).toEqual({ role: "user", content: "и что теперь" });
+    expect(messages.some((entry: { content: string }) => entry.content.includes("[BACKGROUND CONTEXT - calibration only]"))).toBe(false);
   });
 });

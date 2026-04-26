@@ -31,6 +31,13 @@ interface StressRecord {
   limits: ReturnType<typeof composeBehaviorPrompt>["limits"];
 }
 
+interface HistoryTurn {
+  role: "user" | "assistant";
+  author: string;
+  content: string;
+  createdAt: Date;
+}
+
 const featureFlags: FeatureFlags = {
   webSearch: true,
   autoInterject: false,
@@ -153,9 +160,16 @@ function createMessage(turn: number, content: string, triggerSource: TriggerSour
   };
 }
 
-function buildContext(history: Array<{ author: string; content: string; createdAt: Date }>): ContextBundle {
+function buildContext(history: HistoryTurn[]): ContextBundle {
   return {
-    recentMessages: history.slice(-8),
+    recentMessages: history.slice(-8).map((entry, index) => ({
+      id: `history-${index}`,
+      author: entry.author,
+      userId: entry.role === "assistant" ? "baseline-bot" : "baseline-user",
+      isBot: entry.role === "assistant",
+      content: entry.content,
+      createdAt: entry.createdAt
+    })),
     summaries: [],
     serverMemories: [],
     relationship: null,
@@ -163,33 +177,39 @@ function buildContext(history: Array<{ author: string; content: string; createdA
   };
 }
 
-function buildContextText(history: Array<{ author: string; content: string }>) {
-  if (!history.length) {
-    return "";
-  }
-
-  return ["[RECENT CHAT]", ...history.slice(-6).map((item) => `${item.author}: ${item.content}`)].join("\n");
+function buildChatMessages(
+  behavior: ReturnType<typeof composeBehaviorPrompt>,
+  history: HistoryTurn[],
+  userText: string
+) {
+  return [
+    {
+      role: "system" as const,
+      content: [behavior.assembly.commonCore, behavior.assembly.relationshipTail]
+        .filter(Boolean)
+        .join("\n\n")
+    },
+    ...history.slice(-8).map((entry) => ({
+      role: entry.role,
+      content: entry.content
+    })),
+    {
+      role: "system" as const,
+      content: `Turn instruction:\n${behavior.assembly.turnInstruction}`
+    },
+    {
+      role: "user" as const,
+      content: userText
+    }
+  ];
 }
 
 async function callOllama(options: {
   ollamaUrl: string;
   model: string;
-  systemPrompt: string;
-  userText: string;
-  contextText: string;
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
   maxTokens: number;
 }) {
-  const messages: Array<{ role: "system" | "user"; content: string }> = [{ role: "system", content: options.systemPrompt }];
-
-  if (options.contextText.trim()) {
-    messages.push({
-      role: "system",
-      content: `[BACKGROUND CONTEXT - calibration only]\nUse this only for continuity, tone and relevance. Never answer this block directly and do not recap it unless the user explicitly asks.\n${options.contextText}`
-    });
-  }
-
-  messages.push({ role: "user", content: options.userText });
-
   const response = await fetch(`${options.ollamaUrl.replace(/\/$/, "")}/api/chat`, {
     method: "POST",
     headers: {
@@ -204,7 +224,7 @@ async function callOllama(options: {
         top_p: chatModelProfile.topP,
         num_predict: Math.min(options.maxTokens, chatModelProfile.maxTokens)
       },
-      messages
+      messages: options.messages
     })
   });
 
@@ -238,7 +258,7 @@ async function main() {
   const outputPath = resolve(readArg("--output") ?? "artifacts/chat-quality-baseline.json");
   const ollamaUrl = readArg("--ollama-url") ?? process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434";
   const model = readArg("--model") ?? process.env.OLLAMA_FAST_MODEL ?? "qwen3.5:9b";
-  const history: Array<{ author: string; content: string; createdAt: Date }> = [];
+  const history: HistoryTurn[] = [];
   const transcript: TranscriptRecord[] = [];
 
   for (const [index, userText] of ordinaryTranscript.slice(0, Math.max(0, limit)).entries()) {
@@ -256,15 +276,13 @@ async function main() {
       isMention: triggerSource === "mention",
       isReplyToBot: triggerSource === "reply"
     });
-    const contextText = buildContextText(history);
+    const messages = buildChatMessages(behavior, history, userText);
     const rawReply = dryRun
       ? `[dry-run] ${behavior.trace.messageKind}/${behavior.trace.activeMode}/${behavior.trace.stylePreset}`
       : await callOllama({
           ollamaUrl,
           model,
-          systemPrompt: behavior.prompt,
-          userText,
-          contextText,
+          messages,
           maxTokens: behavior.limits.maxTokens
         });
     const reply = responseGuard.enforce(rawReply, {
@@ -281,8 +299,8 @@ async function main() {
       limits: behavior.limits
     });
 
-    history.push({ author: "user", content: userText, createdAt: message.createdAt });
-    history.push({ author: "hori", content: reply, createdAt: new Date(message.createdAt.getTime() + 250) });
+    history.push({ role: "user", author: "user", content: userText, createdAt: message.createdAt });
+    history.push({ role: "assistant", author: "hori", content: reply, createdAt: new Date(message.createdAt.getTime() + 250) });
   }
 
   const stressResults: StressRecord[] = [];
@@ -302,15 +320,13 @@ async function main() {
       isMention: triggerSource === "mention",
       isReplyToBot: triggerSource === "reply"
     });
-    const contextText = buildContextText(history);
+    const messages = buildChatMessages(behavior, history, testCase.text);
     const rawReply = dryRun
       ? `[dry-run] ${behavior.trace.messageKind}/${behavior.trace.activeMode}/${behavior.trace.stylePreset}`
       : await callOllama({
           ollamaUrl,
           model,
-          systemPrompt: behavior.prompt,
-          userText: testCase.text,
-          contextText,
+          messages,
           maxTokens: behavior.limits.maxTokens
         });
     const reply = responseGuard.enforce(rawReply, {

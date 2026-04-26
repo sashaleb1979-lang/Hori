@@ -141,7 +141,7 @@ function normalizeError(error: unknown) {
 function buildInfo(
   kind: ProviderErrorClass,
   normalized: ReturnType<typeof normalizeError>,
-  overrides: Pick<ProviderErrorInfo, "retryOnce" | "setCooldown" | "alertInLogs">>
+  overrides: Pick<ProviderErrorInfo, "retryOnce" | "setCooldown" | "alertInLogs">
 ): ProviderErrorInfo {
   return {
     class: kind,

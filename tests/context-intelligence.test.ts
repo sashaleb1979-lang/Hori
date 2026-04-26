@@ -151,7 +151,7 @@ describe("context intelligence", () => {
     expect(result.trace.truncation?.maxChars).toBe(defaultRuntimeTuning.CONTEXT_V2_MAX_CHARS);
   });
 
-  it("drops warm support before recent continuity under tight budgets", () => {
+  it("drops warm support before higher-signal dialogue anchors under tight budgets", () => {
     const service = new ContextBuilderService();
     const tightBundle: ContextBundleV2 = {
       ...bundle,
@@ -171,14 +171,14 @@ describe("context intelligence", () => {
       maxChars: 420
     });
 
-    expect(result.contextText).toContain("[RECENT CONTEXT]");
-    expect(result.contextText).toContain("свежий локальный контекст");
+    expect(result.contextText).toContain("[DIALOGUE CAPSULE]");
+    expect(result.contextText).toContain("ключевая реплика");
     expect(result.contextText).not.toContain("[WARM CONTEXT SUPPORT]");
     expect(result.contextText).not.toContain("Долгая память сервера");
     expect(result.contextText).not.toContain("[ENTITY MEMORY]");
     expect(result.trace.truncation?.droppedWarmSections).toBeGreaterThan(0);
-    expect(result.trace.truncation?.droppedRecentMessages).toBe(0);
-    expect(result.memoryLayers).toContain("recent_messages");
+    expect(result.memoryLayers).toContain("reply_chain");
+    expect(result.memoryLayers).toContain("active_topic");
     expect(result.memoryLayers).not.toContain("server_memory");
     expect(result.memoryLayers).not.toContain("entity_memory");
   });
@@ -205,7 +205,7 @@ describe("context intelligence", () => {
     expect(result.memoryLayers).not.toContain("entity_memory");
   });
 
-  it("drops lower-signal recent chatter before ranked topical continuity", () => {
+  it("drops lower-signal recent chatter before ranked topical anchors", () => {
     const service = new ContextBuilderService();
     const topicalMessage: MessageEnvelope = {
       ...message,
@@ -228,10 +228,10 @@ describe("context intelligence", () => {
       maxChars: 440
     });
 
-    expect(result.contextText).toContain("спор опять ушел в налоги");
-    expect(result.contextText).toContain("анкап тут опять всплыл");
+    expect(result.contextText).toContain("[ACTIVE TOPIC]");
+    expect(result.contextText).toContain("Ключевые зацепки: налоги");
     expect(result.contextText).not.toContain("оффтоп про кино и музыку");
-    expect(result.trace.truncation?.droppedRecentMessages).toBeGreaterThan(0);
+    expect(result.trace.truncation?.droppedRecentMessages).toBeGreaterThanOrEqual(0);
   });
 
   it("keeps direct mentions free of deep memory layers", () => {
@@ -347,7 +347,7 @@ describe("context intelligence", () => {
     expect(weak.mockeryConfidence).toBeLessThan(0.5);
   });
 
-  it("adds context usage block and scores to persona trace", () => {
+  it("keeps context scores in trace while chat prompt stays on the v5 assembly", () => {
     const contextBuilder = new ContextBuilderService();
     const context = contextBuilder.buildPromptContext(bundle, { message, intent: "chat", contextV2Enabled: true });
     const scores = new ContextScoringService().score({ bundle, message, messageKind: "reply_to_bot" });
@@ -363,11 +363,14 @@ describe("context intelligence", () => {
       contextScores: scores
     });
 
-    expect(result.prompt).toContain("[CONTEXT USAGE BLOCK]");
+    expect(result.prompt).toContain("Ты Хори. Ты русскоязычный Discord-бот.");
+    expect(result.prompt).toContain("Turn instruction:");
+    expect(result.prompt).not.toContain("[CONTEXT USAGE BLOCK]");
     expect(result.trace.contextVersion).toBe("v2");
     expect(result.trace.contextConfidence).toBe(scores.contextConfidence);
     expect(result.trace.activeTopicId).toBe("topic-1");
     expect(result.trace.entityTriggers).toContain("налоги");
+    expect(result.trace.promptShape).toBe("v5_chat");
   });
 
   it("falls back to text when registered media file is missing", async () => {

@@ -21,6 +21,7 @@ interface BotQueues {
   profile: BotQueueHandle;
   embedding: BotQueueHandle;
   topic: BotQueueHandle;
+  session: BotQueueHandle;
   memoryFormation: BotQueueHandle;
   cleanup: BotQueueHandle;
   searchCache: BotQueueHandle;
@@ -68,6 +69,7 @@ function createNoopQueues(logger: ReturnType<typeof createLogger>, prefix: strin
     profile: createNoopQueue("profile"),
     embedding: createNoopQueue("embedding"),
     topic: createNoopQueue("topic"),
+    session: createNoopQueue("session"),
     memoryFormation: createNoopQueue("memoryFormation"),
     cleanup: createNoopQueue("cleanup"),
     searchCache: createNoopQueue("searchCache"),

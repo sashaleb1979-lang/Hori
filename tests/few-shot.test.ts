@@ -38,6 +38,16 @@ describe("few-shot tone anchors", () => {
     expect(block.content).not.toContain("живой человек");
   });
 
+  it("keeps few-shot anchors free of aggression markers and timeout phrases", () => {
+    const block = buildFewShotBlock({
+      includeConcreteReplyAnchors: true,
+      includeMetaFeedbackAnchors: true
+    });
+
+    expect(block.content).not.toContain("агрессивно");
+    expect(block.content.toLowerCase()).not.toContain("тайм-аут");
+  });
+
   it("normal chat and smalltalk no longer drift into weird reply mode", () => {
     const observed = new Set<string>();
 
