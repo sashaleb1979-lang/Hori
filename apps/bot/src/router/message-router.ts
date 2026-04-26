@@ -238,6 +238,57 @@ async function shouldAutoInterject(
   return true;
 }
 
+async function tryHandleKnowledgeQuery(
+  runtime: BotRuntime,
+  message: Message,
+  envelope: MessageEnvelope
+): Promise<boolean> {
+  const trimmed = message.content.trimStart();
+  if (!trimmed) return false;
+  // Cheap pre-filter so we don't hit the DB on every message.
+  const firstChar = Array.from(trimmed)[0];
+  if (!firstChar || /[\p{L}\p{N}_\s]/u.test(firstChar)) return false;
+
+  let match: Awaited<ReturnType<BotRuntime["knowledge"]["matchTrigger"]>> = null;
+  try {
+    match = await runtime.knowledge.matchTrigger(envelope.guildId, message.content);
+  } catch (error) {
+    runtime.logger.warn(
+      { guildId: envelope.guildId, error: (error as Error).message },
+      "knowledge trigger lookup failed"
+    );
+    return false;
+  }
+  if (!match) return false;
+  if (!match.question) {
+    await sendReply(message, `Спроси что-нибудь по «${match.cluster.title}» после «${match.cluster.trigger}».`);
+    return true;
+  }
+
+  try {
+    const result = await runtime.knowledge.answer(match.cluster, match.question);
+    const replyText = result.answer.trim() || "нет такой инфы";
+    await sendReply(message, replyText);
+    runtime.logger.info(
+      {
+        guildId: envelope.guildId,
+        clusterCode: match.cluster.code,
+        chunks: result.retrievedChunkCount,
+        fallback: result.fallback,
+        model: result.model
+      },
+      "knowledge query answered"
+    );
+  } catch (error) {
+    runtime.logger.error(
+      { guildId: envelope.guildId, code: match.cluster.code, error },
+      "knowledge answer failed"
+    );
+    await sendReply(message, "Сек, я споткнулась о вики. Повтори вопрос.");
+  }
+  return true;
+}
+
 export async function routeMessage(runtime: BotRuntime, message: Message) {
   if (!message.inGuild() || message.author.bot || !runtime.client.user) {
     return;
@@ -298,6 +349,14 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
   void enqueueBackgroundJobs(runtime, envelope).catch((error) => {
     runtime.logger.warn({ messageId: envelope.messageId, error }, "background job scheduling crashed");
   });
+
+  if (
+    !routingConfig.channelPolicy.isMuted &&
+    routingConfig.channelPolicy.allowBotReplies &&
+    (await tryHandleKnowledgeQuery(runtime, message, envelope))
+  ) {
+    return;
+  }
 
   if (!explicitInvocation && !autoInterject) {
     return;

@@ -2,7 +2,7 @@ import type { Client } from "discord.js";
 
 import { AnalyticsQueryService, MessageIngestService } from "@hori/analytics";
 import { assertEnvForRole, loadEnv } from "@hori/config";
-import { AffinityService, createChatOrchestrator, createRuntimeLlmClient, MediaReactionService, MoodService, ReplyQueueService, RuntimeConfigService, SlashAdminService } from "@hori/core";
+import { AffinityService, createChatOrchestrator, createRuntimeLlmClient, KnowledgeService, MediaReactionService, MoodService, ReplyQueueService, RuntimeConfigService, SlashAdminService } from "@hori/core";
 import { EmbeddingAdapter, ModelRouter, ToolOrchestrator } from "@hori/llm";
 import type { LlmClient } from "@hori/llm";
 import { ActiveMemoryService, ContextService, InteractionRequestService, MemoryAlbumService, ProfileService, ReflectionService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
@@ -45,6 +45,7 @@ export interface BotRuntime {
   runtimeConfig: RuntimeConfigService;
   orchestrator: ReturnType<typeof createChatOrchestrator>;
   replyQueue: ReplyQueueService;
+  knowledge: KnowledgeService;
 }
 
 function createNoopQueues(logger: ReturnType<typeof createLogger>, prefix: string): BotQueues {
@@ -125,6 +126,25 @@ export async function bootstrapBot() {
   const searchClient = new BraveSearchClient(env, logger, searchCache);
   const toolOrchestrator = new ToolOrchestrator(llmClient, logger);
   const ingestService = new MessageIngestService(prisma, logger);
+  const knowledgeService = new KnowledgeService({
+    prisma,
+    logger,
+    defaultAnswerModel: env.OPENAI_MODEL,
+    embed: async (text) => {
+      const embeddingMeta = modelRouter.pickEmbeddingModel({});
+      const vector = await embeddingAdapter.embedOne(text, { dimensions: embeddingMeta.dimensions });
+      return { vector, model: embeddingMeta.model, dimensions: embeddingMeta.dimensions ?? vector.length };
+    },
+    chat: async ({ model, messages, maxTokens }) => {
+      const response = await llmClient.chat({
+        model,
+        messages,
+        maxTokens,
+        metadata: { purpose: "knowledge_qa" }
+      });
+      return { content: response.message?.content ?? "", model: response.routing?.model ?? model };
+    }
+  });
   const slashAdmin = new SlashAdminService(
     prisma,
     analytics,
@@ -174,7 +194,8 @@ export async function bootstrapBot() {
     reflection: reflectionService,
     runtimeConfig,
     orchestrator,
-    replyQueue: replyQueueService
+    replyQueue: replyQueueService,
+    knowledge: knowledgeService
   };
 
   registerEvents(runtime);

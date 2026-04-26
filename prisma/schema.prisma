@@ -47,6 +47,7 @@ model Guild {
   reflectionLessons  ReflectionLesson[]
   userMemoryCards    HoriUserMemoryCard[]
   restoredContexts   HoriRestoredContext[]
+  knowledgeClusters  KnowledgeCluster[]
 }
 
 model ChannelConfig {
@@ -730,3 +731,59 @@ model ReflectionLesson {
   @@index([guildId, status, createdAt])
   @@index([guildId, sentiment, createdAt])
 }
+
+model KnowledgeCluster {
+  id           String   @id @default(cuid())
+  guildId      String
+  code         String
+  title        String
+  description  String?
+  trigger      String   @default("?")
+  enabled      Boolean  @default(true)
+  answerModel  String?
+  embedModel   String?
+  dimensions   Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  guild        Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  articles     KnowledgeArticle[]
+  chunks       KnowledgeChunk[]
+
+  @@unique([guildId, code])
+  @@index([guildId, enabled])
+  @@index([guildId, trigger, enabled])
+}
+
+model KnowledgeArticle {
+  id          String   @id @default(cuid())
+  clusterId   String
+  title       String
+  sourceUrl   String?
+  rawContent  String   @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  cluster     KnowledgeCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  chunks      KnowledgeChunk[]
+
+  @@unique([clusterId, title])
+  @@index([clusterId])
+}
+
+model KnowledgeChunk {
+  id          String                 @id @default(cuid())
+  clusterId   String
+  articleId   String
+  chunkIndex  Int
+  content     String                 @db.Text
+  tokens      Int                    @default(0)
+  embedding   Unsupported("vector")?
+  dimensions  Int?
+  createdAt   DateTime               @default(now())
+  cluster     KnowledgeCluster       @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  article     KnowledgeArticle       @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([clusterId, dimensions])
+  @@index([articleId, chunkIndex])
+}
+
+
