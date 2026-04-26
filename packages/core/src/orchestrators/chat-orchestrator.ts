@@ -15,7 +15,7 @@ import { getHourInTimeZone, pickContourAResponse, resolveContour, type Contour }
 import { IntentRouter } from "../intents/intent-router";
 import { detectMessageKind } from "../persona/messageKinds";
 import { PersonaService } from "../persona/persona-service";
-import { AGGRESSION_CHECKER_PROMPT, buildRestoredContextBlock, MEMORY_SUMMARIZER_PROMPT } from "../persona/prompt-spec";
+import { buildRestoredContextBlock, type CorePromptTemplates } from "../persona/prompt-spec";
 import { HELP_TEXT } from "../prompts/system-prompts";
 import { ResponseGuard } from "../safety/response-guard";
 import { RoastPolicy } from "../safety/roast-policy";
@@ -324,6 +324,7 @@ export class ChatOrchestrator {
       );
     }
 
+    const corePromptTemplates = await this.deps.runtimeConfig.getCorePromptTemplates(message.guildId);
     const behavior = this.persona.composeBehavior({
       guildSettings: {
         ...guildSettings,
@@ -345,7 +346,8 @@ export class ChatOrchestrator {
       isMention: message.mentionedBot || message.mentionsBotByName,
       isReplyToBot: message.triggerSource === "reply",
       isSelfInitiated: message.triggerSource === "auto_interject",
-      contour: contour.contour
+      contour: contour.contour,
+      corePromptTemplates
     });
     const restoredContext = intent.intent === "chat" ? await this.getActiveRestoredContext(message) : null;
     const systemPrompt = [
@@ -501,7 +503,8 @@ export class ChatOrchestrator {
         reply,
         relationship: affinityRelationship,
         runtimeSettings,
-        llmCalls
+        llmCalls,
+        corePromptTemplates
       });
 
       reply = aggressionResult.reply;
@@ -743,8 +746,16 @@ export class ChatOrchestrator {
     return fallback;
   }
 
-  private buildStableChatSystemPrompt(behavior: ReturnType<PersonaService["composeBehavior"]>) {
-    return [behavior.assembly.commonCore, behavior.assembly.relationshipTail]
+  private buildStableChatSystemPrompt(
+    behavior: ReturnType<PersonaService["composeBehavior"]>,
+    restoredContext?: string | null
+  ) {
+    return [
+      behavior.assembly.commonCore,
+      behavior.assembly.relationshipTail,
+      restoredContext?.trim() ? restoredContext.trim() : null,
+      `Turn instruction:\n${behavior.assembly.turnInstruction}`
+    ]
       .filter(Boolean)
       .join("\n\n");
   }
@@ -781,22 +792,11 @@ export class ChatOrchestrator {
     const messages: LlmChatMessage[] = [
       {
         role: "system",
-        content: this.buildStableChatSystemPrompt(options.behavior)
+        content: this.buildStableChatSystemPrompt(options.behavior, options.restoredContext)
       }
     ];
 
-    if (options.restoredContext?.trim()) {
-      messages.push({
-        role: "system",
-        content: options.restoredContext.trim()
-      });
-    }
-
     messages.push(...this.buildRecentChatTurns(options.message, options.contextBundle));
-    messages.push({
-      role: "system",
-      content: `Turn instruction:\n${options.behavior.assembly.turnInstruction}`
-    });
     messages.push({ role: "user", content: options.content });
 
     const response = await this.deps.llmClient.chat({
@@ -837,11 +837,12 @@ export class ChatOrchestrator {
   private async runAggressionChecker(
     lastUserMessage: string,
     horiResponse: string,
+    checkerPrompt: string,
     runtimeSettings: EffectiveRuntimeSettings,
     llmCalls?: LlmCallTrace[]
   ) {
     const llm = this.getLlmSettingsForSlot("classifier", "chat", runtimeSettings, 12, { temperature: 0, topP: 0.1 });
-    const prompt = AGGRESSION_CHECKER_PROMPT
+    const prompt = checkerPrompt
       .replace("{last_user_message}", lastUserMessage)
       .replace("{hori_response}", horiResponse);
     const messages: LlmChatMessage[] = [
@@ -867,6 +868,7 @@ export class ChatOrchestrator {
     message: MessageEnvelope;
     reply: string;
     relationship?: { escalationStage?: number | null } | null;
+    corePromptTemplates: CorePromptTemplates;
     runtimeSettings: EffectiveRuntimeSettings;
     llmCalls?: LlmCallTrace[];
   }): Promise<AggressionPipelineResult> {
@@ -923,7 +925,13 @@ export class ChatOrchestrator {
     }
 
     if (stageAfter === 2) {
-      const verdict = await this.runAggressionChecker(options.message.content, extracted.content, options.runtimeSettings, options.llmCalls);
+      const verdict = await this.runAggressionChecker(
+        options.message.content,
+        extracted.content,
+        options.corePromptTemplates.aggressionCheckerPrompt,
+        options.runtimeSettings,
+        options.llmCalls
+      );
       const replacementText = "я это запомню.";
 
       if (verdict === "AGGRESSIVE") {
@@ -960,7 +968,13 @@ export class ChatOrchestrator {
       };
     }
 
-    const verdict = await this.runAggressionChecker(options.message.content, extracted.content, options.runtimeSettings, options.llmCalls);
+      const verdict = await this.runAggressionChecker(
+        options.message.content,
+        extracted.content,
+        options.corePromptTemplates.aggressionCheckerPrompt,
+        options.runtimeSettings,
+        options.llmCalls
+      );
 
     if (verdict === "AGGRESSIVE") {
       const timeoutMinutes = Math.max(1, Math.min(15, options.runtimeSettings.maxTimeoutMinutes));
@@ -1373,11 +1387,12 @@ export class ChatOrchestrator {
     };
   }
 
-  private async summarizeMemorySession(messages: MemorySessionMessage[]) {
+  private async summarizeMemorySession(guildId: string, messages: MemorySessionMessage[]) {
     const runtimeSettings = await this.deps.runtimeConfig.getRuntimeSettings();
+    const corePromptTemplates = await this.deps.runtimeConfig.getCorePromptTemplates(guildId);
     const llm = this.getLlmSettings("summary", runtimeSettings, 280, { temperature: 0 });
     const promptMessages: LlmChatMessage[] = [
-      { role: "system", content: MEMORY_SUMMARIZER_PROMPT },
+      { role: "system", content: corePromptTemplates.memorySummarizerPrompt },
       { role: "user", content: this.formatSessionForSummarizer(messages) }
     ];
     const response = await this.deps.llmClient.chat({
@@ -1584,7 +1599,7 @@ export class ChatOrchestrator {
       return "тут нечего сохранять";
     }
 
-    const summary = await this.summarizeMemorySession(session.messages);
+    const summary = await this.summarizeMemorySession(message.guildId, session.messages);
     if (!summary.save || !summary.summary.length) {
       return "тут нечего сохранять";
     }
@@ -2404,7 +2419,6 @@ export class ChatOrchestrator {
           completionTokens: tokenTotals.completionTokens,
           totalTokens: tokenTotals.totalTokens,
           tokenSource: tokenTotals.tokenSource,
-          costUsd: tokenTotals.costUsd,
           relationshipApplied: trace.relationshipApplied,
           debugTrace: trace as never
         }

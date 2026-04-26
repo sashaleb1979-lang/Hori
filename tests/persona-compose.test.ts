@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { composeBehaviorPrompt } from "../packages/core/src/persona/compose";
+import { buildCorePromptTemplates } from "../packages/core/src/persona/prompt-spec";
 import type { BotIntent, ContextBundleV2, ContextTrace, FeatureFlags, MessageEnvelope, PersonaSettings } from "@hori/shared";
 
 const featureFlags: FeatureFlags = {
@@ -32,7 +33,8 @@ const featureFlags: FeatureFlags = {
   linkUnderstandingEnabled: true,
   naturalMessageSplittingEnabled: true,
   selectiveEngagementEnabled: true,
-  selfReflectionLessonsEnabled: true
+  selfReflectionLessonsEnabled: true,
+  emotionalAdviceAnchorsEnabled: true
 };
 
 const guildSettings: PersonaSettings = {
@@ -113,6 +115,20 @@ describe("composeBehaviorPrompt", () => {
     expect(result.prompt).not.toContain("Правила сервера:");
     expect(result.trace.replyMode).toBeDefined();
     expect(uniqueBlocks.size).toBe(result.trace.blocksUsed.length);
+  });
+
+  it("uses injected core prompt templates for chat assembly", () => {
+    const result = compose("привет", {
+      corePromptTemplates: buildCorePromptTemplates({
+        common_core_base: "КАСТОМНЫЙ CORE",
+        relationship_base: "КАСТОМНЫЙ BASE TAIL"
+      })
+    });
+
+    expect(result.assembly.commonCore).toBe("КАСТОМНЫЙ CORE");
+    expect(result.assembly.relationshipTail).toBe("КАСТОМНЫЙ BASE TAIL");
+    expect(result.prompt).toContain("КАСТОМНЫЙ CORE");
+    expect(result.prompt).toContain("КАСТОМНЫЙ BASE TAIL");
   });
 
   it("uses channel overrides from topic tags and channel names", () => {

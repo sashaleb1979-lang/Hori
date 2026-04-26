@@ -8,4 +8,5 @@ dist
 coverage
 prisma/dev.db
 *.log
+docs/v5-reference/
 

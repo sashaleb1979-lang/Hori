@@ -191,7 +191,34 @@ function createLlmPanelRuntime(
       setMemoryHydeEnabled: vi.fn().mockResolvedValue({ value: false, source: "runtime_setting" }),
       setOpenAIEmbeddingDimensions: vi.fn().mockResolvedValue({ value: 512, source: "runtime_setting" }),
       resetMemoryHydeEnabled: vi.fn().mockResolvedValue({ value: true, source: "default" }),
-      resetOpenAIEmbeddingDimensions: vi.fn().mockResolvedValue({ value: 768, source: "default" })
+      resetOpenAIEmbeddingDimensions: vi.fn().mockResolvedValue({ value: 768, source: "default" }),
+      listCorePromptTemplates: vi.fn().mockResolvedValue([
+        {
+          key: "common_core_base",
+          label: "COMMON_CORE_BASE",
+          description: "Главный системный prompt для chat path.",
+          source: "default",
+          content: "Ты Хори.",
+          defaultContent: "Ты Хори."
+        },
+        {
+          key: "relationship_base",
+          label: "RELATIONSHIP_BASE",
+          description: "Базовый relationship tail.",
+          source: "runtime_setting",
+          content: "Пользователь нейтральный.",
+          defaultContent: "Пользователь нейтральный."
+        }
+      ]),
+      getCorePromptTemplate: vi.fn().mockResolvedValue({
+        key: "common_core_base",
+        label: "COMMON_CORE_BASE",
+        description: "Главный системный prompt для chat path.",
+        source: "default",
+        content: "Ты Хори.",
+        defaultContent: "Ты Хори."
+      }),
+      resetCorePromptTemplate: vi.fn().mockResolvedValue({})
     },
     prisma: {
       botEventLog: {
@@ -199,6 +226,82 @@ function createLlmPanelRuntime(
       }
     }
   } as unknown as BotRuntime;
+}
+
+function createCorePromptPanelButtonInteraction(userId: string) {
+  const update = vi.fn();
+
+  return {
+    guildId: "guild-1",
+    channelId: "channel-1",
+    customId: "hori-action:core_prompt_panel",
+    user: {
+      id: userId,
+      username: "tester",
+      globalName: "Tester"
+    },
+    memberPermissions: {
+      has: vi.fn().mockReturnValue(false)
+    },
+    update,
+    reply: vi.fn(),
+    isButton: () => true,
+    isStringSelectMenu: () => false,
+    isModalSubmit: () => false,
+    isChatInputCommand: () => false,
+    isMessageContextMenuCommand: () => false
+  };
+}
+
+function createCorePromptPanelSelectInteraction(userId: string, value: string) {
+  const update = vi.fn();
+
+  return {
+    guildId: "guild-1",
+    channelId: "channel-1",
+    customId: "core-prompt-panel:select",
+    values: [value],
+    user: {
+      id: userId,
+      username: "tester",
+      globalName: "Tester"
+    },
+    memberPermissions: {
+      has: vi.fn().mockReturnValue(false)
+    },
+    update,
+    reply: vi.fn(),
+    isButton: () => false,
+    isStringSelectMenu: () => true,
+    isModalSubmit: () => false,
+    isChatInputCommand: () => false,
+    isMessageContextMenuCommand: () => false
+  };
+}
+
+function createCorePromptResetButtonInteraction(userId: string) {
+  const update = vi.fn();
+
+  return {
+    guildId: "guild-1",
+    channelId: "channel-1",
+    customId: "core-prompt-panel:reset:relationship_base",
+    user: {
+      id: userId,
+      username: "tester",
+      globalName: "Tester"
+    },
+    memberPermissions: {
+      has: vi.fn().mockReturnValue(false)
+    },
+    update,
+    reply: vi.fn(),
+    isButton: () => true,
+    isStringSelectMenu: () => false,
+    isModalSubmit: () => false,
+    isChatInputCommand: () => false,
+    isMessageContextMenuCommand: () => false
+  };
 }
 
 describe("/hori panel access", () => {
@@ -214,7 +317,7 @@ describe("/hori panel access", () => {
   });
 
   it("allows the owner to open the master panel", async () => {
-    const interaction = createPanelInteraction("owner-1", "style");
+    const interaction = createPanelInteraction("owner-1", "persona");
 
     await routeInteraction(createRuntime(["owner-1"]), interaction as never);
 
@@ -232,6 +335,62 @@ describe("/hori panel access", () => {
 
     await routeInteraction(createLlmPanelRuntime(["owner-1"]), interaction as never);
 
+    expect(interaction.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        embeds: expect.any(Array),
+        components: expect.any(Array)
+      })
+    );
+  });
+
+  it("shows only chat text and core prompt actions in the persona panel", async () => {
+    const interaction = createPanelInteraction("owner-1", "persona");
+
+    await routeInteraction(createRuntime(["owner-1"]), interaction as never);
+
+    const response = interaction.reply.mock.calls[0]?.[0];
+    const buttonRow = response?.components?.[1];
+    const labels = (buttonRow?.components ?? []).map(
+      (component: { data?: { label?: string }; toJSON?: () => { label?: string } }) =>
+        component.data?.label ?? component.toJSON?.().label ?? ""
+    );
+
+    expect(labels).toEqual(["Текст чата", "Core prompts"]);
+  });
+
+  it("lets the owner open the core prompt panel from persona actions", async () => {
+    const interaction = createCorePromptPanelButtonInteraction("owner-1");
+
+    await routeInteraction(createLlmPanelRuntime(["owner-1"]), interaction as never);
+
+    expect(interaction.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        embeds: expect.any(Array),
+        components: expect.any(Array)
+      })
+    );
+  });
+
+  it("lets the owner switch selected core prompt from the panel", async () => {
+    const interaction = createCorePromptPanelSelectInteraction("owner-1", "relationship_base");
+
+    await routeInteraction(createLlmPanelRuntime(["owner-1"]), interaction as never);
+
+    expect(interaction.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        embeds: expect.any(Array),
+        components: expect.any(Array)
+      })
+    );
+  });
+
+  it("lets the owner reset one core prompt override from the panel", async () => {
+    const interaction = createCorePromptResetButtonInteraction("owner-1");
+    const runtime = createLlmPanelRuntime(["owner-1"]);
+
+    await routeInteraction(runtime, interaction as never);
+
+    expect(runtime.runtimeConfig.resetCorePromptTemplate).toHaveBeenCalledWith("guild-1", "relationship_base");
     expect(interaction.update).toHaveBeenCalledWith(
       expect.objectContaining({
         embeds: expect.any(Array),
@@ -312,7 +471,7 @@ describe("/hori panel access", () => {
     expect(rows[0].components[0].disabled).toBe(true);
     expect(rows[1].components[0].disabled).toBe(true);
     expect(rows[2].components[0].disabled).toBe(true);
-    expect(rows[3].components[0].options?.some((option) => option.value === "embed:512")).toBe(true);
+    expect(rows[3].components[0].options?.some((option: { value: string }) => option.value === "embed:512")).toBe(true);
     expect(rows[4].components[0].disabled).toBe(true);
     expect(rows[4].components[1].disabled).toBe(true);
   });
@@ -343,7 +502,7 @@ describe("/hori panel access", () => {
     expect(rows[0].components[0].disabled).toBe(true);
     expect(rows[1].components[0].disabled).toBe(true);
     expect(rows[2].components[0].disabled).toBe(true);
-    expect(rows[3].components[0].options?.some((option) => option.value === "embed:512")).toBe(false);
+    expect(rows[3].components[0].options?.some((option: { value: string }) => option.value === "embed:512")).toBe(false);
   });
 
   it("rejects stale router-mode model select interactions without mutating runtime config", async () => {
@@ -354,7 +513,7 @@ describe("/hori panel access", () => {
 
     expect(runtime.runtimeConfig.setModelSlot).not.toHaveBeenCalled();
     expect(interaction.reply).toHaveBeenCalledWith({
-      content: expect.stringContaining("informational-only"),
+      content: expect.stringContaining("Informational-only"),
       flags: EPHEMERAL_FLAG
     });
     expect(interaction.update).not.toHaveBeenCalled();
@@ -368,7 +527,7 @@ describe("/hori panel access", () => {
 
     expect(runtime.runtimeConfig.resetModelSlot).not.toHaveBeenCalled();
     expect(interaction.reply).toHaveBeenCalledWith({
-      content: expect.stringContaining("informational-only"),
+      content: expect.stringContaining("Informational-only"),
       flags: EPHEMERAL_FLAG
     });
     expect(interaction.update).not.toHaveBeenCalled();

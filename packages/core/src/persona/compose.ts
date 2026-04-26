@@ -8,7 +8,7 @@ import { buildIdeologicalBlock, detectIdeologicalTopic, resolveIdeologicalFlavou
 import { buildMessageKindBlock, detectMessageKind } from "./messageKinds";
 import { buildToneBlock, fallbackDisabledMode, modeFromRequestedDepth } from "./modes";
 import { buildStylePresetBlock, resolveStylePreset, stylePresets } from "./presets";
-import { COMMON_CORE_BASE, resolveRelationshipState, resolveRelationshipTail } from "./prompt-spec";
+import { DEFAULT_CORE_PROMPT_TEMPLATES, resolveRelationshipState, resolveRelationshipTail } from "./prompt-spec";
 import { buildReplyModeBlock, resolveReplyMode } from "./replyMode";
 import { buildSelfInterjectionBlock } from "./selfInterjection";
 import { buildSlangBlock, resolveSlangProfile } from "./slang";
@@ -1101,9 +1101,10 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   const relationshipState: RelationshipState = resolveRelationshipState(input.relationship, {
     preferSerious: shouldPreferSeriousRelationshipTail({ input, messageKind, requestedDepth })
   });
+  const corePromptTemplates = input.corePromptTemplates ?? DEFAULT_CORE_PROMPT_TEMPLATES;
   const assembly = {
-    commonCore: COMMON_CORE_BASE,
-    relationshipTail: resolveRelationshipTail(relationshipState),
+    commonCore: corePromptTemplates.commonCore,
+    relationshipTail: resolveRelationshipTail(relationshipState, corePromptTemplates),
     turnInstruction: buildTurnInstruction({
       messageKind,
       limits,

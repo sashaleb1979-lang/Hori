@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { defaultRuntimeTuning, type AppEnv } from "@hori/config";
-import { ChatOrchestrator } from "@hori/core";
+import { ChatOrchestrator, DEFAULT_CORE_PROMPT_TEMPLATES } from "@hori/core";
 import { ModelRouter, resolveModelRouting } from "@hori/llm";
 import type { ContextBundle, FeatureFlags, MessageEnvelope, PersonaSettings } from "@hori/shared";
 
@@ -36,7 +36,7 @@ const env = {
   BRAVE_SEARCH_API_KEY: undefined,
   CFG: undefined,
   QUIET_HOURS_ENABLED: true
-} as AppEnv;
+} as unknown as AppEnv;
 
 const featureFlags: FeatureFlags = {
   webSearch: false,
@@ -67,7 +67,8 @@ const featureFlags: FeatureFlags = {
   linkUnderstandingEnabled: false,
   naturalMessageSplittingEnabled: false,
   selectiveEngagementEnabled: false,
-  selfReflectionLessonsEnabled: false
+  selfReflectionLessonsEnabled: false,
+  emotionalAdviceAnchorsEnabled: false
 };
 
 const guildSettings: PersonaSettings = {
@@ -93,6 +94,7 @@ const runtimeSettings = {
   ollamaKeepAlive: "5m",
   ollamaNumCtx: 4096,
   ollamaNumBatch: 256,
+  memoryHydeEnabled: false,
   mediaAutoGlobalCooldownSec: 7200,
   mediaAutoMinConfidence: 0.82,
   mediaAutoMinIntensity: 0.62,
@@ -171,7 +173,9 @@ function createOrchestrator(overrides: Partial<ChatOrchestratorDeps> = {}) {
     toolOrchestrator: {},
     searchClient: {},
     embeddingAdapter: { embedOne: vi.fn(async () => [0.1, 0.2, 0.3]) },
-    runtimeConfig: {},
+    runtimeConfig: {
+      getCorePromptTemplates: vi.fn(async () => DEFAULT_CORE_PROMPT_TEMPLATES)
+    },
     ...overrides
   };
 
@@ -233,7 +237,7 @@ describe("chat orchestrator quiet hours", () => {
     expect(result.trace.llmCalls?.some((call) => call.purpose === "chat")).toBe(true);
   });
 
-  it("assembles V5 chat messages from stable prompt, restored context and real turns", async () => {
+  it("assembles V5 chat messages as one system prompt plus restored context and real turns", async () => {
     const context = {
       ...emptyContext,
       recentMessages: [
@@ -291,18 +295,17 @@ describe("chat orchestrator quiet hours", () => {
     const llmChatCall = chat.mock.calls.find((call) => !call[0].format)?.[0];
     const messages = llmChatCall?.messages ?? [];
 
-    expect(messages).toHaveLength(8);
+    expect(messages).toHaveLength(6);
     expect(messages[0]).toEqual(expect.objectContaining({ role: "system" }));
     expect(messages[0].content).toContain("Ты Хори. Ты русскоязычный Discord-бот.");
-    expect(messages[1]).toEqual(expect.objectContaining({ role: "system" }));
-    expect(messages[1].content).toContain("Восстановленный контекст:");
-    expect(messages[2]).toEqual({ role: "user", content: "привет" });
-    expect(messages[3]).toEqual({ role: "assistant", content: "привет." });
-    expect(messages[4]).toEqual({ role: "user", content: "вчера было странно" });
-    expect(messages[5]).toEqual({ role: "assistant", content: "бывает." });
-    expect(messages[6]).toEqual(expect.objectContaining({ role: "system" }));
-    expect(messages[6].content).toContain("Turn instruction:");
-    expect(messages[7]).toEqual({ role: "user", content: "и что теперь" });
+    expect(messages[0].content).toContain("Восстановленный контекст:");
+    expect(messages[0].content).toContain("Turn instruction:");
+    expect(messages[1]).toEqual({ role: "user", content: "привет" });
+    expect(messages[2]).toEqual({ role: "assistant", content: "привет." });
+    expect(messages[3]).toEqual({ role: "user", content: "вчера было странно" });
+    expect(messages[4]).toEqual({ role: "assistant", content: "бывает." });
+    expect(messages[5]).toEqual({ role: "user", content: "и что теперь" });
+    expect(messages.slice(1).every((entry: { role: string }) => entry.role !== "system")).toBe(true);
     expect(messages.some((entry: { content: string }) => entry.content.includes("[BACKGROUND CONTEXT - calibration only]"))).toBe(false);
   });
 });

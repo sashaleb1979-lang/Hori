@@ -18,6 +18,14 @@ import {
   type ResolvedModelRouting
 } from "@hori/llm";
 import type { AppPrismaClient, FeatureFlags, MemoryMode, PersonaSettings, RelationshipGrowthMode, StylePresetMode } from "@hori/shared";
+import {
+  CORE_PROMPT_DEFINITIONS,
+  CORE_PROMPT_KEYS,
+  buildCorePromptTemplates,
+  getCorePromptDefaultContent,
+  type CorePromptKey,
+  type CorePromptTemplates
+} from "../persona/prompt-spec";
 
 export const FEATURE_KEY_MAP = {
   web_search: "webSearch",
@@ -55,6 +63,7 @@ export const POWER_PROFILE_SETTING_KEY = "power.profile";
 export const OPENAI_EMBED_DIMENSIONS_SETTING_KEY = "llm.openai_embed_dimensions";
 export const MEMORY_HYDE_SETTING_KEY = "memory.hyde_enabled";
 export const AI_ROUTER_STATE_SETTING_KEY = "llm.ai_router_state";
+const CORE_PROMPT_SETTING_PREFIX = "prompt.core";
 
 const RUNTIME_OVERRIDE_DEFINITIONS: Record<string, { field: keyof Omit<EffectiveRuntimeSettings, "powerProfile" | "modelRouting">; parse: (value: string) => string | number | boolean | undefined }> = {
   "runtime.llm.max_context_messages": { field: "llmMaxContextMessages", parse: parsePositiveInt },
@@ -115,6 +124,17 @@ export interface PowerProfileStatus {
 export interface RuntimeOverrideStatus<T> {
   value: T;
   source: "default" | "runtime_setting" | "unsupported";
+  updatedBy?: string | null;
+  updatedAt?: Date | null;
+}
+
+export interface CorePromptTemplateStatus {
+  key: CorePromptKey;
+  label: string;
+  description: string;
+  source: "default" | "runtime_setting";
+  content: string;
+  defaultContent: string;
   updatedBy?: string | null;
   updatedAt?: Date | null;
 }
@@ -485,6 +505,72 @@ export class RuntimeConfigService {
     };
   }
 
+  async listCorePromptTemplates(guildId: string): Promise<CorePromptTemplateStatus[]> {
+    const rows = await this.prisma.runtimeSetting.findMany({
+      where: {
+        key: {
+          in: CORE_PROMPT_KEYS.map((key) => buildCorePromptSettingKey(guildId, key))
+        }
+      }
+    });
+    const rowsByKey = new Map(rows.map((row) => [row.key, row]));
+
+    return CORE_PROMPT_KEYS.map((key) => {
+      const row = rowsByKey.get(buildCorePromptSettingKey(guildId, key));
+      const definition = CORE_PROMPT_DEFINITIONS[key];
+
+      return {
+        key,
+        label: definition.label,
+        description: definition.description,
+        source: row ? "runtime_setting" : "default",
+        content: row?.value ?? definition.defaultContent,
+        defaultContent: definition.defaultContent,
+        updatedBy: row?.updatedBy,
+        updatedAt: row?.updatedAt
+      };
+    });
+  }
+
+  async getCorePromptTemplate(guildId: string, key: CorePromptKey): Promise<CorePromptTemplateStatus> {
+    const templates = await this.listCorePromptTemplates(guildId);
+    return templates.find((entry) => entry.key === key)
+      ?? {
+        key,
+        label: CORE_PROMPT_DEFINITIONS[key].label,
+        description: CORE_PROMPT_DEFINITIONS[key].description,
+        source: "default",
+        content: getCorePromptDefaultContent(key),
+        defaultContent: getCorePromptDefaultContent(key)
+      };
+  }
+
+  async getCorePromptTemplates(guildId: string): Promise<CorePromptTemplates> {
+    const templates = await this.listCorePromptTemplates(guildId);
+    const overrides = Object.fromEntries(
+      templates
+        .filter((entry) => entry.source === "runtime_setting")
+        .map((entry) => [entry.key, entry.content])
+    ) as Partial<Record<CorePromptKey, string>>;
+
+    return buildCorePromptTemplates(overrides);
+  }
+
+  async setCorePromptTemplate(guildId: string, key: CorePromptKey, content: string, updatedBy?: string) {
+    const normalized = content.replace(/\r\n/g, "\n");
+    if (!normalized.trim()) {
+      throw new Error(`Prompt ${CORE_PROMPT_DEFINITIONS[key].label} не может быть пустым.`);
+    }
+
+    await this.writeRuntimeSetting(buildCorePromptSettingKey(guildId, key), normalized, updatedBy);
+    return this.getCorePromptTemplate(guildId, key);
+  }
+
+  async resetCorePromptTemplate(guildId: string, key: CorePromptKey) {
+    await this.deleteRuntimeSetting(buildCorePromptSettingKey(guildId, key));
+    return this.getCorePromptTemplate(guildId, key);
+  }
+
   async getChannelPolicy(guildId: string, channelId: string): Promise<EffectiveChannelPolicy> {
     const config = await this.prisma.channelConfig.findUnique({
       where: {
@@ -831,7 +917,7 @@ function applyRuntimeOverride(
   }
 }
 
-function parseAiRouterStateValue(rawValue?: string | null) {
+function parseAiRouterStateValue(rawValue?: string | null): AiRouterState {
   if (!rawValue?.trim()) {
     return createEmptyAiRouterState();
   }
@@ -903,7 +989,7 @@ function parseAiRouterStateValue(rawValue?: string | null) {
       : {};
 
     return {
-      providers,
+      providers: providers as AiRouterState["providers"],
       recentRoutes: Array.isArray(parsed.recentRoutes)
         ? parsed.recentRoutes.filter((route): route is AiRouterState["recentRoutes"][number] => Boolean(route && typeof route === "object"))
         : [],
@@ -912,6 +998,10 @@ function parseAiRouterStateValue(rawValue?: string | null) {
   } catch {
     return createEmptyAiRouterState();
   }
+}
+
+function buildCorePromptSettingKey(guildId: string, key: CorePromptKey) {
+  return `${CORE_PROMPT_SETTING_PREFIX}.${guildId}.${key}`;
 }
 
 function usesOpenAiEmbeddingPolicy(env: AppEnv) {

@@ -277,6 +277,134 @@ V
 Сессия:
 {session_messages}`;
 
+export const CORE_PROMPT_DEFINITIONS = {
+  common_core_base: {
+    label: "COMMON_CORE_BASE",
+    description: "Главный системный prompt для chat path.",
+    defaultContent: COMMON_CORE_BASE
+  },
+  relationship_base: {
+    label: "RELATIONSHIP_BASE",
+    description: "Базовый relationship tail для новых и нейтральных пользователей.",
+    defaultContent: RELATIONSHIP_TAILS.base
+  },
+  relationship_warm: {
+    label: "RELATIONSHIP_WARM",
+    description: "Relationship tail для тёплого, но ещё не близкого режима.",
+    defaultContent: RELATIONSHIP_TAILS.warm
+  },
+  relationship_close: {
+    label: "RELATIONSHIP_CLOSE",
+    description: "Relationship tail для близкого dry-friendly режима.",
+    defaultContent: RELATIONSHIP_TAILS.close
+  },
+  relationship_teasing: {
+    label: "RELATIONSHIP_TEASING",
+    description: "Relationship tail для лёгкого teasing/заигрывания.",
+    defaultContent: RELATIONSHIP_TAILS.teasing
+  },
+  relationship_sweet: {
+    label: "RELATIONSHIP_SWEET",
+    description: "Relationship tail для самого тёплого режима.",
+    defaultContent: RELATIONSHIP_TAILS.sweet
+  },
+  relationship_serious: {
+    label: "RELATIONSHIP_SERIOUS",
+    description: "Relationship tail для серьёзного/делового режима.",
+    defaultContent: RELATIONSHIP_TAILS.serious
+  },
+  cold_tail: {
+    label: "COLD_TAIL",
+    description: "Cold relationship tail и примеры агрессии.",
+    defaultContent: COLD_TAIL
+  },
+  aggression_checker: {
+    label: "AGGRESSION_CHECKER_PROMPT",
+    description: "Checker для Stage 2/4 после raw marker `агрессивно`.",
+    defaultContent: AGGRESSION_CHECKER_PROMPT
+  },
+  memory_summarizer: {
+    label: "MEMORY_SUMMARIZER_PROMPT",
+    description: "Summarizer для user memory cards.",
+    defaultContent: MEMORY_SUMMARIZER_PROMPT
+  },
+  relationship_evaluator: {
+    label: "RELATIONSHIP_EVALUATOR_PROMPT",
+    description: "Session evaluator для growth verdict A/B/V.",
+    defaultContent: RELATIONSHIP_EVALUATOR_PROMPT
+  }
+} as const;
+
+export type CorePromptKey = keyof typeof CORE_PROMPT_DEFINITIONS;
+
+export interface CorePromptTemplates {
+  commonCore: string;
+  relationshipTails: Record<Exclude<RelationshipState, "cold_lowest">, string>;
+  coldTail: string;
+  aggressionCheckerPrompt: string;
+  memorySummarizerPrompt: string;
+  relationshipEvaluatorPrompt: string;
+}
+
+export const CORE_PROMPT_KEYS = Object.keys(CORE_PROMPT_DEFINITIONS) as CorePromptKey[];
+
+export function isCorePromptKey(value: unknown): value is CorePromptKey {
+  return typeof value === "string" && value in CORE_PROMPT_DEFINITIONS;
+}
+
+export function getCorePromptDefaultContent(key: CorePromptKey) {
+  return CORE_PROMPT_DEFINITIONS[key].defaultContent;
+}
+
+export function buildCorePromptTemplates(
+  overrides: Partial<Record<CorePromptKey, string>> = {}
+): CorePromptTemplates {
+  return {
+    commonCore: overrides.common_core_base ?? COMMON_CORE_BASE,
+    relationshipTails: {
+      base: overrides.relationship_base ?? RELATIONSHIP_TAILS.base,
+      warm: overrides.relationship_warm ?? RELATIONSHIP_TAILS.warm,
+      close: overrides.relationship_close ?? RELATIONSHIP_TAILS.close,
+      teasing: overrides.relationship_teasing ?? RELATIONSHIP_TAILS.teasing,
+      sweet: overrides.relationship_sweet ?? RELATIONSHIP_TAILS.sweet,
+      serious: overrides.relationship_serious ?? RELATIONSHIP_TAILS.serious
+    },
+    coldTail: overrides.cold_tail ?? COLD_TAIL,
+    aggressionCheckerPrompt: overrides.aggression_checker ?? AGGRESSION_CHECKER_PROMPT,
+    memorySummarizerPrompt: overrides.memory_summarizer ?? MEMORY_SUMMARIZER_PROMPT,
+    relationshipEvaluatorPrompt: overrides.relationship_evaluator ?? RELATIONSHIP_EVALUATOR_PROMPT
+  };
+}
+
+export const DEFAULT_CORE_PROMPT_TEMPLATES = buildCorePromptTemplates();
+
+export function getCorePromptTemplateContent(templates: CorePromptTemplates, key: CorePromptKey) {
+  switch (key) {
+    case "common_core_base":
+      return templates.commonCore;
+    case "relationship_base":
+      return templates.relationshipTails.base;
+    case "relationship_warm":
+      return templates.relationshipTails.warm;
+    case "relationship_close":
+      return templates.relationshipTails.close;
+    case "relationship_teasing":
+      return templates.relationshipTails.teasing;
+    case "relationship_sweet":
+      return templates.relationshipTails.sweet;
+    case "relationship_serious":
+      return templates.relationshipTails.serious;
+    case "cold_tail":
+      return templates.coldTail;
+    case "aggression_checker":
+      return templates.aggressionCheckerPrompt;
+    case "memory_summarizer":
+      return templates.memorySummarizerPrompt;
+    case "relationship_evaluator":
+      return templates.relationshipEvaluatorPrompt;
+  }
+}
+
 const RELATIONSHIP_STATES = ["base", "warm", "close", "teasing", "sweet", "cold_lowest", "serious"] as const;
 
 export interface MemoryCardPromptPayload {
@@ -351,8 +479,11 @@ export function resolveRelationshipState(
   return "base";
 }
 
-export function resolveRelationshipTail(state: RelationshipState) {
-  return state === "cold_lowest" ? COLD_TAIL : RELATIONSHIP_TAILS[state];
+export function resolveRelationshipTail(
+  state: RelationshipState,
+  templates: CorePromptTemplates = DEFAULT_CORE_PROMPT_TEMPLATES
+) {
+  return state === "cold_lowest" ? templates.coldTail : templates.relationshipTails[state];
 }
 
 export function buildRestoredContextBlock(card: MemoryCardPromptPayload) {

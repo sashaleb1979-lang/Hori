@@ -1,6 +1,5 @@
 import type { Job } from "bullmq";
 
-import { RELATIONSHIP_EVALUATOR_PROMPT } from "@hori/core";
 import { asErrorMessage, normalizeWhitespace, type SessionJobPayload } from "@hori/shared";
 
 import type { WorkerRuntime } from "../index";
@@ -86,7 +85,8 @@ export function createSessionJob(runtime: WorkerRuntime) {
       return { skipped: true, reason: "session too small" };
     }
 
-    const prompt = RELATIONSHIP_EVALUATOR_PROMPT.replace("{session_messages}", formatSessionTranscript(sessionMessages));
+    const corePromptTemplates = await runtime.runtimeConfig.getCorePromptTemplates(job.data.guildId);
+    const prompt = corePromptTemplates.relationshipEvaluatorPrompt.replace("{session_messages}", formatSessionTranscript(sessionMessages));
     let verdict: "A" | "B" | "V" = "B";
 
     try {

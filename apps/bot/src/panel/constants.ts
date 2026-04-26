@@ -5,6 +5,7 @@ export const HORI_ACTION_PREFIX = "hori-action";
 export const HORI_STATE_PANEL_PREFIX = "hori-state";
 export const POWER_PANEL_PREFIX = "power-panel";
 export const LLM_PANEL_PREFIX = "llm-panel";
+export const CORE_PROMPT_PANEL_PREFIX = "core-prompt-panel";
 
 export const POWER_PROFILES = ["economy", "balanced", "expanded", "max"] as const;
 export const HORI_PANEL_TABS = ["main", "persona", "behavior", "memory", "channels", "llm", "system"] as const;

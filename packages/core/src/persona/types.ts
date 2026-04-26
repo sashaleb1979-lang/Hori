@@ -224,6 +224,8 @@ export interface PersonaDebugOverrides {
   isSelfInitiated?: boolean;
 }
 
+import type { CorePromptTemplates } from "./prompt-spec";
+
 export interface ComposeBehaviorPromptInput {
   personaConfig?: Partial<PersonaConfig>;
   guildSettings: PersonaSettings;
@@ -259,6 +261,7 @@ export interface ComposeBehaviorPromptInput {
   debugOverrides?: PersonaDebugOverrides;
   isDirectMessage?: boolean;
   contour?: "A" | "B" | "C";
+  corePromptTemplates?: CorePromptTemplates;
 }
 
 export interface ComposeBehaviorPromptOutput {

@@ -1,5 +1,6 @@
 import type { FeatureFlags, MessageEnvelope, PersonaSettings, RelationshipOverlay } from "@hori/shared";
 
+import type { CorePromptTemplates } from "./prompt-spec";
 import { composeBehaviorPrompt } from "./compose";
 import type { ComposeBehaviorPromptInput } from "./types";
 
@@ -63,11 +64,13 @@ export class PersonaService {
     guildSettings: PersonaSettings;
     moderatorOverlay?: { preferredStyle?: string | null; forbiddenTopics?: string[]; forbiddenWords?: string[] } | null;
     relationship?: RelationshipOverlay | null;
+    corePromptTemplates?: CorePromptTemplates;
   }) {
     return composeBehaviorPrompt({
       guildSettings: options.guildSettings,
       moderatorOverlay: options.moderatorOverlay,
       relationship: options.relationship,
+      corePromptTemplates: options.corePromptTemplates,
       featureFlags: defaultBehaviorFeatureFlags,
       message: fallbackMessage,
       intent: "chat",

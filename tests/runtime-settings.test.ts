@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  CORE_PROMPT_DEFINITIONS,
   OPENAI_EMBED_DIMENSIONS_SETTING_KEY,
   MEMORY_HYDE_SETTING_KEY,
   RuntimeConfigService
@@ -142,6 +143,74 @@ describe("runtime settings", () => {
       source: "runtime_setting",
       updatedBy: "owner-2",
       updatedAt
+    });
+  });
+
+  it("reads guild-scoped core prompt overrides", async () => {
+    const env = loadEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      LLM_PROVIDER: "openai"
+    });
+    const updatedAt = new Date("2026-04-26T11:00:00Z");
+    const prisma = {
+      runtimeSetting: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            key: "prompt.core.guild-1.common_core_base",
+            value: "Кастомный core prompt",
+            updatedBy: "owner-9",
+            updatedAt
+          }
+        ])
+      }
+    } as unknown as AppPrismaClient;
+    const service = new RuntimeConfigService(prisma, env);
+
+    const status = await service.getCorePromptTemplate("guild-1", "common_core_base");
+    const templates = await service.getCorePromptTemplates("guild-1");
+
+    expect(status).toEqual(expect.objectContaining({
+      key: "common_core_base",
+      source: "runtime_setting",
+      content: "Кастомный core prompt",
+      updatedBy: "owner-9",
+      updatedAt
+    }));
+    expect(templates.commonCore).toBe("Кастомный core prompt");
+    expect(templates.relationshipTails.base).toBe(CORE_PROMPT_DEFINITIONS.relationship_base.defaultContent);
+  });
+
+  it("persists and resets guild-scoped core prompt overrides", async () => {
+    const env = loadEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      LLM_PROVIDER: "openai"
+    });
+    const upsert = vi.fn().mockResolvedValue({});
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      runtimeSetting: {
+        findMany: vi.fn().mockResolvedValue([]),
+        upsert,
+        deleteMany
+      }
+    } as unknown as AppPrismaClient;
+    const service = new RuntimeConfigService(prisma, env);
+
+    await service.setCorePromptTemplate("guild-1", "common_core_base", "Новый core prompt", "owner-10");
+    await service.resetCorePromptTemplate("guild-1", "common_core_base");
+
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { key: "prompt.core.guild-1.common_core_base" },
+      create: expect.objectContaining({
+        key: "prompt.core.guild-1.common_core_base",
+        value: "Новый core prompt",
+        updatedBy: "owner-10"
+      })
+    }));
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { key: "prompt.core.guild-1.common_core_base" }
     });
   });
 

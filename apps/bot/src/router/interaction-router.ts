@@ -29,6 +29,13 @@ import {
   type RelationshipState,
   type StylePresetMode
 } from "@hori/shared";
+import {
+  CORE_PROMPT_DEFINITIONS,
+  CORE_PROMPT_KEYS,
+  getCorePromptDefaultContent,
+  isCorePromptKey,
+  type CorePromptKey
+} from "@hori/core";
 import { RelationshipService } from "@hori/memory";
 import {
   isModelRoutingModelId,
@@ -43,6 +50,7 @@ import {
 
 import type { BotRuntime } from "../bootstrap";
 import {
+  CORE_PROMPT_PANEL_PREFIX,
   HORI_ACTION_PREFIX,
   HORI_MODAL_PREFIX,
   HORI_PANEL_OWNER_ONLY_MESSAGE,
@@ -1303,6 +1311,11 @@ async function routeStringSelectInteraction(
   interaction: StringSelectMenuInteraction,
   isOwner: boolean
 ) {
+  if (interaction.customId.startsWith(`${CORE_PROMPT_PANEL_PREFIX}:`)) {
+    await handleCorePromptPanelSelect(runtime, interaction, isOwner);
+    return;
+  }
+
   if (interaction.customId.startsWith(`${LLM_PANEL_PREFIX}:`)) {
     await handleLlmPanelSelect(runtime, interaction, isOwner);
     return;
@@ -1431,6 +1444,70 @@ async function handleLlmPanelSelect(
 
     await interaction.reply({ content: "Неизвестный runtime control.", flags: MessageFlags.Ephemeral });
   }
+}
+
+async function handleCorePromptPanelSelect(
+  runtime: BotRuntime,
+  interaction: StringSelectMenuInteraction,
+  isOwner: boolean
+) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (!isOwner) {
+    await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const [, action] = interaction.customId.split(":");
+  if (action !== "select") {
+    await interaction.reply({ content: "Неизвестный select core prompt panel.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const selectedKey = isCorePromptKey(interaction.values[0]) ? interaction.values[0] : "common_core_base";
+  await interaction.update(await buildCorePromptPanelResponse(runtime, interaction.guildId, selectedKey));
+}
+
+async function handleCorePromptPanelButton(
+  runtime: BotRuntime,
+  interaction: ButtonInteraction,
+  isOwner: boolean
+) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (!isOwner) {
+    await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const [, action, rawKey] = interaction.customId.split(":");
+  const selectedKey = isCorePromptKey(rawKey) ? rawKey : "common_core_base";
+
+  if (action === "edit") {
+    await interaction.showModal(
+      buildCorePromptModal(await runtime.runtimeConfig.getCorePromptTemplate(interaction.guildId, selectedKey))
+    );
+    return;
+  }
+
+  if (action === "reset") {
+    await runtime.runtimeConfig.resetCorePromptTemplate(interaction.guildId, selectedKey);
+    await interaction.update(await buildCorePromptPanelResponse(runtime, interaction.guildId, selectedKey));
+    return;
+  }
+
+  if (action === "back") {
+    await interaction.update(buildHoriPanelResponse("persona", isOwner, hasManageGuild(interaction)));
+    return;
+  }
+
+  await interaction.reply({ content: "Неизвестная кнопка core prompt panel.", flags: MessageFlags.Ephemeral });
 }
 
 async function handleOwnerLockdownCommand(
@@ -1708,23 +1785,35 @@ async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubm
   }
 
   if (modalKind === "style") {
-    const [roughness, sarcasm, roast] = readNumberList(interaction.fields.getTextInputValue("levels"));
-    const [replyLength, preferredLanguage, interjectTendency] = readTextList(interaction.fields.getTextInputValue("replyLength"));
-    const [forbiddenWords, forbiddenTopics] = interaction.fields.getTextInputValue("forbidden").split("|").map((part) => part.trim());
-
     await interaction.reply({
       content: await runtime.slashAdmin.updateStyle(interaction.guildId, {
-        botName: blankToNull(interaction.fields.getTextInputValue("botName")),
-        roughnessLevel: readIntInRange(roughness, 0, 5) ?? null,
-        sarcasmLevel: readIntInRange(sarcasm, 0, 5) ?? null,
-        roastLevel: readIntInRange(roast, 0, 5) ?? null,
-        preferredLanguage: blankToNull(preferredLanguage ?? ""),
-        interjectTendency: readIntegerText(interjectTendency, 0, 5) ?? null,
-        replyLength: parseReplyLengthSelection(replyLength),
-        preferredStyle: blankToNull(interaction.fields.getTextInputValue("preferredStyle")),
-        forbiddenWords: blankToNull(forbiddenWords ?? ""),
-        forbiddenTopics: blankToNull(forbiddenTopics ?? "")
+        preferredStyle: blankToNull(interaction.fields.getTextInputValue("preferredStyle"))
       }),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (modalKind === "core-prompt") {
+    const promptKey = channelIdFromModal;
+
+    if (!promptKey || !isCorePromptKey(promptKey)) {
+      await interaction.reply({ content: "Неизвестный core prompt.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const updated = await runtime.runtimeConfig.setCorePromptTemplate(
+      interaction.guildId,
+      promptKey,
+      interaction.fields.getTextInputValue("content"),
+      interaction.user.id
+    );
+    await interaction.reply({
+      content: [
+        `Сохранён ${updated.label}.`,
+        `source=${updated.source}`,
+        updated.updatedAt ? `updated=${updated.updatedAt.toISOString()}` : null
+      ].filter(Boolean).join("\n"),
       flags: MessageFlags.Ephemeral
     });
     return;
@@ -1745,6 +1834,11 @@ async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubm
 }
 
 async function routeButtonInteraction(runtime: BotRuntime, interaction: ButtonInteraction, isOwner: boolean) {
+  if (interaction.customId.startsWith(`${CORE_PROMPT_PANEL_PREFIX}:`)) {
+    await handleCorePromptPanelButton(runtime, interaction, isOwner);
+    return;
+  }
+
   if (interaction.customId.startsWith(`${HORI_ACTION_PREFIX}:`)) {
     await handleHoriPanelAction(runtime, interaction, isOwner, hasManageGuild(interaction));
     return;
@@ -1866,6 +1960,11 @@ async function handleHoriPanelAction(
 
   if (action === "llm_panel") {
     await interaction.update(await buildLlmPanelResponse(runtime, "chat", interaction.guildId));
+    return;
+  }
+
+  if (action === "core_prompt_panel") {
+    await interaction.update(await buildCorePromptPanelResponse(runtime, interaction.guildId, "common_core_base"));
     return;
   }
 
@@ -2169,7 +2268,7 @@ function buildHoriPanelEmbed(tab: HoriPanelTab, isOwner: boolean, isModerator: b
 
   const tabText: Record<HoriPanelTab, string> = {
     main: "Быстрый доступ к статусу, помощи, поиску, очереди и профилю. Отсюда можно перейти в любой раздел.",
-    persona: "Настройки персоны: имя, стиль, roughness/sarcasm/roast, длина ответов, mood и запреты. Живой preset для быстрого сброса.",
+    persona: "Пока здесь только живые вещи для chat path: текст чата и редактор V5 core prompt-ов. Остальное временно убрано из панели.",
     behavior: "Активность бота: чтение чата, auto-interject, reply queue, natural message splitting, media reactions.",
     memory: "Всё про память: Active Memory, hybrid recall, memory-build, topic engine, album, reflection, профили людей и отношения.",
     channels: "Каналы: policy, mute, reply length override, topic tags, поиск, summary. Web search и link understanding тоже тут.",
@@ -2329,17 +2428,8 @@ function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boo
       { id: "memory_self", label: "Моя память", emoji: "💭" }
     ],
     persona: [
-      { id: "style_status", label: "Snapshot", emoji: "📋", style: ButtonStyle.Primary },
-      { id: "style_edit_modal", label: "Редактор", emoji: "✏️", modOnly: true, style: ButtonStyle.Primary },
-      { id: "style_default", label: "Живой preset", emoji: "🔄", modOnly: true },
-      { id: "mood_playful", label: "Playful", emoji: "🎉", modOnly: true },
-      { id: "mood_normal", label: "Normal", emoji: "😐", modOnly: true },
-      featureAction("playful_mode_enabled", true, "Playful ON", { emoji: "✅", modOnly: true }),
-      featureAction("playful_mode_enabled", false, "Playful OFF", { emoji: "❌", modOnly: true }),
-      featureAction("irritated_mode_enabled", true, "Irritated ON", { emoji: "✅", modOnly: true }),
-      featureAction("irritated_mode_enabled", false, "Irritated OFF", { emoji: "❌", modOnly: true }),
-      featureAction("roast", true, "Roast ON", { emoji: "✅", modOnly: true }),
-      featureAction("roast", false, "Roast OFF", { emoji: "❌", modOnly: true })
+      { id: "style_edit_modal", label: "Текст чата", emoji: "✏️", modOnly: true, style: ButtonStyle.Primary },
+      { id: "core_prompt_panel", label: "Core prompts", emoji: "🧩", ownerOnly: true, style: ButtonStyle.Primary }
     ],
     behavior: [
       { id: "read_chat_on", label: "Читать чат", emoji: "📖", modOnly: true, style: ButtonStyle.Primary },
@@ -2464,7 +2554,7 @@ function inferTabForHoriAction(action: string): HoriPanelTab {
   if (action.startsWith("search") || action.startsWith("channel") || action === "read_chat_on" || action === "read_chat_off" || action.startsWith("topic") || action.startsWith("queue") || action === "summary_current") return "channels";
   if (action.startsWith("llm")) return "llm";
   if (action.startsWith("lockdown") || action === "power_panel" || action === "state_panel" || action === "ai_url_modal" || action.startsWith("debug") || action === "feature_status" || action === "stats_week" || action.startsWith("state_")) return "system";
-  if (action.startsWith("style") || action.startsWith("mood")) return "persona";
+  if (action === "core_prompt_panel" || action.startsWith("style") || action.startsWith("mood")) return "persona";
   if (action.startsWith("natural") || action === "media_list" || action === "media_sync") return "behavior";
   return "main";
 }
@@ -2480,6 +2570,7 @@ function horiActionTitle(action: string) {
     help: "Help",
     search_query_modal: "Поиск",
     style_status: "Persona snapshot",
+    core_prompt_panel: "Core prompts",
     profile_self: "Мой профиль",
     memory_self: "Моя память",
     relationship_self: "Отношение ко мне",
@@ -2707,7 +2798,7 @@ function buildLlmPanelRows(
     embedDimensions?: number;
   }
 ) {
-  const runtimeOptions = [
+  const runtimeOptions: Array<{ label: string; value: string; description: string; default?: boolean }> = [
     {
       label: runtime.hydeEnabled ? "HyDE: OFF" : "HyDE: ON",
       value: runtime.hydeEnabled ? "hyde:off" : "hyde:on",
@@ -2719,16 +2810,19 @@ function buildLlmPanelRows(
       description: "Return HyDE to env default"
     },
     ...(runtime.supportsEmbeddingDimensions
-      ? SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS.map((dimensions) => ({
-          label: `Embeddings: ${dimensions} dims`,
-          value: `embed:${dimensions}`,
-          description: runtime.embedDimensions === dimensions ? "Current runtime value" : "Set live OpenAI embedding dimensions",
-          default: runtime.embedDimensions === dimensions
-        })).concat({
+      ? [
+          ...SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS.map((dimensions) => ({
+            label: `Embeddings: ${dimensions} dims`,
+            value: `embed:${dimensions}`,
+            description: runtime.embedDimensions === dimensions ? "Current runtime value" : "Set live OpenAI embedding dimensions",
+            default: runtime.embedDimensions === dimensions
+          })),
+          {
           label: "Embeddings: reset",
           value: "embed:reset",
           description: "Return embedding dimensions to env default"
-        })
+          }
+        ]
       : [])
   ];
 
@@ -2870,6 +2964,96 @@ async function buildLlmTelemetry(runtime: BotRuntime, guildId: string) {
     "7d:",
     week || "нет данных"
   ].join("\n"), 1000);
+}
+
+async function buildCorePromptPanelResponse(
+  runtime: BotRuntime,
+  guildId: string,
+  selectedKey: CorePromptKey
+) {
+  const templates = await runtime.runtimeConfig.listCorePromptTemplates(guildId);
+  const selected = templates.find((entry) => entry.key === selectedKey) ?? templates[0];
+  const overriddenCount = templates.filter((entry) => entry.source === "runtime_setting").length;
+  const lines = templates.map((entry) => {
+    const marker = entry.key === selected.key ? ">" : " ";
+    const source = entry.source === "runtime_setting" ? "override" : "default";
+    return `${marker} ${entry.label} · ${source}`;
+  });
+
+  return {
+    content: "",
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("🧩 Hori Core Prompts")
+        .setColor(0xEB459E)
+        .setDescription([
+          "Редактируется только то, что реально участвует в V5 core prompt-ах.",
+          "Chat payload сейчас идёт как один system prompt + реальные сообщения чата.",
+          `Guild: \`${guildId}\` · overrides: ${overriddenCount}/${templates.length}`
+        ].join("\n"))
+        .addFields(
+          {
+            name: "Prompt list",
+            value: clipFieldText(lines.join("\n"))
+          },
+          {
+            name: `${selected.label} · ${selected.source === "runtime_setting" ? "override" : "default"}`,
+            value: clipFieldText([
+              selected.description,
+              "",
+              selected.updatedAt ? `updated=${selected.updatedAt.toISOString()}${selected.updatedBy ? ` by ${selected.updatedBy}` : ""}` : "using built-in default",
+              "",
+              selected.content
+            ].join("\n"), 1024)
+          }
+        )
+    ],
+    components: buildCorePromptPanelRows(selected)
+  };
+}
+
+function buildCorePromptPanelRows(selected: {
+  key: CorePromptKey;
+  source: "default" | "runtime_setting";
+}) {
+  return [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:select`)
+        .setPlaceholder("Выбери core prompt")
+        .addOptions(
+          ...CORE_PROMPT_KEYS.map((key) => ({
+            label: CORE_PROMPT_DEFINITIONS[key].label,
+            value: key,
+            description: CORE_PROMPT_DEFINITIONS[key].description.slice(0, 100),
+            default: key === selected.key
+          }))
+        )
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:edit:${selected.key}`)
+        .setLabel("Edit")
+        .setEmoji("✏️")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:reset:${selected.key}`)
+        .setLabel("Reset")
+        .setEmoji("↺")
+        .setDisabled(selected.source !== "runtime_setting")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:back:${selected.key}`)
+        .setLabel("Persona")
+        .setEmoji("🎭")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${HORI_ACTION_PREFIX}:panel_home`)
+        .setLabel("Panel")
+        .setEmoji("🏠")
+        .setStyle(ButtonStyle.Secondary)
+    )
+  ];
 }
 
 function extractTraceLlmCalls(debugTrace: unknown) {
@@ -3177,6 +3361,31 @@ function buildSearchModal() {
   return modal;
 }
 
+function buildCorePromptModal(current: {
+  key: CorePromptKey;
+  label: string;
+  content: string;
+}) {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:core-prompt:${current.key}`)
+    .setTitle(current.label.slice(0, 45));
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("content")
+        .setLabel("Текст prompt")
+        .setPlaceholder(getCorePromptDefaultContent(current.key).slice(0, 100))
+        .setRequired(true)
+        .setValue(current.content)
+        .setMaxLength(4000)
+        .setStyle(TextInputStyle.Paragraph)
+    )
+  );
+
+  return modal;
+}
+
 function buildRelationshipModal() {
   const modal = new ModalBuilder()
     .setCustomId(`${HORI_MODAL_PREFIX}:relationship`)
@@ -3253,69 +3462,21 @@ function buildDossierModal() {
 }
 
 function buildStyleModal(current?: {
-  botName: string;
-  preferredLanguage: string;
-  roughnessLevel: number;
-  sarcasmLevel: number;
-  roastLevel: number;
-  interjectTendency: number;
-  replyLength: string;
   preferredStyle: string;
-  forbiddenWords: string[];
-  forbiddenTopics: string[];
 }) {
   const modal = new ModalBuilder()
     .setCustomId(`${HORI_MODAL_PREFIX}:style`)
-    .setTitle("Style editor");
+    .setTitle("Текст чата");
 
   modal.addComponents(
     new ActionRowBuilder<TextInputBuilder>().addComponents(
       new TextInputBuilder()
-        .setCustomId("botName")
-        .setLabel("Имя")
-        .setPlaceholder("Хори")
-        .setRequired(false)
-        .setValue(current?.botName ?? "")
-        .setMaxLength(40)
-        .setStyle(TextInputStyle.Short)
-    ),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder()
-        .setCustomId("levels")
-        .setLabel("roughness,sarcasm,roast")
-        .setPlaceholder("2,3,2")
-        .setRequired(false)
-        .setValue(current ? `${current.roughnessLevel},${current.sarcasmLevel},${current.roastLevel}` : "")
-        .setMaxLength(30)
-        .setStyle(TextInputStyle.Short)
-    ),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder()
-        .setCustomId("replyLength")
-        .setLabel("replyLength,language,interject")
-        .setPlaceholder("short,ru,1")
-        .setRequired(false)
-        .setValue(current ? `${current.replyLength},${current.preferredLanguage},${current.interjectTendency}` : "")
-        .setMaxLength(20)
-        .setStyle(TextInputStyle.Short)
-    ),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder()
         .setCustomId("preferredStyle")
-        .setLabel("Стиль")
+        .setLabel("Текст для chat path")
+        .setPlaceholder("Коротко опиши, как Хори должна звучать в обычном чате.")
         .setRequired(false)
         .setValue(current?.preferredStyle ?? "")
         .setMaxLength(900)
-        .setStyle(TextInputStyle.Paragraph)
-    ),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder()
-        .setCustomId("forbidden")
-        .setLabel("forbiddenWords | forbiddenTopics")
-        .setPlaceholder("слово1,слово2 | тема1,тема2")
-        .setRequired(false)
-        .setValue(current ? `${current.forbiddenWords.join(", ")} | ${current.forbiddenTopics.join(", ")}` : "")
-        .setMaxLength(400)
         .setStyle(TextInputStyle.Paragraph)
     )
   );
