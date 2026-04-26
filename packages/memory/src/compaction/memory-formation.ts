@@ -10,7 +10,7 @@ const maxCandidatesPerDecision = 30;
 const maxFactsPerRun = 12;
 const semanticDedupSearchLimit = 5;
 const semanticDedupMinScore = 0.82;
-const semanticDedupRewriteDeltaChars = 18;
+const semanticDedupRewriteDeltaChars = 15;
 
 export type MemoryScope = "server" | "user" | "channel" | "event";
 export type FormationActionEvent = "ADD" | "UPDATE" | "DELETE" | "NOOP";
@@ -765,10 +765,16 @@ export class MemoryFormationService {
 
       const existing = batchDeduplicated[duplicate.index]!;
       if (shouldPreferBatchCandidate(action, existing)) {
+        const replaced = existing;
         batchDeduplicated[duplicate.index] = {
           ...action,
           reason: appendReason(action.reason, `batch_semantic_dedup_replaced:${duplicate.score.toFixed(2)}`),
         };
+        batchDeduplicated.push({
+          ...replaced,
+          event: "NOOP",
+          reason: appendReason(replaced.reason, `batch_semantic_duplicate:${duplicate.score.toFixed(2)}`),
+        });
         continue;
       }
 
@@ -1098,6 +1104,9 @@ function normalizeMemoryKey(value: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 64);
 
+  return key;
+}
+
 
 function appendReason(current: string | undefined, suffix: string) {
   return current ? `${current}; ${suffix}` : suffix;
@@ -1184,7 +1193,6 @@ function countSharedTokens(left: Set<string>, right: Set<string>) {
     }
   }
   return shared;
-}
 }
 
 function fallbackCompaction(messages: readonly FormationMessage[]): string {

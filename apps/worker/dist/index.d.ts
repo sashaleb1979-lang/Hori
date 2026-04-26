@@ -2,7 +2,7 @@ import { AnalyticsQueryService } from '@hori/analytics';
 import { loadEnv } from '@hori/config';
 import { RuntimeConfigService } from '@hori/core';
 import { LlmClient, ModelRouter, EmbeddingAdapter } from '@hori/llm';
-import { SummaryService, ProfileService, RetrievalService, TopicService } from '@hori/memory';
+import { SummaryService, ProfileService, RetrievalService, RelationshipService, TopicService } from '@hori/memory';
 import { SearchCacheService } from '@hori/search';
 import { createLogger, createPrismaClient, createRedisClient, createAppQueues } from '@hori/shared';
 
@@ -16,6 +16,7 @@ interface WorkerRuntime {
     summaryService: SummaryService;
     profileService: ProfileService;
     retrievalService: RetrievalService;
+    relationshipService: RelationshipService;
     topicService: TopicService;
     searchCache: SearchCacheService;
     runtimeConfig: RuntimeConfigService;

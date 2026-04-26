@@ -169,8 +169,7 @@ export class AiRouterClient implements LlmClient {
 
       try {
         const response = await this.sendWithRetry(provider, {
-          openaiCooldownMs: env.AI_ROUTER_OPENAI_COOLDOWN_MS,
-          reservationTtlMs: Math.max(env.OLLAMA_TIMEOUT_MS * 2, 5 * 60 * 1000),
+          ...options,
           model: attempt.model,
           metadata: {
             ...options.metadata,
@@ -292,8 +291,14 @@ export class AiRouterClient implements LlmClient {
       activeOrder: this.describeActiveOrder(),
       cooldowns,
       geminiUsage: {
-        flash: { used: geminiFlash?.requestsToday ?? 0, limit: geminiFlash?.dailyLimit },
-        pro: { used: geminiPro?.requestsToday ?? 0, limit: geminiPro?.dailyLimit }
+        flash: {
+          used: geminiFlash?.requestsToday ?? 0,
+          limit: geminiFlash?.dailyLimit ?? this.env.AI_ROUTER_GEMINI_FLASH_DAILY_LIMIT
+        },
+        pro: {
+          used: geminiPro?.requestsToday ?? 0,
+          limit: geminiPro?.dailyLimit ?? this.env.AI_ROUTER_GEMINI_PRO_DAILY_LIMIT
+        }
       },
       embeddings: {
         provider: "openai",

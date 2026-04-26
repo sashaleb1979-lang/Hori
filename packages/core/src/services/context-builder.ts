@@ -325,8 +325,8 @@ export class ContextBuilderService {
     const recentMessages = relevant.has("recent_messages") ? uniqueRecentMessages(bundle) : [];
     let rankedRecentMessages = scoreRecentMessages(recentMessages, {
       queryTokens,
-      replyChainIds: new Set(bundle.replyChain.map((message) => message.id).filter(Boolean)),
-      topicWindowIds: new Set(bundle.topicWindow.map((message) => message.id).filter(Boolean)),
+      replyChainIds: new Set(bundle.replyChain.map((message) => message.id).filter((id): id is string => Boolean(id))),
+      topicWindowIds: new Set(bundle.topicWindow.map((message) => message.id).filter((id): id is string => Boolean(id))),
       activeTopic: bundle.activeTopic?.summaryShort,
     });
     let activeWarmSections = [...warmSections].sort((left, right) => (right.priorityScore ?? 0) - (left.priorityScore ?? 0));

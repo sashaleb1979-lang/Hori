@@ -35,6 +35,7 @@ describe("emotion media decision", () => {
         mediaAutoGlobalCooldownSec: 7200,
         mediaAutoMinConfidence: 0.82,
         mediaAutoMinIntensity: 0.62,
+        memoryHydeEnabled: false,
         memoryMode: "OFF",
         relationshipGrowthMode: "OFF",
         stylePresetMode: "manual_only",

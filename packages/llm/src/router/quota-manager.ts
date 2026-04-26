@@ -13,7 +13,7 @@ export const GEMINI_RESET_TIMEZONE = "America/Los_Angeles";
 export const UTC_RESET_TIMEZONE = "UTC";
 
 const DEFAULT_GEMINI_COOLDOWN_MS = 15 * 60 * 1000;
-const DEFAULT_TRANSIENT_COOLDOWN_MS = 60 * 1000;
+const DEFAULT_TRANSIENT_COOLDOWN_MS = 1000;
 const MAX_TRANSIENT_COOLDOWN_MS = 15 * 60 * 1000;
 const DEFAULT_RESERVATION_TTL_MS = 10 * 60 * 1000;
 
@@ -96,17 +96,13 @@ export class AiRouterQuotaManager {
       const resetAt = policy.resetTimeZone ? getNextResetAt(now, policy.resetTimeZone) : undefined;
 
       if (policy.dailyLimit !== undefined && effectiveRequestsToday >= policy.dailyLimit) {
-        if (!modelState.cooldownUntil || new Date(modelState.cooldownUntil) < now) {
-          modelState.cooldownUntil = resetAt?.toISOString();
-        }
-
         result = {
           allowed: false,
           reason: "daily_limit_reached",
           requestsToday: modelState.requestsToday,
           dailyLimit: policy.dailyLimit,
           remainingToday: 0,
-          cooldownUntil: modelState.cooldownUntil,
+          cooldownUntil: resetAt?.toISOString(),
           resetAt: resetAt?.toISOString(),
           recentFailureCount: modelState.recentFailureCount
         };
@@ -181,17 +177,13 @@ export class AiRouterQuotaManager {
       }
 
       if (policy.dailyLimit !== undefined && effectiveRequestsToday >= policy.dailyLimit) {
-        if (!modelState.cooldownUntil || new Date(modelState.cooldownUntil) < now) {
-          modelState.cooldownUntil = resetAt?.toISOString();
-        }
-
         result = {
           allowed: false,
           reason: "daily_limit_reached",
           requestsToday: modelState.requestsToday,
           dailyLimit: policy.dailyLimit,
           remainingToday: 0,
-          cooldownUntil: modelState.cooldownUntil,
+          cooldownUntil: resetAt?.toISOString(),
           resetAt: resetAt?.toISOString(),
           recentFailureCount: modelState.recentFailureCount
         };

@@ -59,7 +59,7 @@ export function evaluateSelectiveEngagement(input: SelectiveEngagementInput): Se
     triggers.push("group_opinion");
   }
 
-  if (/(кто прав|я прав|она права|он прав|они правы)/iu.test(lower)) {
+  if (/(кто\s+(?:\S+\s+)?прав|я прав|она права|он прав|они правы)/iu.test(lower)) {
     score += 0.7;
     triggers.push("conflict_opinion");
   }

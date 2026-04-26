@@ -37,7 +37,9 @@ export function createRuntimeLlmClient(
     client: new AiRouterClient(env, logger, {
       stateStore: {
         getState: () => runtimeConfig.getAiRouterState(),
-        setState: (state) => runtimeConfig.setAiRouterState(state),
+        setState: async (state) => {
+          await runtimeConfig.setAiRouterState(state);
+        },
         updateState: (updater) => runtimeConfig.updateAiRouterState(updater)
       }
     }),

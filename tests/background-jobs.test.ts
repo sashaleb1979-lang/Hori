@@ -21,6 +21,7 @@ describe("enqueueBackgroundJobs", () => {
         profile: createQueue(),
         embedding: createQueue(),
         topic: createQueue(),
+        conversationAnalysis: createQueue(),
         session: createQueue()
       },
       logger: {
@@ -41,7 +42,7 @@ describe("enqueueBackgroundJobs", () => {
       .map((entry) => entry.jobId)
       .filter((value): value is string => Boolean(value));
 
-    expect(jobIds).toHaveLength(5);
+    expect(jobIds).toHaveLength(6);
     expect(jobIds.every((value) => !value.includes(":"))).toBe(true);
   });
 });

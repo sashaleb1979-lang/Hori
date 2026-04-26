@@ -15,7 +15,10 @@ describe("RuntimeConfigService ai router state", () => {
     const serviceMissing = new RuntimeConfigService(missingState.prisma, createEnv());
     const serviceInvalid = new RuntimeConfigService(invalidState.prisma, createEnv());
 
-    await expect(serviceMissing.getAiRouterState()).resolves.toEqual(createEmptyAiRouterState());
+    const missing = await serviceMissing.getAiRouterState();
+    expect(missing.providers).toEqual({});
+    expect(missing.recentRoutes).toEqual([]);
+    expect(typeof missing.updatedAt).toBe("string");
 
     const invalid = await serviceInvalid.getAiRouterState();
     expect(invalid.providers).toEqual({});
@@ -55,10 +58,28 @@ describe("RuntimeConfigService ai router state", () => {
     expect(prismaState.tx.runtimeSetting.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { key: AI_ROUTER_STATE_SETTING_KEY },
       data: expect.objectContaining({
-        value: JSON.stringify(state),
         updatedBy: "owner-1"
       })
     }));
+
+    const storedValue = prismaState.tx.runtimeSetting.update.mock.calls[0]?.[0]?.data?.value;
+    expect(JSON.parse(storedValue)).toEqual({
+      providers: {
+        gemini: {
+          fallbackCount: 1,
+          models: {
+            "gemini-2.5-flash": {
+              requestsToday: 7,
+              windowKey: "2026-04-21",
+              recentFailureCount: 0,
+              reservations: {}
+            }
+          }
+        }
+      },
+      recentRoutes: [],
+      updatedAt: "2026-04-21T10:00:00.000Z"
+    });
     expect(invalidateSpy).not.toHaveBeenCalled();
   });
 

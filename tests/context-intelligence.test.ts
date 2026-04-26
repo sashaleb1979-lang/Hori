@@ -160,7 +160,7 @@ describe("context intelligence", () => {
         { id: "m2", author: "b", userId: "b", content: "ключевая реплика", createdAt: new Date("2026-04-12T09:59:30Z") }
       ],
       serverMemories: [
-        { key: "old-politics", value: "Это старая длинная серверная память, которая должна отвалиться раньше локальной continuity при tight budget.", type: "note", score: 0.7 }
+        { key: "old-politics", value: "Это старая длинная серверная память, которая должна отвалиться раньше локальной continuity при tight budget.", type: "note" }
       ]
     };
     const result = service.buildPromptContext(tightBundle, {
@@ -176,6 +176,9 @@ describe("context intelligence", () => {
     expect(result.contextText).not.toContain("[WARM CONTEXT SUPPORT]");
     expect(result.contextText).not.toContain("Долгая память сервера");
     expect(result.contextText).not.toContain("[ENTITY MEMORY]");
+    if (result.trace.version !== "v2") {
+      throw new Error("expected v2 context trace");
+    }
     expect(result.trace.truncation?.droppedWarmSections).toBeGreaterThan(0);
     expect(result.memoryLayers).toContain("reply_chain");
     expect(result.memoryLayers).toContain("active_topic");
@@ -188,7 +191,7 @@ describe("context intelligence", () => {
     const richBundle: ContextBundleV2 = {
       ...bundle,
       serverMemories: [
-        { key: "old-politics", value: "Это старая серверная память, которая нужна для explicit explanation, но не для обычного вопроса.", type: "note", score: 0.7 }
+        { key: "old-politics", value: "Это старая серверная память, которая нужна для explicit explanation, но не для обычного вопроса.", type: "note" }
       ]
     };
     const result = service.buildPromptContext(richBundle, {
@@ -231,6 +234,9 @@ describe("context intelligence", () => {
     expect(result.contextText).toContain("[ACTIVE TOPIC]");
     expect(result.contextText).toContain("Ключевые зацепки: налоги");
     expect(result.contextText).not.toContain("оффтоп про кино и музыку");
+    if (result.trace.version !== "v2") {
+      throw new Error("expected v2 context trace");
+    }
     expect(result.trace.truncation?.droppedRecentMessages).toBeGreaterThanOrEqual(0);
   });
 
@@ -239,13 +245,10 @@ describe("context intelligence", () => {
     const richBundle: ContextBundleV2 = {
       ...bundle,
       userProfile: {
-        userId: "user",
-        guildId: "guild",
         summaryShort: "любит спорить и душнить",
         styleTags: ["dry"],
         topicTags: ["politics"],
-        confidenceScore: 0.8,
-        isEligible: true
+        confidenceScore: 0.8
       },
       relationship: {
         toneBias: "friendly",
@@ -298,13 +301,10 @@ describe("context intelligence", () => {
     const richBundle: ContextBundleV2 = {
       ...bundle,
       userProfile: {
-        userId: "user",
-        guildId: "guild",
         summaryShort: "любит спорить и душнить",
         styleTags: ["dry"],
         topicTags: ["politics"],
-        confidenceScore: 0.8,
-        isEligible: true
+        confidenceScore: 0.8
       },
       relationship: {
         toneBias: "friendly",

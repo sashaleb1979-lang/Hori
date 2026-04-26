@@ -1,22 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { defaultRuntimeTuning, type AppEnv } from "@hori/config";
+import { ModelRouter, resolveModelRouting } from "@hori/llm";
 
-const { memoryFormationCtor, runFormation } = vi.hoisted(() => {
-  const runFormationMock = vi.fn(async () => undefined);
-  const ctor = vi.fn().mockImplementation(() => ({ runFormation: runFormationMock }));
+import { createProfileJob } from "../apps/worker/src/jobs/profiles";
 
-  return {
-    memoryFormationCtor: ctor,
-    runFormation: runFormationMock
-  };
+const { memoryFormationCtor, runFormation, MockMemoryFormationService } = vi.hoisted(() => {
+  const runFormation = vi.fn(async () => undefined);
+  const memoryFormationCtor = vi.fn();
+
+  class MockMemoryFormationService {
+    runFormation = runFormation;
+
+    constructor(...args: unknown[]) {
+      memoryFormationCtor(...args);
+    }
+  }
+
+  return { memoryFormationCtor, runFormation, MockMemoryFormationService };
 });
 
 vi.mock("@hori/memory", () => ({
-  MemoryFormationService: memoryFormationCtor
+  MemoryFormationService: MockMemoryFormationService
 }));
-
-import { createProfileJob } from "../apps/worker/src/jobs/profiles";
 
 const env = {
   ...defaultRuntimeTuning,
@@ -48,7 +54,7 @@ const env = {
   BRAVE_SEARCH_API_KEY: undefined,
   CFG: undefined,
   QUIET_HOURS_ENABLED: true
-} as AppEnv;
+} as unknown as AppEnv;
 
 describe("createProfileJob", () => {
   beforeEach(() => {
@@ -59,7 +65,7 @@ describe("createProfileJob", () => {
   it("passes runtime embedding dimensions into memory formation", async () => {
     const runtimeSettings = {
       modelRouting: { slots: { memory: "gpt-5.4-nano" } },
-      openaiEmbedDimensions: 512,
+      openaiEmbedDimensions: 512
     };
     const runtime = {
       env,
@@ -101,10 +107,10 @@ describe("createProfileJob", () => {
       summaryService: {
         getRecentSummaries: vi.fn(async () => [])
       }
-    } as never;
+    } as unknown as Parameters<typeof createProfileJob>[0];
 
     const handler = createProfileJob(runtime);
-    await handler({ data: { guildId: "guild-1", userId: "user-1" }, id: "job-1" } as never);
+    await handler({ data: { guildId: "guild-1", userId: "user-1" }, id: "job-1" } as unknown as never);
 
     expect(runtime.modelRouter.pickEmbeddingModel).toHaveBeenCalledWith({ dimensions: 512 });
     expect(memoryFormationCtor).toHaveBeenCalledWith(
@@ -119,77 +125,6 @@ describe("createProfileJob", () => {
       512
     );
     expect(runFormation).toHaveBeenCalledTimes(1);
-  });
-});import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import { defaultRuntimeTuning, type AppEnv } from "@hori/config";
-import { ModelRouter, resolveModelRouting } from "@hori/llm";
-
-const { memoryFormationCtor, runFormation, MockMemoryFormationService } = vi.hoisted(() => {
-  const runFormation = vi.fn(async () => ({
-    extractedFacts: 0,
-    added: 0,
-    updated: 0,
-    deleted: 0,
-    skipped: 0,
-    compactedSummary: "",
-    facts: [],
-    actions: []
-  }));
-  const memoryFormationCtor = vi.fn();
-
-  class MockMemoryFormationService {
-    runFormation = runFormation;
-
-    constructor(...args: unknown[]) {
-      memoryFormationCtor(...args);
-    }
-  }
-
-  return { memoryFormationCtor, runFormation, MockMemoryFormationService };
-});
-
-vi.mock("@hori/memory", () => ({
-  MemoryFormationService: MockMemoryFormationService
-}));
-
-import { createProfileJob } from "../apps/worker/src/jobs/profiles";
-
-const env = {
-  ...defaultRuntimeTuning,
-  NODE_ENV: "test",
-  LOG_LEVEL: "info",
-  DISCORD_OWNER_IDS: [],
-  BOT_NAME: "Хори",
-  BOT_DEFAULT_LANGUAGE: "ru",
-  API_HOST: "0.0.0.0",
-  API_PORT: 3000,
-  API_ADMIN_TOKEN: "test",
-  DATABASE_URL: "postgresql://user:pass@localhost:5432/hori",
-  REDIS_URL: "redis://localhost:6379",
-  LLM_PROVIDER: "openai",
-  OLLAMA_BASE_URL: undefined,
-  OLLAMA_FAST_MODEL: "fast",
-  OLLAMA_SMART_MODEL: "smart",
-  OLLAMA_EMBED_MODEL: "embed",
-  OLLAMA_TIMEOUT_MS: 45000,
-  OLLAMA_LOG_TRAFFIC: false,
-  OLLAMA_LOG_PROMPTS: false,
-  OLLAMA_LOG_RESPONSES: false,
-  OLLAMA_LOG_MAX_CHARS: 12000,
-  OPENAI_API_KEY: "test",
-  OPENAI_CHAT_MODEL: "gpt-5.4-nano",
-  OPENAI_SMART_MODEL: "gpt-5.4-nano",
-  OPENAI_EMBED_MODEL: "text-embedding-3-small",
-  OPENAI_EMBED_DIMENSIONS: 768,
-  BRAVE_SEARCH_API_KEY: undefined,
-  CFG: undefined
-} as AppEnv;
-
-describe("profile job", () => {
-  beforeEach(() => {
-    memoryFormationCtor.mockClear();
-    runFormation.mockClear();
   });
 
   it("passes runtime embedding dimensions into memory formation follow-up", async () => {
@@ -247,7 +182,7 @@ describe("profile job", () => {
       logger: {
         warn: vi.fn()
       }
-    } as never;
+    } as unknown as Parameters<typeof createProfileJob>[0];
 
     const job = createProfileJob(runtime);
 
@@ -257,7 +192,7 @@ describe("profile job", () => {
         guildId: "guild-1",
         userId: "user-1"
       }
-    } as never);
+    } as unknown as never);
 
     expect(memoryFormationCtor).toHaveBeenCalledTimes(1);
     expect(memoryFormationCtor).toHaveBeenCalledWith(

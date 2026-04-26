@@ -114,6 +114,8 @@ function createRouter(providers: Record<string, ChatProvider>) {
     REDIS_URL: "redis://localhost:6379",
     AI_PROVIDER: "router",
     GOOGLE_API_KEY: "google-key",
+    AI_ROUTER_GEMINI_FLASH_DAILY_LIMIT: "250",
+    AI_ROUTER_GEMINI_PRO_DAILY_LIMIT: "100",
     CF_ACCOUNT_ID: "cf-account",
     CF_API_TOKEN: "cf-token",
     GITHUB_TOKEN: "gh-token",

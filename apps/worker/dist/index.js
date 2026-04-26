@@ -22,7 +22,7 @@ var import_core = require("@hori/core");
 var import_llm4 = require("@hori/llm");
 var import_memory3 = require("@hori/memory");
 var import_search = require("@hori/search");
-var import_shared6 = require("@hori/shared");
+var import_shared7 = require("@hori/shared");
 
 // src/jobs/cleanup.ts
 function createCleanupJob(runtime) {
@@ -58,10 +58,183 @@ function createCleanupJob(runtime) {
   };
 }
 
+// src/jobs/conversation-analysis.ts
+var ANALYSIS_WINDOW_MESSAGES = 30;
+var MAX_BIO_NOTES_PER_USER = 20;
+function buildAnalysisPrompt(messages, existingBio, existingRelationship) {
+  const chatLog = messages.map((m) => `[${m.isBot ? "\u0425\u043E\u0440\u0438" : m.author}] ${m.content}`).join("\n");
+  const bioSection = existingBio.length ? `\u0422\u0435\u043A\u0443\u0449\u0438\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u043E \u044E\u0437\u0435\u0440\u0435:
+${existingBio.map((n, i) => `${i + 1}. ${n}`).join("\n")}` : "\u0417\u0430\u043C\u0435\u0442\u043E\u043A \u043E \u044E\u0437\u0435\u0440\u0435 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442.";
+  const relSection = existingRelationship ? `\u0422\u0435\u043A\u0443\u0449\u0435\u0435 \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435: ${existingRelationship}` : "\u041E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435 \u043A \u044E\u0437\u0435\u0440\u0443: \u0434\u0435\u0444\u043E\u043B\u0442\u043D\u043E\u0435 (neutral).";
+  return [
+    {
+      role: "system",
+      content: [
+        "\u0422\u044B \u0430\u043D\u0430\u043B\u0438\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0439 \u043C\u043E\u0434\u0443\u043B\u044C \u0425\u043E\u0440\u0438. \u0422\u0432\u043E\u044F \u0437\u0430\u0434\u0430\u0447\u0430 \u2014 \u043F\u0440\u043E\u0430\u043D\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0434\u0438\u0430\u043B\u043E\u0433 \u0438 \u0432\u0435\u0440\u043D\u0443\u0442\u044C JSON.",
+        "",
+        "\u041F\u0440\u0430\u0432\u0438\u043B\u0430:",
+        "- \u0410\u043D\u0430\u043B\u0438\u0437\u0438\u0440\u0443\u0439 \u0422\u041E\u041B\u042C\u041A\u041E \u0444\u0430\u043A\u0442\u044B \u0438\u0437 \u0434\u0438\u0430\u043B\u043E\u0433\u0430, \u043D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439",
+        "- \u0411\u0438\u043E\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u0438\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0438: \u043A\u0440\u0430\u0442\u043A\u0438\u0435 \u0444\u0430\u043A\u0442\u044B \u043E \u044E\u0437\u0435\u0440\u0435 (\u0438\u043D\u0442\u0435\u0440\u0435\u0441\u044B, \u043F\u0440\u0438\u0432\u044B\u0447\u043A\u0438, \u0444\u0430\u043A\u0442\u044B \u0438\u0437 \u0436\u0438\u0437\u043D\u0438, \u0441\u0442\u0438\u043B\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u044F)",
+        "- \u041A\u0430\u0436\u0434\u0430\u044F \u0437\u0430\u043C\u0435\u0442\u043A\u0430 \u2014 \u043E\u0434\u043D\u043E \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u0435, \u043C\u0430\u043A\u0441\u0438\u043C\u0443\u043C",
+        "- \u041D\u0435 \u0434\u0443\u0431\u043B\u0438\u0440\u0443\u0439 \u0443\u0436\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044E\u0449\u0438\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0438",
+        "- \u041E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435: \u043E\u0446\u0435\u043D\u0438 \u043A\u0430\u043A \u0434\u0438\u0430\u043B\u043E\u0433 \u043F\u043E\u0432\u043B\u0438\u044F\u043B \u043D\u0430 tone_bias (neutral/friendly/sharp), closeness_delta (-0.1..+0.1), trust_delta (-0.1..+0.1)",
+        "- \u0415\u0441\u043B\u0438 \u0434\u0438\u0430\u043B\u043E\u0433 \u0441\u043A\u0443\u0447\u043D\u044B\u0439/\u043F\u0443\u0441\u0442\u043E\u0439 \u2014 \u0432\u0435\u0440\u043D\u0438 \u043F\u0443\u0441\u0442\u044B\u0435 \u043C\u0430\u0441\u0441\u0438\u0432\u044B \u0438 \u043D\u0443\u043B\u0435\u0432\u044B\u0435 \u0434\u0435\u043B\u044C\u0442\u044B",
+        "",
+        bioSection,
+        relSection
+      ].join("\n")
+    },
+    {
+      role: "user",
+      content: [
+        "\u0414\u0438\u0430\u043B\u043E\u0433:",
+        chatLog,
+        "",
+        '\u041E\u0442\u0432\u0435\u0442\u044C JSON: { "new_notes": ["\u0437\u0430\u043C\u0435\u0442\u043A\u04301", ...], "remove_notes": ["\u0442\u0435\u043A\u0441\u0442 \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0435\u0439 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 (\u043A\u0430\u043A \u0432 \u0441\u043F\u0438\u0441\u043A\u0435 \u0432\u044B\u0448\u0435)", ...], "relationship_update": { "tone_bias": "neutral"|"friendly"|"sharp"|null, "closeness_delta": number, "trust_delta": number, "familiarity_delta": number }, "summary": "\u043E\u0434\u043D\u043E \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u043E \u0441\u0443\u0442\u0438 \u0434\u0438\u0430\u043B\u043E\u0433\u0430" }'
+      ].join("\n")
+    }
+  ];
+}
+function createConversationAnalysisJob(runtime) {
+  return async (job) => {
+    const { guildId, userId, channelId } = job.data;
+    const messages = await runtime.prisma.message.findMany({
+      where: {
+        guildId,
+        channelId,
+        OR: [
+          { userId },
+          { user: { isBot: true } }
+        ]
+      },
+      orderBy: { createdAt: "desc" },
+      take: ANALYSIS_WINDOW_MESSAGES,
+      include: { user: true }
+    });
+    if (messages.length < 3) {
+      runtime.logger.debug({ guildId, userId }, "conversation-analysis: too few messages, skipping");
+      return;
+    }
+    const chatMessages = messages.reverse().map((m) => ({
+      author: m.user.globalName || m.user.username || m.userId,
+      content: m.content,
+      isBot: m.user.isBot
+    }));
+    const existingNotes = await runtime.prisma.userMemoryNote.findMany({
+      where: { guildId, userId, active: true },
+      orderBy: { createdAt: "desc" },
+      take: MAX_BIO_NOTES_PER_USER
+    });
+    const relationship = await runtime.prisma.relationshipProfile.findUnique({
+      where: { guildId_userId: { guildId, userId } }
+    });
+    const existingBio = existingNotes.map((n) => n.value);
+    const existingRel = relationship ? `tone=${relationship.toneBias}, closeness=${relationship.closeness}, trust=${relationship.trustLevel}, familiarity=${relationship.familiarity}` : null;
+    const runtimeSettings = await runtime.runtimeConfig.getRuntimeSettings();
+    const model = runtime.modelRouter.pickModelForSlot("analytics", runtimeSettings.modelRouting);
+    const prompt = buildAnalysisPrompt(chatMessages, existingBio, existingRel);
+    let result;
+    try {
+      const response = await runtime.llmClient.chat({
+        model,
+        messages: prompt,
+        format: "json",
+        maxTokens: 400
+      });
+      const raw = response.message.content.trim();
+      const start = raw.indexOf("{");
+      const end = raw.lastIndexOf("}");
+      result = JSON.parse(start >= 0 && end > start ? raw.slice(start, end + 1) : raw);
+    } catch (error) {
+      runtime.logger.warn({ error, guildId, userId }, "conversation-analysis: LLM parse failed");
+      return;
+    }
+    if (result.new_notes?.length) {
+      for (const note of result.new_notes.slice(0, 5)) {
+        const key = `bio:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
+        await runtime.prisma.userMemoryNote.create({
+          data: {
+            guildId,
+            userId,
+            key,
+            value: note.slice(0, 500),
+            source: "conversation_analysis",
+            active: true
+          }
+        });
+      }
+    }
+    if (result.remove_notes?.length) {
+      for (const noteText of result.remove_notes.slice(0, 3)) {
+        await runtime.prisma.userMemoryNote.updateMany({
+          where: { guildId, userId, value: { contains: noteText.slice(0, 100) }, active: true },
+          data: { active: false }
+        });
+      }
+    }
+    const update = result.relationship_update;
+    if (update && relationship) {
+      const newCloseness = clamp((relationship.closeness ?? 0.5) + (update.closeness_delta || 0), 0, 1);
+      const newTrust = clamp((relationship.trustLevel ?? 0.5) + (update.trust_delta || 0), 0, 1);
+      const newFamiliarity = clamp((relationship.familiarity ?? 0.5) + (update.familiarity_delta || 0), 0, 1);
+      await runtime.prisma.relationshipProfile.update({
+        where: { guildId_userId: { guildId, userId } },
+        data: {
+          ...update.tone_bias ? { toneBias: update.tone_bias } : {},
+          closeness: newCloseness,
+          trustLevel: newTrust,
+          familiarity: newFamiliarity,
+          interactionCount: { increment: 1 }
+        }
+      });
+    } else if (update && !relationship) {
+      await runtime.prisma.relationshipProfile.create({
+        data: {
+          guildId,
+          userId,
+          toneBias: update.tone_bias || "neutral",
+          roastLevel: 0,
+          praiseBias: 0,
+          interruptPriority: 0,
+          doNotMock: false,
+          doNotInitiate: false,
+          protectedTopics: [],
+          closeness: clamp(0.5 + (update.closeness_delta || 0), 0, 1),
+          trustLevel: clamp(0.5 + (update.trust_delta || 0), 0, 1),
+          familiarity: clamp(0.5 + (update.familiarity_delta || 0), 0, 1),
+          interactionCount: 1
+        }
+      });
+    }
+    try {
+      await Promise.allSettled([
+        runtime.redis.del(`ctx:profile:${guildId}:${userId}`),
+        runtime.redis.del(`ctx:rel:${guildId}:${userId}`)
+      ]);
+    } catch {
+    }
+    runtime.logger.info(
+      {
+        guildId,
+        userId,
+        newNotes: result.new_notes?.length ?? 0,
+        removedNotes: result.remove_notes?.length ?? 0,
+        toneBias: update?.tone_bias,
+        summary: result.summary
+      },
+      "conversation-analysis: completed"
+    );
+  };
+}
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
+
 // src/jobs/embeddings.ts
 var import_shared = require("@hori/shared");
 function createEmbeddingJob(runtime) {
   return async (job) => {
+    const runtimeSettings = await runtime.runtimeConfig.getRuntimeSettings();
     if (job.data.entityType === "message") {
       const message = await runtime.prisma.message.findUnique({
         where: { id: job.data.entityId }
@@ -71,7 +244,9 @@ function createEmbeddingJob(runtime) {
       }
       let vector2;
       try {
-        vector2 = await runtime.embeddingAdapter.embedOne(message.content);
+        vector2 = await runtime.embeddingAdapter.embedOne(message.content, {
+          dimensions: runtimeSettings.openaiEmbedDimensions
+        });
       } catch (error) {
         runtime.logger.warn({ entityId: message.id, error: (0, import_shared.asErrorMessage)(error), jobId: job.id }, "embedding skipped because ollama is unavailable");
         return { skipped: true, reason: "ollama unavailable" };
@@ -108,12 +283,14 @@ function createEmbeddingJob(runtime) {
     const value = "value" in source ? source.value : "";
     let vector;
     try {
-      vector = await runtime.embeddingAdapter.embedOne(value);
+      vector = await runtime.embeddingAdapter.embedOne(value, {
+        dimensions: runtimeSettings.openaiEmbedDimensions
+      });
     } catch (error) {
       runtime.logger.warn({ entityId: job.data.entityId, error: (0, import_shared.asErrorMessage)(error), jobId: job.id }, "embedding skipped because ollama is unavailable");
       return { skipped: true, reason: "ollama unavailable" };
     }
-    await runtime.retrievalService.setEmbedding(job.data.entityType, job.data.entityId, (0, import_shared.toVectorLiteral)(vector));
+    await runtime.retrievalService.setEmbedding(job.data.entityType, job.data.entityId, (0, import_shared.toVectorLiteral)(vector), vector.length);
     return { skipped: false, entityType: job.data.entityType };
   };
 }
@@ -172,12 +349,16 @@ function createMemoryFormationJob(runtime) {
         OLLAMA_SMART_MODEL: bestModel.model
       };
     }
+    const embedding = runtime.modelRouter.pickEmbeddingModel({
+      dimensions: runtimeSettings.openaiEmbedDimensions
+    });
     const formationService = new import_memory.MemoryFormationService(
       runtime.prisma,
       runtime.retrievalService,
       runtime.llmClient,
       formationEnv,
-      runtime.modelRouter.pickEmbedModel()
+      embedding.model,
+      embedding.dimensions
     );
     await runtime.prisma.memoryBuildRun.update({
       where: { id: job.data.runId },
@@ -419,16 +600,30 @@ function createProfileJob(runtime) {
       sourceWindowSize: stats.totalMessages,
       isEligible: true
     });
+    try {
+      await runtime.redis.del(`ctx:profile:${job.data.guildId}:${job.data.userId}`);
+    } catch {
+    }
     const latestChannelId = messages[0]?.channelId;
     if (latestChannelId && messages.length) {
       try {
         const memoryModel = runtime.modelRouter.pickModelForSlot("memory", runtimeSettings.modelRouting);
+        const embedding = runtime.modelRouter.pickEmbeddingModel({
+          dimensions: runtimeSettings.openaiEmbedDimensions
+        });
         const formationEnv = {
           ...runtime.env,
           OLLAMA_FAST_MODEL: memoryModel,
           OLLAMA_SMART_MODEL: memoryModel
         };
-        const formationService = new import_memory2.MemoryFormationService(runtime.prisma, runtime.retrievalService, runtime.llmClient, formationEnv, runtime.modelRouter.pickEmbedModel());
+        const formationService = new import_memory2.MemoryFormationService(
+          runtime.prisma,
+          runtime.retrievalService,
+          runtime.llmClient,
+          formationEnv,
+          embedding.model,
+          embedding.dimensions
+        );
         const priorSummaries = await runtime.summaryService.getRecentSummaries(job.data.guildId, latestChannelId, 2);
         await formationService.runFormation({
           guildId: job.data.guildId,
@@ -455,9 +650,155 @@ function createSearchCacheCleanupJob(runtime) {
   };
 }
 
+// src/jobs/session-evaluator.ts
+var import_shared4 = require("@hori/shared");
+var SESSION_INACTIVITY_MS = 10 * 60 * 1e3;
+var SESSION_LOOKBACK_MS = 3 * 60 * 60 * 1e3;
+function formatSessionTranscript(messages) {
+  return messages.map((entry) => `${entry.role}: ${entry.content}`).join("\n");
+}
+function parseVerdict(raw) {
+  const normalized = raw.trim().toUpperCase();
+  if (normalized.includes("A")) {
+    return "A";
+  }
+  if (normalized.includes("V")) {
+    return "V";
+  }
+  return "B";
+}
+function createSessionJob(runtime) {
+  return async (job) => {
+    const runtimeSettings = await runtime.runtimeConfig.getRuntimeSettings();
+    const since = new Date(Date.now() - SESSION_LOOKBACK_MS);
+    const rows = await runtime.prisma.message.findMany({
+      where: {
+        guildId: job.data.guildId,
+        channelId: job.data.channelId,
+        createdAt: { gte: since },
+        OR: [
+          { userId: job.data.userId },
+          { user: { isBot: true } }
+        ]
+      },
+      orderBy: { createdAt: "desc" },
+      take: 80,
+      include: {
+        user: {
+          select: {
+            isBot: true
+          }
+        }
+      }
+    });
+    if (!rows.length) {
+      return { skipped: true, reason: "session not found" };
+    }
+    if (Date.now() - rows[0].createdAt.getTime() < SESSION_INACTIVITY_MS) {
+      return { skipped: true, reason: "session still active" };
+    }
+    const sessionRows = [];
+    for (const row of rows) {
+      if (sessionRows.length) {
+        const newest = sessionRows[sessionRows.length - 1];
+        if (newest.createdAt.getTime() - row.createdAt.getTime() > SESSION_INACTIVITY_MS) {
+          break;
+        }
+      }
+      sessionRows.push(row);
+    }
+    const ordered = [...sessionRows].reverse();
+    const sessionMessages = ordered.filter((row) => (0, import_shared4.normalizeWhitespace)(row.content).length > 0).map((row) => ({
+      role: row.user.isBot ? "Hori" : "User",
+      content: row.content,
+      createdAt: row.createdAt
+    }));
+    if (sessionMessages.length < 3 || !sessionMessages.some((entry) => entry.role === "User") || !sessionMessages.some((entry) => entry.role === "Hori")) {
+      return { skipped: true, reason: "session too small" };
+    }
+    const corePromptTemplates = await runtime.runtimeConfig.getCorePromptTemplates(job.data.guildId);
+    const prompt = corePromptTemplates.relationshipEvaluatorPrompt.replace("{session_messages}", formatSessionTranscript(sessionMessages));
+    let verdict = "B";
+    try {
+      const response = await runtime.llmClient.chat({
+        model: runtime.modelRouter.pickModel("summary", runtimeSettings.modelRouting),
+        messages: [{ role: "system", content: prompt }],
+        temperature: 0,
+        topP: 0.1,
+        maxTokens: 8
+      });
+      verdict = parseVerdict(response.message.content);
+    } catch (error) {
+      runtime.logger.warn(
+        {
+          error: (0, import_shared4.asErrorMessage)(error),
+          guildId: job.data.guildId,
+          channelId: job.data.channelId,
+          userId: job.data.userId,
+          jobId: job.id
+        },
+        "session evaluator skipped because llm is unavailable"
+      );
+      return { skipped: true, reason: "llm unavailable" };
+    }
+    const sessionStart = sessionMessages[0]?.createdAt ?? /* @__PURE__ */ new Date();
+    const sessionEnd = sessionMessages[sessionMessages.length - 1]?.createdAt ?? /* @__PURE__ */ new Date();
+    const recentLogs = await runtime.prisma.botEventLog.findMany({
+      where: {
+        guildId: job.data.guildId,
+        channelId: job.data.channelId,
+        userId: job.data.userId,
+        createdAt: {
+          gte: sessionStart,
+          lte: sessionEnd
+        }
+      },
+      select: {
+        debugTrace: true
+      }
+    });
+    const duplicateAggressionPenalty = verdict === "V" && recentLogs.some((entry) => {
+      const trace = entry.debugTrace;
+      return trace?.aggression?.checkerVerdict === "AGGRESSIVE";
+    });
+    const appliedVerdict = duplicateAggressionPenalty ? "B" : verdict;
+    const autoApply = runtimeSettings.relationshipGrowthMode === "TRUSTED_AUTO" || runtimeSettings.relationshipGrowthMode === "FULL_AUTO";
+    if (autoApply && appliedVerdict !== "B") {
+      await runtime.relationshipService.applySessionVerdict(job.data.guildId, job.data.userId, appliedVerdict, {
+        allowStatePromotion: runtimeSettings.relationshipGrowthMode === "FULL_AUTO"
+      });
+    }
+    await runtime.prisma.botEventLog.create({
+      data: {
+        guildId: job.data.guildId,
+        channelId: job.data.channelId,
+        userId: job.data.userId,
+        eventType: "relationship_session_eval",
+        routeReason: `verdict:${verdict}`,
+        relationshipApplied: autoApply && appliedVerdict !== "B",
+        debugTrace: {
+          relationshipVerdict: verdict,
+          appliedVerdict,
+          duplicateAggressionPenalty,
+          growthMode: runtimeSettings.relationshipGrowthMode,
+          messageCount: sessionMessages.length,
+          sessionStart: sessionStart.toISOString(),
+          sessionEnd: sessionEnd.toISOString()
+        }
+      }
+    });
+    return {
+      skipped: false,
+      verdict,
+      appliedVerdict,
+      growthMode: runtimeSettings.relationshipGrowthMode
+    };
+  };
+}
+
 // src/jobs/summaries.ts
 var import_llm3 = require("@hori/llm");
-var import_shared4 = require("@hori/shared");
+var import_shared5 = require("@hori/shared");
 function createSummaryJob(runtime) {
   return async (job) => {
     const profile = (0, import_llm3.getModelProfile)("smart");
@@ -484,7 +825,7 @@ function createSummaryJob(runtime) {
         maxTokens: profile.maxTokens
       });
     } catch (error) {
-      runtime.logger.warn({ channelId: job.data.channelId, error: (0, import_shared4.asErrorMessage)(error), guildId: job.data.guildId, jobId: job.id }, "summary skipped because ollama is unavailable");
+      runtime.logger.warn({ channelId: job.data.channelId, error: (0, import_shared5.asErrorMessage)(error), guildId: job.data.guildId, jobId: job.id }, "summary skipped because ollama is unavailable");
       return { skipped: true, reason: "ollama unavailable" };
     }
     const [summaryShort, ...rest] = response.message.content.split("\n");
@@ -503,7 +844,7 @@ function createSummaryJob(runtime) {
 }
 
 // src/jobs/topics.ts
-var import_shared5 = require("@hori/shared");
+var import_shared6 = require("@hori/shared");
 function createTopicJob(runtime) {
   return async (job) => {
     if (!runtime.env.FEATURE_TOPIC_ENGINE_ENABLED) {
@@ -520,7 +861,7 @@ function createTopicJob(runtime) {
       try {
         embedding = await runtime.embeddingAdapter.embedOne(message.content);
       } catch (error) {
-        runtime.logger.warn({ error: (0, import_shared5.asErrorMessage)(error), messageId: message.id, jobId: job.id }, "topic embedding unavailable");
+        runtime.logger.warn({ error: (0, import_shared6.asErrorMessage)(error), messageId: message.id, jobId: job.id }, "topic embedding unavailable");
       }
     }
     return runtime.topicService.updateFromMessage({
@@ -539,10 +880,10 @@ function createTopicJob(runtime) {
 async function main() {
   const env = (0, import_config.loadEnv)();
   (0, import_config.assertEnvForRole)(env, "worker");
-  const logger = (0, import_shared6.createLogger)(env.LOG_LEVEL);
-  const prisma = (0, import_shared6.createPrismaClient)();
-  const redis = (0, import_shared6.createRedisClient)(env.REDIS_URL);
-  await (0, import_shared6.ensureInfrastructureReady)({
+  const logger = (0, import_shared7.createLogger)(env.LOG_LEVEL);
+  const prisma = (0, import_shared7.createPrismaClient)();
+  const redis = (0, import_shared7.createRedisClient)(env.REDIS_URL);
+  await (0, import_shared7.ensureInfrastructureReady)({
     role: "worker",
     nodeEnv: env.NODE_ENV,
     databaseUrl: env.DATABASE_URL,
@@ -551,19 +892,11 @@ async function main() {
     redis,
     logger
   });
-  if (!env.OLLAMA_BASE_URL) {
-    const persistedOllamaUrl = await (0, import_shared6.loadPersistedOllamaBaseUrl)(prisma, logger);
-    if (persistedOllamaUrl) {
-      env.OLLAMA_BASE_URL = persistedOllamaUrl;
-    }
-  }
-  if ((0, import_shared6.shouldAutoSyncOllamaBaseUrl)()) {
-    (0, import_shared6.startOllamaBaseUrlSync)({ env, prisma, logger });
-  }
-  const queues = (0, import_shared6.createAppQueues)(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
+  const queues = (0, import_shared7.createAppQueues)(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
   const analytics = new import_analytics.AnalyticsQueryService(prisma);
   const summaryService = new import_memory3.SummaryService(prisma);
   const profileService = new import_memory3.ProfileService(prisma, env);
+  const relationshipService = new import_memory3.RelationshipService(prisma);
   const retrievalService = new import_memory3.RetrievalService(prisma, logger);
   const topicService = new import_memory3.TopicService(prisma, {
     topicTtlMinutes: env.TOPIC_TTL_MINUTES,
@@ -571,15 +904,7 @@ async function main() {
   });
   const searchCache = new import_search.SearchCacheService(prisma, redis);
   const runtimeConfig = new import_core.RuntimeConfigService(prisma, env);
-  const llmProvider = env.LLM_PROVIDER;
-  let llmClient;
-  if (llmProvider === "openai") {
-    llmClient = new import_llm4.OpenAIClient(env, logger);
-    logger.info("worker LLM provider: OpenAI");
-  } else {
-    llmClient = new import_llm4.OllamaClient(env, logger);
-    logger.info("worker LLM provider: Ollama");
-  }
+  const { client: llmClient } = (0, import_core.createRuntimeLlmClient)(env, logger, runtimeConfig, "worker");
   const modelRouter = new import_llm4.ModelRouter(env);
   const embeddingAdapter = new import_llm4.EmbeddingAdapter(llmClient, modelRouter);
   const runtime = {
@@ -592,6 +917,7 @@ async function main() {
     summaryService,
     profileService,
     retrievalService,
+    relationshipService,
     topicService,
     searchCache,
     runtimeConfig,
@@ -600,13 +926,15 @@ async function main() {
     embeddingAdapter
   };
   const workers = [
-    (0, import_shared6.createWorker)(import_shared6.QUEUE_NAMES.summary, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSummaryJob(runtime), env.JOB_CONCURRENCY_SUMMARIES),
-    (0, import_shared6.createWorker)(import_shared6.QUEUE_NAMES.profile, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createProfileJob(runtime), env.JOB_CONCURRENCY_PROFILES),
-    (0, import_shared6.createWorker)(import_shared6.QUEUE_NAMES.embedding, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createEmbeddingJob(runtime), env.JOB_CONCURRENCY_EMBEDDINGS),
-    (0, import_shared6.createWorker)(import_shared6.QUEUE_NAMES.topic, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createTopicJob(runtime), 1),
-    (0, import_shared6.createWorker)(import_shared6.QUEUE_NAMES.memoryFormation, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createMemoryFormationJob(runtime), 1),
-    (0, import_shared6.createWorker)(import_shared6.QUEUE_NAMES.searchCache, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSearchCacheCleanupJob(runtime), 1),
-    (0, import_shared6.createWorker)(import_shared6.QUEUE_NAMES.cleanup, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createCleanupJob(runtime), 1)
+    (0, import_shared7.createWorker)(import_shared7.QUEUE_NAMES.summary, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSummaryJob(runtime), env.JOB_CONCURRENCY_SUMMARIES),
+    (0, import_shared7.createWorker)(import_shared7.QUEUE_NAMES.profile, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createProfileJob(runtime), env.JOB_CONCURRENCY_PROFILES),
+    (0, import_shared7.createWorker)(import_shared7.QUEUE_NAMES.embedding, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createEmbeddingJob(runtime), env.JOB_CONCURRENCY_EMBEDDINGS),
+    (0, import_shared7.createWorker)(import_shared7.QUEUE_NAMES.topic, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createTopicJob(runtime), 1),
+    (0, import_shared7.createWorker)(import_shared7.QUEUE_NAMES.session, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSessionJob(runtime), 1),
+    (0, import_shared7.createWorker)(import_shared7.QUEUE_NAMES.memoryFormation, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createMemoryFormationJob(runtime), 1),
+    (0, import_shared7.createWorker)(import_shared7.QUEUE_NAMES.searchCache, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSearchCacheCleanupJob(runtime), 1),
+    (0, import_shared7.createWorker)(import_shared7.QUEUE_NAMES.cleanup, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createCleanupJob(runtime), 1),
+    (0, import_shared7.createWorker)(import_shared7.QUEUE_NAMES.conversationAnalysis, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createConversationAnalysisJob(runtime), 1)
   ];
   await Promise.all([
     queues.cleanup.add("cleanup", { kind: "logs" }, { jobId: "cleanup:logs", repeat: { every: 24 * 60 * 60 * 1e3 } }),
