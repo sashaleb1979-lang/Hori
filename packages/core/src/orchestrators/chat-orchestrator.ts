@@ -754,7 +754,8 @@ export class ChatOrchestrator {
       behavior.assembly.commonCore,
       behavior.assembly.relationshipTail,
       restoredContext?.trim() ? restoredContext.trim() : null,
-      `Turn instruction:\n${behavior.assembly.turnInstruction}`
+      `Turn instruction:\n${behavior.assembly.turnInstruction}`,
+      "Сейчас идёт лента сообщений из Discord-чата. Ответь на последнее сообщение пользователя."
     ]
       .filter(Boolean)
       .join("\n\n");

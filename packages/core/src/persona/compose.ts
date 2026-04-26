@@ -706,10 +706,6 @@ function buildTurnInstruction(options: {
   return lines.join("\n");
 }
 
-function buildWeakModelBrevityBlock(_persona: PersonaConfig, _requestedDepth: RequestedDepth): BlockResult | null {
-  return null;
-}
-
 function buildSnarkConfidenceBlock(options: {
   threshold: number;
   isSelfInitiated: boolean;
@@ -721,9 +717,9 @@ function buildSnarkConfidenceBlock(options: {
     name: "SNARK CONFIDENCE BLOCK",
     content: [
       "[SNARK CONFIDENCE BLOCK]",
-      `Порог=${options.threshold}, точность контекста=${options.contextPrecisionBias}, contextConfidence=${options.contextConfidence ?? "n/a"}, mockeryConfidence=${options.mockeryConfidence ?? "n/a"}. ${
-        options.isSelfInitiated ? "Для самостоятельного подкола нужен чистый уверенный хит." : "Не подкалывай наугад; если контекст мутный, отвечай короче и нейтральнее."
-      }`
+      options.isSelfInitiated
+        ? "Для самостоятельного подкола нужен чистый уверенный хит. Если контекст мутный — не подкалывай."
+        : "Не подкалывай наугад. Если контекст мутный, отвечай короче и нейтральнее."
     ].join("\n")
   };
 }
@@ -794,9 +790,7 @@ function buildContextUsageBlock(input: ComposeBehaviorPromptInput): BlockResult 
     name: "CONTEXT USAGE BLOCK",
     content: [
       "[CONTEXT USAGE BLOCK]",
-      `Версия контекста: ${version}. Reply-chain=${input.contextTrace.replyChainCount ?? 0}. ActiveTopic=${input.contextTrace.activeTopicId ?? "none"}. Entities=${input.contextTrace.entityTriggers?.join(", ") || "none"}.`,
-      `contextConfidence=${input.contextScores?.contextConfidence ?? "n/a"}, mockeryConfidence=${input.contextScores?.mockeryConfidence ?? "n/a"}.`,
-      "Сначала reply-chain и active topic. Не выдумывай контекст. При низком confidence отвечай короче.",
+      "Сначала reply-chain и active topic. Не выдумывай контекст. При мутном контексте отвечай короче.",
       "Контекст для калибровки тона, не для пересказа. Не разворачивай ответ только потому, что контекст богатый."
     ].join("\n")
   };
@@ -868,23 +862,9 @@ function buildCoreBlock(): BlockResult {
   };
 }
 
-function buildSmartnessBlock(): BlockResult | null {
-  return null;
-}
-
-function buildMemoryUsageBlock(): BlockResult | null {
-  return null;
-}
-
-function buildFinalSelectionRuleBlock(): BlockResult | null {
-  return null;
-}
-
 function buildStyleRulesBlock(persona: PersonaConfig, options: { isDirectMessage: boolean }): BlockResult {
   const lines = [
     "[STYLE RULES BLOCK]",
-    `Core traits: brevity=${persona.coreTraits.brevity}, sarcasm=${persona.coreTraits.sarcasm}, sharpness=${persona.coreTraits.sharpness}, warmth=${persona.coreTraits.warmth}, patience=${persona.coreTraits.patience}, playfulness=${persona.coreTraits.playfulness}.`,
-    `Style: sentenceLength=${persona.styleRules.averageSentenceLength}, slang=${persona.styleRules.allowedSlangLevel}, rudeness=${persona.styleRules.allowedRudenessLevel}, explanationDensity=${persona.styleRules.explanationDensity}, analogyBanStrictness=${persona.styleRules.analogyBanStrictness}.`,
     "Начинай с сути. Не повторяй вопрос.",
     "Без лекций, дисклеймеров, красивого мусора и фальшивой уверенности.",
     "Сленг можно, но не форсируй его. Не форси шутки.",
@@ -903,24 +883,34 @@ function buildStyleRulesBlock(persona: PersonaConfig, options: { isDirectMessage
 }
 
 function buildLengthBlock(limits: PersonaResponseLimits): BlockResult {
+  const tightness =
+    limits.maxSentences <= 2
+      ? "Уложись в одну-две короткие фразы."
+      : limits.maxSentences <= 4
+        ? "Держи ответ коротким, без длинных абзацев."
+        : "Не растягивай ответ; держи компактным.";
+  const lists = limits.bulletListAllowed ? "Списки допустимы только если пользователь явно попросил список." : "Без bullet-списков.";
+  const followUp = limits.followUpAllowed ? "" : "Без финального уточняющего вопроса.";
   return {
     name: "RESPONSE LENGTH BLOCK",
     content: [
       "[RESPONSE LENGTH BLOCK]",
-      `Compactness target: ${limits.compactness}. Max sentences=${limits.maxSentences}. Max paragraphs=${limits.maxParagraphs}. Max chars=${limits.maxChars}.`,
-      `Bullet lists allowed: ${limits.bulletListAllowed}. Follow-up allowed: ${limits.followUpAllowed}. Explanation density=${limits.explanationDensity}.`,
+      tightness,
+      lists,
+      followUp,
       "Если хватает одной короткой мысли, остановись на ней.",
       "Без пустых закрывашек и без лишнего follow-up вопроса."
-    ].join("\n")
+    ].filter(Boolean).join("\n")
   };
 }
 
 function buildLegacyServerOverlay(input: ComposeBehaviorPromptInput): BlockResult {
   const settings = input.guildSettings;
-  const lines = [
-    "[LEGACY SERVER OVERLAY]",
-    `Server style: roughness=${settings.roughnessLevel}/5, sarcasm=${settings.sarcasmLevel}/5, roast=${settings.roastLevel}/5, replyLength=${settings.replyLength}, preferredStyle="${settings.preferredStyle}".`
-  ];
+  const lines = ["[LEGACY SERVER OVERLAY]"];
+
+  if (settings.preferredStyle) {
+    lines.push(`Server preferred style: "${settings.preferredStyle}".`);
+  }
 
   if (settings.forbiddenTopics.length) {
     lines.push(`Forbidden topics: ${settings.forbiddenTopics.join(", ")}.`);
@@ -1135,7 +1125,8 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     const sections = [
       assembly.commonCore,
       assembly.relationshipTail,
-      `Turn instruction:\n${assembly.turnInstruction}`
+      `Turn instruction:\n${assembly.turnInstruction}`,
+      "Сейчас идёт лента сообщений из Discord-чата. Ответь на последнее сообщение пользователя."
     ].filter((section): section is string => Boolean(section));
 
     prompt = sections.join("\n\n");
@@ -1180,10 +1171,7 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     if (messageKind === "reply_to_bot" || !isLightMessage) {
       add(buildContextUsageBlock(input));
     }
-    add(buildMemoryUsageBlock());
     add(buildLengthBlock(limits));
-    add(buildWeakModelBrevityBlock(persona, requestedDepth));
-    add(buildSmartnessBlock());
     if (messageKind === "smalltalk_hangout") {
       add(buildLowPressureSmalltalkBlock({ hasContextHook: smalltalkContextHook }));
     }
@@ -1214,7 +1202,6 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     }
     add(buildModeratorOverlay(input));
     add(buildRelationshipOverlay(input));
-    add(buildFinalSelectionRuleBlock());
 
     const allBlocks = [...staticBlocks, ...blocks];
     blocksUsed = allBlocks.map((block) => block.name);

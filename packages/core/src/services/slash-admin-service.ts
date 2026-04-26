@@ -252,6 +252,7 @@ export class SlashAdminService {
       doNotInitiate?: boolean;
       protectedTopics?: string[];
       relationshipState?: RelationshipState;
+      relationshipScore?: number;
       closeness?: number;
       trustLevel?: number;
       familiarity?: number;
@@ -275,7 +276,7 @@ export class SlashAdminService {
       doNotInitiate: input.doNotInitiate ?? current?.doNotInitiate ?? false,
       protectedTopics: input.protectedTopics ?? current?.protectedTopics ?? [],
       relationshipState: input.relationshipState ?? current?.relationshipState ?? "base",
-      relationshipScore: current?.relationshipScore ?? 0,
+      relationshipScore: input.relationshipScore ?? current?.relationshipScore ?? 0,
       positiveMarks: current?.positiveMarks ?? 0,
       escalationStage: current?.escalationStage ?? 0,
       escalationUpdatedAt: current?.escalationUpdatedAt ?? null,

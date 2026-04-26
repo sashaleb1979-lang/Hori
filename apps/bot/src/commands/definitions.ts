@@ -154,6 +154,7 @@ const horiCommandDefinition = new SlashCommandBuilder()
       .addNumberOption((option) => option.setName("trust").setDescription("Доверие 0-1").setMinValue(0).setMaxValue(1))
       .addNumberOption((option) => option.setName("familiarity").setDescription("Знакомость 0-1").setMinValue(0).setMaxValue(1))
       .addNumberOption((option) => option.setName("proactivity").setDescription("Желательность инициативы 0-1").setMinValue(0).setMaxValue(1))
+      .addNumberOption((option) => option.setName("score").setDescription("relationshipScore (-1.5..3)").setMinValue(-1.5).setMaxValue(3))
   )
   .addSubcommand((subcommand) =>
     subcommand
@@ -492,7 +493,8 @@ const legacySlashCommandBuilders = [
     .addNumberOption((option) => option.setName("closeness").setDescription("Близость 0-1").setMinValue(0).setMaxValue(1))
     .addNumberOption((option) => option.setName("trust").setDescription("Доверие 0-1").setMinValue(0).setMaxValue(1))
     .addNumberOption((option) => option.setName("familiarity").setDescription("Знакомость 0-1").setMinValue(0).setMaxValue(1))
-    .addNumberOption((option) => option.setName("proactivity").setDescription("Желательность инициативы 0-1").setMinValue(0).setMaxValue(1)),
+    .addNumberOption((option) => option.setName("proactivity").setDescription("Желательность инициативы 0-1").setMinValue(0).setMaxValue(1))
+    .addNumberOption((option) => option.setName("score").setDescription("relationshipScore (-1.5..3)").setMinValue(-1.5).setMaxValue(3)),
   new SlashCommandBuilder()
     .setName("bot-feature")
     .setDescription("Переключить feature flag")

@@ -262,7 +262,8 @@ export async function routeInteraction(
               closeness: interaction.options.getNumber("closeness") ?? undefined,
               trustLevel: interaction.options.getNumber("trust") ?? undefined,
               familiarity: interaction.options.getNumber("familiarity") ?? undefined,
-              proactivityPreference: interaction.options.getNumber("proactivity") ?? undefined
+              proactivityPreference: interaction.options.getNumber("proactivity") ?? undefined,
+              relationshipScore: interaction.options.getNumber("score") ?? undefined
             }
           ),
           flags: MessageFlags.Ephemeral
@@ -678,7 +679,8 @@ async function handleHoriCommand(
       interaction.options.getNumber("closeness") !== null ||
       interaction.options.getNumber("trust") !== null ||
       interaction.options.getNumber("familiarity") !== null ||
-      interaction.options.getNumber("proactivity") !== null;
+      interaction.options.getNumber("proactivity") !== null ||
+      interaction.options.getNumber("score") !== null;
 
     const content = hasUpdate
       ? [
@@ -696,7 +698,8 @@ async function handleHoriCommand(
             closeness: interaction.options.getNumber("closeness") ?? undefined,
             trustLevel: interaction.options.getNumber("trust") ?? undefined,
             familiarity: interaction.options.getNumber("familiarity") ?? undefined,
-            proactivityPreference: interaction.options.getNumber("proactivity") ?? undefined
+            proactivityPreference: interaction.options.getNumber("proactivity") ?? undefined,
+            relationshipScore: interaction.options.getNumber("score") ?? undefined
           }),
           "",
           await runtime.slashAdmin.relationshipDetails(interaction.guildId, targetUserId)
@@ -1757,7 +1760,7 @@ async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubm
   }
 
   if (modalKind === "relationship") {
-    const [roastLevel, praiseBias, interruptPriority] = readNumberList(interaction.fields.getTextInputValue("levels"));
+    const [roastLevel, praiseBias, interruptPriority, score] = readNumberList(interaction.fields.getTextInputValue("levels"));
     const [closeness, trustLevel, familiarity, proactivityPreference] = readNumberList(interaction.fields.getTextInputValue("signals"));
     const [doNotMock, doNotInitiate, ...topics] = interaction.fields.getTextInputValue("switches").split(",").map((part) => part.trim()).filter(Boolean);
     const userId = interaction.fields.getTextInputValue("userId").trim();
@@ -1769,6 +1772,7 @@ async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubm
         roastLevel: readIntInRange(roastLevel, 0, 5),
         praiseBias: readIntInRange(praiseBias, 0, 5),
         interruptPriority: readIntInRange(interruptPriority, 0, 5),
+        relationshipScore: readFloatInRange(score, -1.5, 3),
         doNotMock: readOptionalBoolean(doNotMock),
         doNotInitiate: readOptionalBoolean(doNotInitiate),
         protectedTopics: topics.length ? topics : undefined,
@@ -3412,10 +3416,10 @@ function buildRelationshipModal() {
     new ActionRowBuilder<TextInputBuilder>().addComponents(
       new TextInputBuilder()
         .setCustomId("levels")
-        .setLabel("roast,praise,interrupt")
-        .setPlaceholder("2,1,0")
+        .setLabel("roast,praise,interrupt,score")
+        .setPlaceholder("2,1,0,1.5  (score: -1.5..3)")
         .setRequired(false)
-        .setMaxLength(30)
+        .setMaxLength(40)
         .setStyle(TextInputStyle.Short)
     ),
     new ActionRowBuilder<TextInputBuilder>().addComponents(
@@ -3610,6 +3614,14 @@ function readIntegerText(value: string | undefined, min: number, max: number) {
 
 function readIntInRange(value: number | undefined, min: number, max: number) {
   if (value === undefined || !Number.isInteger(value)) {
+    return undefined;
+  }
+
+  return Math.max(min, Math.min(max, value));
+}
+
+function readFloatInRange(value: number | undefined, min: number, max: number) {
+  if (value === undefined || !Number.isFinite(value)) {
     return undefined;
   }
 
