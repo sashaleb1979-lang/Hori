@@ -29,6 +29,11 @@ const PATTERNS: Array<{
     reason: "memory write pattern"
   },
   {
+    intent: "memory_recall",
+    regex: /^вспомни\b/i,
+    reason: "memory recall pattern"
+  },
+  {
     intent: "memory_forget",
     regex: /^забудь\b/i,
     reason: "memory forget pattern"

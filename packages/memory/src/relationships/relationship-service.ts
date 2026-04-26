@@ -1,4 +1,4 @@
-import type { AppPrismaClient, RelationshipOverlay } from "@hori/shared";
+import type { AppPrismaClient, RelationshipOverlay, RelationshipState } from "@hori/shared";
 import {
   DEFAULT_SIGNALS,
   type RelationshipVector,
@@ -11,6 +11,13 @@ import {
 type RelationshipProfileRecord = RelationshipOverlay & {
   userId: string;
   guildId: string;
+  relationshipState?: RelationshipState | null;
+  relationshipScore?: number | null;
+  positiveMarks?: number | null;
+  escalationStage?: number | null;
+  escalationUpdatedAt?: Date | null;
+  coldUntil?: Date | null;
+  coldPermanent?: boolean | null;
   closeness?: number | null;
   trustLevel?: number | null;
   familiarity?: number | null;
@@ -35,6 +42,13 @@ export interface UpsertRelationshipInput {
   doNotMock: boolean;
   doNotInitiate: boolean;
   protectedTopics: string[];
+  relationshipState?: RelationshipState;
+  relationshipScore?: number;
+  positiveMarks?: number;
+  escalationStage?: number;
+  escalationUpdatedAt?: Date | null;
+  coldUntil?: Date | null;
+  coldPermanent?: boolean;
   closeness?: number;
   trustLevel?: number;
   familiarity?: number;
@@ -76,6 +90,13 @@ export class RelationshipService {
         doNotMock: input.doNotMock,
         doNotInitiate: input.doNotInitiate,
         protectedTopics: input.protectedTopics,
+        relationshipState: input.relationshipState ?? "base",
+        relationshipScore: clampRelationshipScore(input.relationshipScore ?? 0),
+        positiveMarks: Math.max(0, input.positiveMarks ?? 0),
+        escalationStage: clampEscalationStage(input.escalationStage ?? 0),
+        escalationUpdatedAt: input.escalationUpdatedAt ?? null,
+        coldUntil: input.coldUntil ?? null,
+        coldPermanent: input.coldPermanent ?? false,
         closeness: input.closeness ?? DEFAULT_SIGNALS.closeness,
         trustLevel: input.trustLevel ?? DEFAULT_SIGNALS.trustLevel,
         familiarity: input.familiarity ?? DEFAULT_SIGNALS.familiarity,
@@ -95,6 +116,13 @@ export class RelationshipService {
         doNotMock: input.doNotMock,
         doNotInitiate: input.doNotInitiate,
         protectedTopics: input.protectedTopics,
+        relationshipState: input.relationshipState ?? "base",
+        relationshipScore: clampRelationshipScore(input.relationshipScore ?? 0),
+        positiveMarks: Math.max(0, input.positiveMarks ?? 0),
+        escalationStage: clampEscalationStage(input.escalationStage ?? 0),
+        escalationUpdatedAt: input.escalationUpdatedAt ?? null,
+        coldUntil: input.coldUntil ?? null,
+        coldPermanent: input.coldPermanent ?? false,
         closeness: input.closeness ?? DEFAULT_SIGNALS.closeness,
         trustLevel: input.trustLevel ?? DEFAULT_SIGNALS.trustLevel,
         familiarity: input.familiarity ?? DEFAULT_SIGNALS.familiarity,
@@ -146,6 +174,13 @@ export class RelationshipService {
       doNotMock: vector.doNotMock,
       doNotInitiate: vector.doNotInitiate,
       protectedTopics: vector.protectedTopics,
+      relationshipState: vector.relationshipState,
+      relationshipScore: vector.relationshipScore,
+      positiveMarks: vector.positiveMarks,
+      escalationStage: this.resolveEscalationStage(vector, new Date()),
+      escalationUpdatedAt: vector.escalationUpdatedAt,
+      coldUntil: vector.coldUntil,
+      coldPermanent: vector.coldPermanent,
       closeness: nudgeCloseness(vector.closeness, sentiment),
       trustLevel: nudgeTrustLevel(vector.trustLevel, sentiment),
       familiarity: incrementFamiliarity(vector.familiarity, interactionCount),
@@ -189,6 +224,13 @@ export class RelationshipService {
       doNotMock: vector.doNotMock,
       doNotInitiate: vector.doNotInitiate,
       protectedTopics: vector.protectedTopics,
+      relationshipState: "cold_lowest",
+      relationshipScore: -1.5,
+      positiveMarks: 0,
+      escalationStage: 0,
+      escalationUpdatedAt: new Date(),
+      coldUntil: null,
+      coldPermanent: true,
       closeness: newCloseness,
       trustLevel: newTrust,
       familiarity: vector.familiarity,
@@ -196,6 +238,224 @@ export class RelationshipService {
       proactivityPreference: vector.proactivityPreference,
       topicBoundaries: vector.topicBoundaries,
     });
+  }
+
+  async noteAggressionMarker(guildId: string, userId: string, now = new Date()) {
+    const vector = await this.getVector(guildId, userId);
+    const currentStage = this.resolveEscalationStage(vector, now);
+
+    return this.upsertRelationship({
+      guildId,
+      userId,
+      toneBias: vector.toneBias,
+      roastLevel: vector.roastLevel,
+      praiseBias: vector.praiseBias,
+      interruptPriority: vector.interruptPriority,
+      doNotMock: vector.doNotMock,
+      doNotInitiate: vector.doNotInitiate,
+      protectedTopics: vector.protectedTopics,
+      relationshipState: vector.relationshipState,
+      relationshipScore: vector.relationshipScore,
+      positiveMarks: vector.positiveMarks,
+      escalationStage: Math.min(4, currentStage + 1),
+      escalationUpdatedAt: now,
+      coldUntil: vector.coldUntil,
+      coldPermanent: vector.coldPermanent,
+      closeness: vector.closeness,
+      trustLevel: vector.trustLevel,
+      familiarity: vector.familiarity,
+      interactionCount: vector.interactionCount,
+      proactivityPreference: vector.proactivityPreference,
+      topicBoundaries: vector.topicBoundaries,
+    });
+  }
+
+  async clearEscalation(guildId: string, userId: string, now = new Date()) {
+    const vector = await this.getVector(guildId, userId);
+
+    return this.upsertRelationship({
+      guildId,
+      userId,
+      toneBias: vector.toneBias,
+      roastLevel: vector.roastLevel,
+      praiseBias: vector.praiseBias,
+      interruptPriority: vector.interruptPriority,
+      doNotMock: vector.doNotMock,
+      doNotInitiate: vector.doNotInitiate,
+      protectedTopics: vector.protectedTopics,
+      relationshipState: vector.relationshipState,
+      relationshipScore: vector.relationshipScore,
+      positiveMarks: vector.positiveMarks,
+      escalationStage: 0,
+      escalationUpdatedAt: now,
+      coldUntil: vector.coldUntil,
+      coldPermanent: vector.coldPermanent,
+      closeness: vector.closeness,
+      trustLevel: vector.trustLevel,
+      familiarity: vector.familiarity,
+      interactionCount: vector.interactionCount,
+      proactivityPreference: vector.proactivityPreference,
+      topicBoundaries: vector.topicBoundaries,
+    });
+  }
+
+  async confirmAggression(guildId: string, userId: string, options: { timedOut?: boolean; now?: Date } = {}) {
+    const now = options.now ?? new Date();
+    const vector = await this.getVector(guildId, userId);
+
+    return this.upsertRelationship({
+      guildId,
+      userId,
+      toneBias: "sharp",
+      roastLevel: Math.max(vector.roastLevel, 1),
+      praiseBias: vector.praiseBias,
+      interruptPriority: vector.interruptPriority,
+      doNotMock: vector.doNotMock,
+      doNotInitiate: vector.doNotInitiate,
+      protectedTopics: vector.protectedTopics,
+      relationshipState: "cold_lowest",
+      relationshipScore: -1.5,
+      positiveMarks: 0,
+      escalationStage: options.timedOut ? 0 : Math.max(2, this.resolveEscalationStage(vector, now)),
+      escalationUpdatedAt: now,
+      coldUntil: null,
+      coldPermanent: true,
+      closeness: Math.max(0, vector.closeness - 0.04),
+      trustLevel: Math.max(0, vector.trustLevel - 0.08),
+      familiarity: vector.familiarity,
+      interactionCount: vector.interactionCount + 1,
+      proactivityPreference: vector.proactivityPreference,
+      topicBoundaries: vector.topicBoundaries,
+    });
+  }
+
+  async resetColdState(guildId: string, userId: string, updatedBy?: string | null) {
+    const vector = await this.getVector(guildId, userId);
+
+    return this.upsertRelationship({
+      guildId,
+      userId,
+      updatedBy,
+      toneBias: vector.toneBias === "sharp" ? "neutral" : vector.toneBias,
+      roastLevel: vector.roastLevel,
+      praiseBias: vector.praiseBias,
+      interruptPriority: vector.interruptPriority,
+      doNotMock: vector.doNotMock,
+      doNotInitiate: vector.doNotInitiate,
+      protectedTopics: vector.protectedTopics,
+      relationshipState: "base",
+      relationshipScore: Math.max(0, vector.relationshipScore ?? 0),
+      positiveMarks: vector.positiveMarks ?? 0,
+      escalationStage: 0,
+      escalationUpdatedAt: new Date(),
+      coldUntil: null,
+      coldPermanent: false,
+      closeness: vector.closeness,
+      trustLevel: vector.trustLevel,
+      familiarity: vector.familiarity,
+      interactionCount: vector.interactionCount,
+      proactivityPreference: vector.proactivityPreference,
+      topicBoundaries: vector.topicBoundaries,
+    });
+  }
+
+  async setRelationshipState(guildId: string, userId: string, relationshipState: RelationshipState, updatedBy?: string | null) {
+    const vector = await this.getVector(guildId, userId);
+    const nextScore = relationshipState === "cold_lowest" ? -1.5 : relationshipState === "sweet" ? 3 : relationshipState === "close" ? 2 : relationshipState === "warm" ? 1 : vector.relationshipScore ?? 0;
+
+    return this.upsertRelationship({
+      guildId,
+      userId,
+      updatedBy,
+      toneBias: relationshipState === "cold_lowest" ? "sharp" : vector.toneBias,
+      roastLevel: vector.roastLevel,
+      praiseBias: vector.praiseBias,
+      interruptPriority: vector.interruptPriority,
+      doNotMock: vector.doNotMock,
+      doNotInitiate: vector.doNotInitiate,
+      protectedTopics: vector.protectedTopics,
+      relationshipState,
+      relationshipScore: nextScore,
+      positiveMarks: relationshipState === "cold_lowest" ? 0 : vector.positiveMarks,
+      escalationStage: relationshipState === "cold_lowest" ? Math.max(2, vector.escalationStage ?? 0) : vector.escalationStage,
+      escalationUpdatedAt: new Date(),
+      coldUntil: null,
+      coldPermanent: relationshipState === "cold_lowest" ? true : vector.coldPermanent,
+      closeness: vector.closeness,
+      trustLevel: vector.trustLevel,
+      familiarity: vector.familiarity,
+      interactionCount: vector.interactionCount,
+      proactivityPreference: vector.proactivityPreference,
+      topicBoundaries: vector.topicBoundaries,
+    });
+  }
+
+  async applySessionVerdict(
+    guildId: string,
+    userId: string,
+    verdict: "A" | "B" | "V",
+    options: { allowStatePromotion?: boolean; updatedBy?: string | null } = {}
+  ) {
+    const vector = await this.getVector(guildId, userId);
+    const score = vector.relationshipScore ?? 0;
+    const positiveMarks = vector.positiveMarks ?? 0;
+    let nextScore = score;
+    let nextPositiveMarks = positiveMarks;
+
+    if (verdict === "A") {
+      nextPositiveMarks += 1;
+      if (nextPositiveMarks >= 2) {
+        nextScore = clampRelationshipScore(score + 0.5);
+        nextPositiveMarks = 0;
+      }
+    }
+
+    if (verdict === "V") {
+      nextScore = clampRelationshipScore(score - 0.5);
+      nextPositiveMarks = 0;
+    }
+
+    return this.upsertRelationship({
+      guildId,
+      userId,
+      updatedBy: options.updatedBy,
+      toneBias: vector.toneBias,
+      roastLevel: vector.roastLevel,
+      praiseBias: vector.praiseBias,
+      interruptPriority: vector.interruptPriority,
+      doNotMock: vector.doNotMock,
+      doNotInitiate: vector.doNotInitiate,
+      protectedTopics: vector.protectedTopics,
+      relationshipState: resolveRelationshipStateFromScore(
+        options.allowStatePromotion ? nextScore : vector.relationshipScore ?? 0,
+        vector.relationshipState
+      ),
+      relationshipScore: nextScore,
+      positiveMarks: nextPositiveMarks,
+      escalationStage: this.resolveEscalationStage(vector, new Date()),
+      escalationUpdatedAt: vector.escalationUpdatedAt,
+      coldUntil: vector.coldUntil,
+      coldPermanent: vector.coldPermanent,
+      closeness: vector.closeness,
+      trustLevel: vector.trustLevel,
+      familiarity: vector.familiarity,
+      interactionCount: vector.interactionCount,
+      proactivityPreference: vector.proactivityPreference,
+      topicBoundaries: vector.topicBoundaries,
+    });
+  }
+
+  private resolveEscalationStage(vector: Pick<RelationshipOverlay, "escalationStage" | "escalationUpdatedAt">, now: Date) {
+    if (!vector.escalationStage) {
+      return 0;
+    }
+
+    if (!vector.escalationUpdatedAt) {
+      return clampEscalationStage(vector.escalationStage);
+    }
+
+    const staleMs = now.getTime() - vector.escalationUpdatedAt.getTime();
+    return staleMs >= 24 * 60 * 60 * 1000 ? 0 : clampEscalationStage(vector.escalationStage);
   }
 
   private async findProfile(guildId: string, userId: string): Promise<RelationshipProfileRecord | null> {
@@ -278,6 +538,13 @@ export class RelationshipService {
       doNotMock: profile.doNotMock,
       doNotInitiate: profile.doNotInitiate,
       protectedTopics: profile.protectedTopics,
+      relationshipState: profile.relationshipState ?? "base",
+      relationshipScore: clampRelationshipScore(profile.relationshipScore ?? 0),
+      positiveMarks: Math.max(0, profile.positiveMarks ?? 0),
+      escalationStage: clampEscalationStage(profile.escalationStage ?? 0),
+      escalationUpdatedAt: profile.escalationUpdatedAt ?? null,
+      coldUntil: profile.coldUntil ?? null,
+      coldPermanent: profile.coldPermanent ?? false,
     };
   }
 
@@ -347,5 +614,33 @@ function normalizeTopicBoundaries(value: unknown): Record<string, boolean> {
     }
   }
   return normalized;
+}
+
+function clampRelationshipScore(value: number) {
+  return Math.max(-1.5, Math.min(3, value));
+}
+
+function clampEscalationStage(value: number) {
+  return Math.max(0, Math.min(4, Math.trunc(value)));
+}
+
+function resolveRelationshipStateFromScore(score: number, current?: RelationshipState) {
+  if (current === "cold_lowest" || score <= -1.5) {
+    return "cold_lowest" as const;
+  }
+
+  if (score >= 3) {
+    return current === "teasing" ? "teasing" : "sweet";
+  }
+
+  if (score >= 2) {
+    return "close" as const;
+  }
+
+  if (score >= 1) {
+    return "warm" as const;
+  }
+
+  return "base" as const;
 }
 

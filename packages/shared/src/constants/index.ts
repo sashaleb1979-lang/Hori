@@ -3,6 +3,7 @@ export const QUEUE_NAMES = {
   profile: "profile.refresh",
   embedding: "embedding.generate",
   topic: "topic.update",
+  session: "session.evaluate",
   memoryFormation: "memory.formation",
   cleanup: "cleanup.execute",
   searchCache: "search-cache.cleanup"

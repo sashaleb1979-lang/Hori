@@ -6,6 +6,7 @@ export type BotIntent =
   | "search"
   | "profile"
   | "memory_write"
+  | "memory_recall"
   | "memory_forget"
   | "rewrite"
   | "moderation_style_request"
@@ -72,6 +73,14 @@ export type IdeologicalFlavourState = "disabled" | "background" | "enabled";
 
 export type ContextEnergy = "low" | "medium" | "high";
 
+export type RelationshipState = "base" | "warm" | "close" | "teasing" | "sweet" | "cold_lowest" | "serious";
+
+export type MemoryMode = "OFF" | "TRUSTED_ONLY" | "ACTIVE_OPT_IN" | "ADMIN_SELECTED";
+
+export type RelationshipGrowthMode = "OFF" | "MANUAL_REVIEW" | "TRUSTED_AUTO" | "FULL_AUTO";
+
+export type StylePresetMode = "manual_only";
+
 export type ReplyMode =
   | "dry"
   | "mocking"
@@ -124,6 +133,8 @@ export interface PersonaBehaviorTrace {
   bulletListAllowed: boolean;
   followUpAllowed: boolean;
   blocksUsed: string[];
+  promptShape?: "legacy" | "v5_chat";
+  relationshipState?: RelationshipState;
 }
 
 export interface FeatureFlags {
@@ -179,6 +190,13 @@ export interface RelationshipOverlay {
   doNotMock: boolean;
   doNotInitiate: boolean;
   protectedTopics: string[];
+  relationshipState?: RelationshipState;
+  relationshipScore?: number;
+  positiveMarks?: number;
+  escalationStage?: number;
+  escalationUpdatedAt?: Date | null;
+  coldUntil?: Date | null;
+  coldPermanent?: boolean;
 }
 
 export interface MessageEnvelope {
@@ -321,12 +339,27 @@ export interface BotTrace {
     sentiment?: "positive" | "negative" | "neutral";
     lessonId?: string | null;
   };
+  aggression?: {
+    markerDetected: boolean;
+    stageBefore?: number;
+    stageAfter?: number;
+    checkerVerdict?: "AGGRESSIVE" | "OK" | "SKIPPED";
+    moderationRequested?: boolean;
+    timeoutMinutes?: number;
+    replacementText?: string | null;
+  };
+  restoredContext?: {
+    active: boolean;
+    cardId?: string | null;
+    title?: string | null;
+  };
 }
 
 export interface ContextMessage {
   id?: string;
   author: string;
   userId?: string;
+  isBot?: boolean;
   content: string;
   createdAt: Date;
   replyToMessageId?: string | null;
@@ -471,6 +504,7 @@ export interface QueueJobNames {
   profile: "profile.refresh";
   embedding: "embedding.generate";
   topic: "topic.update";
+  session: "session.evaluate";
   memoryFormation: "memory.formation";
   cleanup: "cleanup.execute";
   searchCache: "search-cache.cleanup";
@@ -504,6 +538,12 @@ export interface TopicJobPayload {
   guildId: string;
   channelId: string;
   messageId: string;
+}
+
+export interface SessionJobPayload {
+  guildId: string;
+  channelId: string;
+  userId: string;
 }
 
 export interface CleanupJobPayload {

@@ -34,7 +34,11 @@ describe("emotion media decision", () => {
         ...POWER_PROFILE_PRESETS.balanced,
         mediaAutoGlobalCooldownSec: 7200,
         mediaAutoMinConfidence: 0.82,
-        mediaAutoMinIntensity: 0.62
+        mediaAutoMinIntensity: 0.62,
+        memoryMode: "OFF",
+        relationshipGrowthMode: "OFF",
+        stylePresetMode: "manual_only",
+        maxTimeoutMinutes: 15
       }
     });
 

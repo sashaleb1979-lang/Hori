@@ -45,6 +45,8 @@ model Guild {
   memoryAlbumEntries MemoryAlbumEntry[]
   interactionRequests InteractionRequest[]
   reflectionLessons  ReflectionLesson[]
+  userMemoryCards    HoriUserMemoryCard[]
+  restoredContexts   HoriRestoredContext[]
 }
 
 model ChannelConfig {
@@ -78,6 +80,8 @@ model User {
   relationshipTargets RelationshipProfile[] @relation("RelationshipTarget")
   relationshipUpdates RelationshipProfile[] @relation("RelationshipUpdatedBy")
   userMemoryNotes  UserMemoryNote[]      @relation("UserMemoryTarget")
+  userMemoryCards  HoriUserMemoryCard[]
+  restoredContexts HoriRestoredContext[]
   userDailyAggregates UserDailyAggregate[]
 }
 
@@ -127,6 +131,13 @@ model RelationshipProfile {
   doNotMock        Boolean  @default(false)
   doNotInitiate    Boolean  @default(false)
   protectedTopics  String[] @default([])
+  relationshipState String  @default("base")
+  relationshipScore Float   @default(0)
+  positiveMarks    Int      @default(0)
+  escalationStage  Int      @default(0)
+  escalationUpdatedAt DateTime?
+  coldUntil        DateTime?
+  coldPermanent    Boolean  @default(false)
   closeness        Float    @default(0.5)
   trustLevel       Float    @default(0.5)
   familiarity      Float    @default(0.5)
@@ -231,6 +242,46 @@ model UserMemoryNote {
 
   @@unique([guildId, userId, key])
   @@index([guildId, userId, active])
+}
+
+model HoriUserMemoryCard {
+  id                 String   @id @default(cuid())
+  guildId            String
+  userId             String
+  title              String
+  summary            String[] @default([])
+  details            String[] @default([])
+  openQuestions      String[] @default([])
+  importance         String   @default("normal")
+  sessionRangeStart  DateTime
+  sessionRangeEnd    DateTime
+  sessionMessageCount Int     @default(0)
+  active             Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  guild              Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restoredContexts   HoriRestoredContext[]
+
+  @@index([guildId, userId, active, createdAt])
+}
+
+model HoriRestoredContext {
+  id           String   @id @default(cuid())
+  guildId      String
+  channelId    String
+  userId       String
+  memoryCardId String
+  expiresAt    DateTime?
+  consumedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  guild        Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memoryCard   HoriUserMemoryCard @relation(fields: [memoryCardId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, channelId, userId])
+  @@index([guildId, userId, consumedAt, expiresAt])
 }
 
 model ChannelMemoryNote {

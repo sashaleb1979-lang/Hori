@@ -149,7 +149,7 @@ describe("context intelligence", () => {
     expect(weak.mockeryConfidence).toBeLessThan(0.5);
   });
 
-  it("adds context usage block and scores to persona trace", () => {
+  it("keeps context scores in trace while chat prompt stays on the v5 assembly", () => {
     const contextBuilder = new ContextBuilderService();
     const context = contextBuilder.buildPromptContext(bundle, { message, intent: "chat", contextV2Enabled: true });
     const scores = new ContextScoringService().score({ bundle, message, messageKind: "reply_to_bot" });
@@ -165,11 +165,14 @@ describe("context intelligence", () => {
       contextScores: scores
     });
 
-    expect(result.prompt).toContain("[CONTEXT USAGE BLOCK]");
+    expect(result.prompt).toContain("Ты Хори. Ты русскоязычный Discord-бот.");
+    expect(result.prompt).toContain("Turn instruction:");
+    expect(result.prompt).not.toContain("[CONTEXT USAGE BLOCK]");
     expect(result.trace.contextVersion).toBe("v2");
     expect(result.trace.contextConfidence).toBe(scores.contextConfidence);
     expect(result.trace.activeTopicId).toBe("topic-1");
     expect(result.trace.entityTriggers).toContain("налоги");
+    expect(result.trace.promptShape).toBe("v5_chat");
   });
 
   it("falls back to text when registered media file is missing", async () => {

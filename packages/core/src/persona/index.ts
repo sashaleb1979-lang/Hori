@@ -7,6 +7,7 @@ export * from "./messageKinds";
 export * from "./modes";
 export * from "./persona-service";
 export * from "./presets";
+export * from "./prompt-spec";
 export * from "./selfInterjection";
 export * from "./slang";
 export * from "./types";

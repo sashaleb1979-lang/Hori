@@ -24,7 +24,7 @@ const baseMessage: MessageEnvelope = {
 };
 
 describe("micro reaction service", () => {
-  it("detects direct toxicity addressed to Hori", () => {
+  it("does not short-circuit direct toxicity addressed to Hori", () => {
     const service = new MicroReactionService();
 
     const result = service.detect({
@@ -33,9 +33,7 @@ describe("micro reaction service", () => {
       messageKind: "provocation"
     });
 
-    expect(result?.kind).toBe("toxicity");
-    expect(result?.rule).toBe("direct_toxicity");
-    expect(result?.reply.length).toBeGreaterThan(0);
+    expect(result).toBeNull();
   });
 
   it("detects direct praise addressed to Hori", () => {

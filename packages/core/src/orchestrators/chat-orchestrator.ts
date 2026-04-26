@@ -1,6 +1,6 @@
 import type { AppEnv } from "@hori/config";
 import type { AppLogger, AppPrismaClient, BotReplyPayload, BotTrace, LlmCallTrace, LlmChatMessage, MessageEnvelope, SearchHit } from "@hori/shared";
-import { asErrorMessage, botLatencyHistogram, botRepliesCounter, buildMemoryKey, clamp, normalizeWhitespace } from "@hori/shared";
+import { asErrorMessage, botLatencyHistogram, botRepliesCounter, clamp, normalizeWhitespace } from "@hori/shared";
 
 import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet, getModelProfile } from "@hori/llm";
 import type { LlmChatResponse, LlmClient, ModelRoutingSlot } from "@hori/llm";
@@ -14,6 +14,7 @@ import { getHourInTimeZone, pickContourAResponse, resolveContour, type Contour }
 import { IntentRouter } from "../intents/intent-router";
 import { detectMessageKind } from "../persona/messageKinds";
 import { PersonaService } from "../persona/persona-service";
+import { AGGRESSION_CHECKER_PROMPT, buildRestoredContextBlock, MEMORY_SUMMARIZER_PROMPT } from "../persona/prompt-spec";
 import { HELP_TEXT } from "../prompts/system-prompts";
 import { ResponseGuard } from "../safety/response-guard";
 import { RoastPolicy } from "../safety/roast-policy";
@@ -66,6 +67,32 @@ export interface DebugTraceRecord {
   relationshipApplied: boolean;
   debugTrace: unknown;
   createdAt: Date;
+}
+
+interface AggressionPipelineResult {
+  reply: string;
+  trace: NonNullable<BotTrace["aggression"]>;
+  moderationAction?: {
+    kind: "timeout";
+    durationMinutes: number;
+    replacementText: string;
+  } | null;
+}
+
+interface MemorySessionMessage {
+  role: "User" | "Hori";
+  content: string;
+  createdAt: Date;
+}
+
+interface MemorySummarizerResult {
+  title: string;
+  summary: string[];
+  details: string[];
+  openQuestions: string[];
+  importance: "low" | "normal" | "high";
+  save: boolean;
+  reason?: string | null;
 }
 
 export class ChatOrchestrator {
@@ -140,6 +167,35 @@ export class ChatOrchestrator {
     }
 
     const intent = initialIntent.confidence < 0.7 ? await this.classifyWithLlm(initialIntent.cleanedContent, initialIntent, runtimeSettings, llmCalls) : initialIntent;
+
+    if (intent.intent === "chat") {
+      const recallSelectionReply = await this.tryHandleMemoryRecallSelection(message, intent.cleanedContent);
+      if (recallSelectionReply) {
+        return this.finish(
+          {
+            triggerSource: message.triggerSource,
+            explicitInvocation: message.explicitInvocation,
+            intent: "memory_recall",
+            routeReason: "memory_recall_selection",
+            usedSearch: false,
+            toolNames: [],
+            contextMessages: 0,
+            memoryLayers: [],
+            relationshipApplied: false,
+            responded: true,
+            queue: queueTrace,
+            restoredContext: {
+              active: true,
+              title: recallSelectionReply.title
+            }
+          },
+          startedAt,
+          recallSelectionReply.reply,
+          message
+        );
+      }
+    }
+
     const queryEmbedding = intent.intent !== "help" ? await this.safeEmbed(intent.cleanedContent) : undefined;
     const contextBundle = await this.deps.contextService.buildContext({
       guildId: message.guildId,
@@ -273,6 +329,7 @@ export class ChatOrchestrator {
       isReplyToBot: message.triggerSource === "reply",
       isSelfInitiated: message.triggerSource === "auto_interject"
     });
+    const restoredContext = intent.intent === "chat" ? await this.getActiveRestoredContext(message) : null;
     const systemPrompt = [
       behavior.prompt,
       this.buildEmotionGuidance(emotionalState),
@@ -317,6 +374,13 @@ export class ChatOrchestrator {
           }
         : { enabled: false, entries: 0, layers: [], reason: "not_available" },
       llmCalls,
+      restoredContext: restoredContext
+        ? {
+            active: true,
+            cardId: restoredContext.id,
+            title: restoredContext.title
+          }
+        : { active: false },
       context: {
         ...contextTrace,
         contextConfidence: contextScores?.contextConfidence,
@@ -325,6 +389,7 @@ export class ChatOrchestrator {
     };
 
     let reply = "";
+    let moderationAction: AggressionPipelineResult["moderationAction"] = null;
     const microReaction =
       intent.intent === "chat"
         ? this.microReactions.detect({
@@ -368,6 +433,9 @@ export class ChatOrchestrator {
         case "memory_write":
           reply = await this.handleMemoryWrite(message, intent.cleanedContent);
           break;
+        case "memory_recall":
+          reply = await this.handleMemoryRecall(message, intent.cleanedContent);
+          break;
         case "memory_forget":
           reply = await this.handleMemoryForget(message, intent.cleanedContent);
           break;
@@ -382,15 +450,45 @@ export class ChatOrchestrator {
           break;
         case "chat":
         default:
-          reply = contour.contour === "A"
-            ? pickContourAResponse()
-            : await this.handleChat(intent.cleanedContent, systemPrompt, promptContextText, runtimeSettings, behavior.limits.maxTokens, contour.contour, llmCalls);
+          if (contour.contour === "A") {
+            reply = pickContourAResponse();
+          } else {
+            reply = await this.handleChat({
+              message,
+              content: intent.cleanedContent,
+              behavior,
+              contextBundle,
+              runtimeSettings,
+              maxTokens: behavior.limits.maxTokens,
+              contour: contour.contour,
+              llmCalls,
+              restoredContext: restoredContext ? buildRestoredContextBlock(restoredContext) : null
+            });
+
+            if (restoredContext) {
+              await this.consumeRestoredContext(restoredContext.id);
+            }
+          }
           break;
       }
     } catch (error) {
         this.deps.logger.error({ error, intent: intent.intent, model: this.deps.modelRouter.pickModel(intent.intent, runtimeSettings.modelRouting) }, "llm call failed, sending fallback");
       reply = "Сейчас не могу ответить — мозги перегрелись. Попробуй чуть позже.";
       trace.routeReason = "llm_unavailable";
+    }
+
+    if (intent.intent === "chat" && !microReaction) {
+      const aggressionResult = await this.applyAggressionPipeline({
+        message,
+        reply,
+        relationship: affinityRelationship,
+        runtimeSettings,
+        llmCalls
+      });
+
+      reply = aggressionResult.reply;
+      moderationAction = aggressionResult.moderationAction;
+      trace.aggression = aggressionResult.trace;
     }
 
     const behaviorLimitedIntents = new Set(["analytics", "summary", "search", "rewrite", "chat"]);
@@ -497,7 +595,7 @@ export class ChatOrchestrator {
 
     botRepliesCounter.inc({ intent: intent.intent });
 
-    return this.finish(trace, startedAt, replyPayload, message);
+    return this.finish(trace, startedAt, replyPayload, message, { moderationAction });
   }
 
   async handleContextAction(input: {
@@ -623,26 +721,61 @@ export class ChatOrchestrator {
     return fallback;
   }
 
-  private async handleChat(
-    content: string,
-    systemPrompt: string,
-    contextText: string,
-    runtimeSettings: EffectiveRuntimeSettings,
-    maxTokens?: number,
-    contour: Contour = "B",
-    llmCalls?: LlmCallTrace[]
-  ) {
-    const llm = this.getChatSettingsForContour(contour, runtimeSettings, maxTokens);
-    const messages: Array<{ role: "system" | "user"; content: string }> = [{ role: "system", content: systemPrompt }];
+  private buildStableChatSystemPrompt(behavior: ReturnType<PersonaService["composeBehavior"]>) {
+    return [behavior.assembly.commonCore, behavior.assembly.relationshipTail]
+      .filter(Boolean)
+      .join("\n\n");
+  }
 
-    if (contextText.trim()) {
+  private buildRecentChatTurns(
+    message: MessageEnvelope,
+    contextBundle: Awaited<ReturnType<ContextService["buildContext"]>>
+  ): LlmChatMessage[] {
+    const turns = contextBundle.recentMessages
+      .filter((entry) => entry.id !== message.messageId)
+      .filter((entry) => entry.userId === message.userId || entry.isBot)
+      .filter((entry) => normalizeWhitespace(entry.content).length > 0)
+      .slice(-8)
+      .map((entry) => ({
+        role: entry.isBot ? "assistant" as const : "user" as const,
+        content: entry.content
+      }));
+
+    return turns.slice(-8);
+  }
+
+  private async handleChat(options: {
+    message: MessageEnvelope;
+    content: string;
+    behavior: ReturnType<PersonaService["composeBehavior"]>;
+    contextBundle: Awaited<ReturnType<ContextService["buildContext"]>>;
+    runtimeSettings: EffectiveRuntimeSettings;
+    maxTokens?: number;
+    contour?: Contour;
+    llmCalls?: LlmCallTrace[];
+    restoredContext?: string | null;
+  }) {
+    const llm = this.getChatSettingsForContour(options.contour ?? "B", options.runtimeSettings, options.maxTokens);
+    const messages: LlmChatMessage[] = [
+      {
+        role: "system",
+        content: this.buildStableChatSystemPrompt(options.behavior)
+      }
+    ];
+
+    if (options.restoredContext?.trim()) {
       messages.push({
         role: "system",
-        content: `[BACKGROUND CONTEXT - calibration only]\nСТРОГО: используй контекст ТОЛЬКО для калибровки тона и релевантности. НЕ пересказывай. НЕ ссылайся на события которых нет в контексте. НЕ выдумывай предысторию. Если контекст пустой или не связан с сообщением пользователя — ПОЛНОСТЬЮ ИГНОРИРУЙ его. Лучше ответить коротко чем выдумать историю.\n${contextText}`
+        content: options.restoredContext.trim()
       });
     }
 
-    messages.push({ role: "user", content });
+    messages.push(...this.buildRecentChatTurns(options.message, options.contextBundle));
+    messages.push({
+      role: "system",
+      content: `Turn instruction:\n${options.behavior.assembly.turnInstruction}`
+    });
+    messages.push({ role: "user", content: options.content });
 
     const response = await this.deps.llmClient.chat({
       model: llm.model,
@@ -654,9 +787,193 @@ export class ChatOrchestrator {
       numCtx: llm.numCtx,
       numBatch: llm.numBatch
     });
-    this.recordLlmCall(llmCalls, "chat", llm.model, messages, response);
+    this.recordLlmCall(options.llmCalls, "chat", llm.model, messages, response);
 
     return response.message.content;
+  }
+
+  private extractAggressionMarker(text: string) {
+    const normalized = normalizeWhitespace(text);
+    const match = normalized.match(/^(.*?)(?:[\s.,!?;:()"'`-]+)?агрессивно[\s.,!?;:()"'`-]*$/iu);
+
+    if (!match) {
+      return { hasMarker: false, content: normalized };
+    }
+
+    return {
+      hasMarker: true,
+      content: normalizeWhitespace(match[1] ?? "")
+    };
+  }
+
+  private withVisibleReplacement(reply: string, replacement: string) {
+    const base = normalizeWhitespace(reply);
+    return base ? `${base} ${replacement}` : replacement;
+  }
+
+  private async runAggressionChecker(
+    lastUserMessage: string,
+    horiResponse: string,
+    runtimeSettings: EffectiveRuntimeSettings,
+    llmCalls?: LlmCallTrace[]
+  ) {
+    const llm = this.getLlmSettingsForSlot("classifier", "chat", runtimeSettings, 12, { temperature: 0, topP: 0.1 });
+    const prompt = AGGRESSION_CHECKER_PROMPT
+      .replace("{last_user_message}", lastUserMessage)
+      .replace("{hori_response}", horiResponse);
+    const messages: LlmChatMessage[] = [
+      { role: "system", content: prompt },
+      { role: "user", content: "Ответь только AGGRESSIVE или OK." }
+    ];
+    const response = await this.deps.llmClient.chat({
+      model: llm.model,
+      messages,
+      temperature: llm.temperature,
+      topP: llm.topP,
+      maxTokens: llm.maxTokens,
+      keepAlive: llm.keepAlive,
+      numCtx: llm.numCtx,
+      numBatch: llm.numBatch
+    });
+    this.recordLlmCall(llmCalls, "aggression_checker", llm.model, messages, response);
+
+    return /\bAGGRESSIVE\b/i.test(response.message.content) ? "AGGRESSIVE" : "OK";
+  }
+
+  private async applyAggressionPipeline(options: {
+    message: MessageEnvelope;
+    reply: string;
+    relationship?: { escalationStage?: number | null } | null;
+    runtimeSettings: EffectiveRuntimeSettings;
+    llmCalls?: LlmCallTrace[];
+  }): Promise<AggressionPipelineResult> {
+    const extracted = this.extractAggressionMarker(options.reply);
+    const stageBefore = options.relationship?.escalationStage ?? 0;
+
+    if (!extracted.hasMarker) {
+      return {
+        reply: extracted.content,
+        trace: {
+          markerDetected: false,
+          stageBefore,
+          stageAfter: stageBefore,
+          checkerVerdict: "SKIPPED",
+          moderationRequested: false,
+          replacementText: null
+        },
+        moderationAction: null
+      };
+    }
+
+    if (!this.deps.relationships) {
+      return {
+        reply: extracted.content,
+        trace: {
+          markerDetected: true,
+          stageBefore,
+          stageAfter: stageBefore,
+          checkerVerdict: "SKIPPED",
+          moderationRequested: false,
+          replacementText: null
+        },
+        moderationAction: null
+      };
+    }
+
+    const updated = await this.deps.relationships.noteAggressionMarker(options.message.guildId, options.message.userId);
+    const stageAfter = updated.escalationStage ?? Math.min(4, stageBefore + 1);
+
+    if (stageAfter === 1) {
+      const replacementText = "предупреждаю, не надо так.";
+      return {
+        reply: this.withVisibleReplacement(extracted.content, replacementText),
+        trace: {
+          markerDetected: true,
+          stageBefore,
+          stageAfter,
+          checkerVerdict: "SKIPPED",
+          moderationRequested: false,
+          replacementText
+        },
+        moderationAction: null
+      };
+    }
+
+    if (stageAfter === 2) {
+      const verdict = await this.runAggressionChecker(options.message.content, extracted.content, options.runtimeSettings, options.llmCalls);
+      const replacementText = "я это запомню.";
+
+      if (verdict === "AGGRESSIVE") {
+        await this.deps.relationships.confirmAggression(options.message.guildId, options.message.userId);
+      }
+
+      return {
+        reply: this.withVisibleReplacement(extracted.content, replacementText),
+        trace: {
+          markerDetected: true,
+          stageBefore,
+          stageAfter,
+          checkerVerdict: verdict,
+          moderationRequested: false,
+          replacementText
+        },
+        moderationAction: null
+      };
+    }
+
+    if (stageAfter === 3) {
+      const replacementText = "последний раз предупреждаю.";
+      return {
+        reply: this.withVisibleReplacement(extracted.content, replacementText),
+        trace: {
+          markerDetected: true,
+          stageBefore,
+          stageAfter,
+          checkerVerdict: "SKIPPED",
+          moderationRequested: false,
+          replacementText
+        },
+        moderationAction: null
+      };
+    }
+
+    const verdict = await this.runAggressionChecker(options.message.content, extracted.content, options.runtimeSettings, options.llmCalls);
+
+    if (verdict === "AGGRESSIVE") {
+      const timeoutMinutes = Math.max(1, Math.min(15, options.runtimeSettings.maxTimeoutMinutes));
+      const replacementText = `тайм-аут на ${timeoutMinutes} минут.`;
+      await this.deps.relationships.confirmAggression(options.message.guildId, options.message.userId, { timedOut: true });
+      return {
+        reply: extracted.content,
+        trace: {
+          markerDetected: true,
+          stageBefore,
+          stageAfter,
+          checkerVerdict: verdict,
+          moderationRequested: true,
+          timeoutMinutes,
+          replacementText
+        },
+        moderationAction: {
+          kind: "timeout",
+          durationMinutes: timeoutMinutes,
+          replacementText
+        }
+      };
+    }
+
+    return {
+      reply: extracted.content,
+      trace: {
+        markerDetected: true,
+        stageBefore,
+        stageAfter,
+        checkerVerdict: verdict,
+        moderationRequested: false,
+        replacementText: null
+      },
+      moderationAction: null
+    };
   }
 
   private async handleSummary(
@@ -915,48 +1232,485 @@ export class ChatOrchestrator {
     }
   }
 
-  private async handleMemoryWrite(message: MessageEnvelope, cleanedContent: string) {
-    if (!message.isModerator) {
-      return "Не. Это только для модератора.";
-    }
-
-    const fact = normalizeWhitespace(cleanedContent.replace(/^запомни\b/i, ""));
-
-    if (!fact) {
-      return "Скажи что именно запомнить.";
-    }
-
-    const key = buildMemoryKey(fact);
-    const memory = await this.deps.retrieval.rememberServerFact({
-      guildId: message.guildId,
-      key,
-      value: fact,
-      type: "manual_note",
-      createdBy: message.userId,
-      source: "message"
+  private async getLatestSession(message: MessageEnvelope) {
+    const since = new Date(message.createdAt.getTime() - 3 * 60 * 60 * 1000);
+    const rows = await this.deps.prisma.message.findMany({
+      where: {
+        guildId: message.guildId,
+        channelId: message.channelId,
+        createdAt: { gte: since },
+        id: { not: message.messageId },
+        OR: [
+          { userId: message.userId },
+          { user: { isBot: true } }
+        ]
+      },
+      orderBy: { createdAt: "desc" },
+      take: 80,
+      include: {
+        user: {
+          select: {
+            isBot: true
+          }
+        }
+      }
     });
 
-    const embedding = await this.safeEmbed(memory.value);
-    if (embedding?.length) {
-      await this.deps.retrieval.setEmbedding("server_memory", memory.id, `[${embedding.join(",")}]`);
+    if (!rows.length) {
+      return null;
     }
 
-    return `Ладно. Запомнила: ${fact}`;
+    const sessionRows: typeof rows = [];
+    for (const row of rows) {
+      if (sessionRows.length) {
+        const newest = sessionRows[sessionRows.length - 1];
+        if (newest.createdAt.getTime() - row.createdAt.getTime() > 10 * 60 * 1000) {
+          break;
+        }
+      }
+      sessionRows.push(row);
+    }
+
+    const ordered = [...sessionRows].reverse();
+    const messages = ordered
+      .filter((row) => normalizeWhitespace(row.content).length > 0)
+      .map((row) => ({
+        role: row.user.isBot ? "Hori" as const : "User" as const,
+        content: row.content,
+        createdAt: row.createdAt
+      }));
+
+    const hasUser = messages.some((entry) => entry.role === "User");
+    const hasHori = messages.some((entry) => entry.role === "Hori");
+    if (!hasUser || !hasHori || messages.length < 3) {
+      return null;
+    }
+
+    return {
+      messages,
+      rangeStart: messages[0]?.createdAt ?? message.createdAt,
+      rangeEnd: messages[messages.length - 1]?.createdAt ?? message.createdAt
+    };
+  }
+
+  private formatSessionForSummarizer(messages: MemorySessionMessage[]) {
+    return messages.map((entry) => `${entry.role}: ${entry.content}`).join("\n");
+  }
+
+  private parseSummarizerLines(value: string) {
+    return value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => line.replace(/^[-*]\s*/, ""))
+      .filter(Boolean);
+  }
+
+  private parseMemorySummarizerOutput(text: string): MemorySummarizerResult {
+    const normalized = text.replace(/\r/g, "").trim();
+    const lines = normalized.split("\n");
+    const sections = new Map<string, string[]>();
+    let currentKey: string | null = null;
+
+    for (const line of lines) {
+      const match = line.match(/^(title|summary|details|openQuestions|importance|save)\s*:\s*(.*)$/i);
+      if (match) {
+        currentKey = match[1];
+        const value = match[2]?.trim();
+        sections.set(currentKey, value ? [value] : []);
+        continue;
+      }
+
+      if (currentKey) {
+        sections.get(currentKey)?.push(line);
+      }
+    }
+
+    const saveRaw = sections.get("save")?.join(" ").trim().toLowerCase() ?? "false";
+    const summary = this.parseSummarizerLines((sections.get("summary") ?? []).join("\n"));
+    const details = this.parseSummarizerLines((sections.get("details") ?? []).join("\n"));
+    const openQuestions = this.parseSummarizerLines((sections.get("openQuestions") ?? []).join("\n"));
+    const importance = ((sections.get("importance")?.join(" ").trim().toLowerCase() ?? "normal") as MemorySummarizerResult["importance"]);
+
+    return {
+      title: sections.get("title")?.join(" ").trim() || "Без названия",
+      summary,
+      details,
+      openQuestions,
+      importance: importance === "low" || importance === "high" ? importance : "normal",
+      save: /^true\b/.test(saveRaw),
+      reason: /^false\b(.+)?$/.test(saveRaw) ? saveRaw.replace(/^false\b[:\-]?\s*/i, "").trim() || null : null
+    };
+  }
+
+  private async summarizeMemorySession(messages: MemorySessionMessage[]) {
+    const runtimeSettings = await this.deps.runtimeConfig.getRuntimeSettings();
+    const llm = this.getLlmSettings("summary", runtimeSettings, 280, { temperature: 0 });
+    const promptMessages: LlmChatMessage[] = [
+      { role: "system", content: MEMORY_SUMMARIZER_PROMPT },
+      { role: "user", content: this.formatSessionForSummarizer(messages) }
+    ];
+    const response = await this.deps.llmClient.chat({
+      model: llm.model,
+      messages: promptMessages,
+      temperature: llm.temperature,
+      topP: llm.topP,
+      maxTokens: llm.maxTokens,
+      keepAlive: llm.keepAlive,
+      numCtx: llm.numCtx,
+      numBatch: llm.numBatch
+    });
+
+    return this.parseMemorySummarizerOutput(response.message.content);
+  }
+
+  private parseMemorySelection(rawValue: string, cards: Array<{ id: string; title: string }>) {
+    const value = normalizeWhitespace(rawValue).toLowerCase();
+    if (!value) {
+      return null;
+    }
+
+    const numeric = Number(value);
+    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= cards.length) {
+      return cards[numeric - 1] ?? null;
+    }
+
+    return cards.find((card) => card.title.toLowerCase() === value)
+      ?? cards.find((card) => card.title.toLowerCase().includes(value));
+  }
+
+  private async activateRestoredContext(message: MessageEnvelope, cardId: string) {
+    const restoredContext = (this.deps.prisma as typeof this.deps.prisma & {
+      horiRestoredContext?: {
+        upsert(args: unknown): Promise<unknown>;
+      };
+    }).horiRestoredContext;
+
+    if (!restoredContext?.upsert) {
+      return null;
+    }
+
+    return restoredContext.upsert({
+      where: {
+        guildId_channelId_userId: {
+          guildId: message.guildId,
+          channelId: message.channelId,
+          userId: message.userId
+        }
+      },
+      update: {
+        memoryCardId: cardId,
+        consumedAt: null,
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000)
+      },
+      create: {
+        guildId: message.guildId,
+        channelId: message.channelId,
+        userId: message.userId,
+        memoryCardId: cardId,
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000)
+      }
+    });
+  }
+
+  private async getActiveRestoredContext(message: MessageEnvelope) {
+    const restoredContext = (this.deps.prisma as typeof this.deps.prisma & {
+      horiRestoredContext?: {
+        findUnique(args: unknown): Promise<{
+          id: string;
+          expiresAt: Date | null;
+          consumedAt: Date | null;
+          memoryCard: {
+            title: string;
+            summary: string[];
+            details: string[];
+            openQuestions: string[];
+            active: boolean;
+          };
+        } | null>;
+      };
+    }).horiRestoredContext;
+
+    if (!restoredContext?.findUnique) {
+      return null;
+    }
+
+    const row = await restoredContext.findUnique({
+      where: {
+        guildId_channelId_userId: {
+          guildId: message.guildId,
+          channelId: message.channelId,
+          userId: message.userId
+        }
+      },
+      include: {
+        memoryCard: true
+      }
+    });
+
+    if (!row || row.consumedAt || (row.expiresAt && row.expiresAt.getTime() <= Date.now()) || !row.memoryCard.active) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      title: row.memoryCard.title,
+      summary: row.memoryCard.summary,
+      details: row.memoryCard.details,
+      openQuestions: row.memoryCard.openQuestions
+    };
+  }
+
+  private async consumeRestoredContext(id: string) {
+    const restoredContext = (this.deps.prisma as typeof this.deps.prisma & {
+      horiRestoredContext?: {
+        update(args: unknown): Promise<unknown>;
+      };
+    }).horiRestoredContext;
+
+    if (!restoredContext?.update) {
+      return;
+    }
+
+    await restoredContext.update({
+      where: { id },
+      data: { consumedAt: new Date() }
+    });
+  }
+
+  private async tryHandleMemoryRecallSelection(message: MessageEnvelope, cleanedContent: string) {
+    const interactionRequest = (this.deps.prisma as typeof this.deps.prisma & {
+      interactionRequest?: {
+        findFirst(args: unknown): Promise<{ id: string } | null>;
+        update(args: unknown): Promise<unknown>;
+      };
+      horiUserMemoryCard?: {
+        findMany(args: unknown): Promise<Array<{ id: string; title: string }>>;
+      };
+    }).interactionRequest;
+    const memoryCard = (this.deps.prisma as typeof this.deps.prisma & {
+      horiUserMemoryCard?: {
+        findMany(args: unknown): Promise<Array<{ id: string; title: string }>>;
+      };
+    }).horiUserMemoryCard;
+
+    if (!interactionRequest?.findFirst || !interactionRequest.update || !memoryCard?.findMany) {
+      return null;
+    }
+
+    const pending = await interactionRequest.findFirst({
+      where: {
+        guildId: message.guildId,
+        channelId: message.channelId,
+        userId: message.userId,
+        category: "hori_memory_recall",
+        status: "pending",
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }]
+      },
+      orderBy: { createdAt: "desc" }
+    });
+
+    if (!pending) {
+      return null;
+    }
+
+    const cards = await memoryCard.findMany({
+      where: {
+        guildId: message.guildId,
+        userId: message.userId,
+        active: true
+      },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+      select: { id: true, title: true }
+    });
+    const selected = this.parseMemorySelection(cleanedContent, cards);
+
+    if (!selected) {
+      return null;
+    }
+
+    await this.activateRestoredContext(message, selected.id);
+    await interactionRequest.update({
+      where: { id: pending.id },
+      data: {
+        status: "answered",
+        answerText: cleanedContent,
+        answerJson: { memoryCardId: selected.id, title: selected.title } as never,
+        answeredAt: new Date()
+      }
+    });
+
+    return {
+      reply: `вспомнила: ${selected.title}`,
+      title: selected.title
+    };
+  }
+
+  private async handleMemoryWrite(message: MessageEnvelope, _cleanedContent: string) {
+    const session = await this.getLatestSession(message);
+
+    if (!session) {
+      return "тут нечего сохранять";
+    }
+
+    const summary = await this.summarizeMemorySession(session.messages);
+    if (!summary.save || !summary.summary.length) {
+      return "тут нечего сохранять";
+    }
+
+    const card = await this.deps.prisma.horiUserMemoryCard.create({
+      data: {
+        guildId: message.guildId,
+        userId: message.userId,
+        title: summary.title,
+        summary: summary.summary,
+        details: summary.details,
+        openQuestions: summary.openQuestions,
+        importance: summary.importance,
+        sessionRangeStart: session.rangeStart,
+        sessionRangeEnd: session.rangeEnd,
+        sessionMessageCount: session.messages.length
+      }
+    });
+
+    return `запомнила: ${card.title}`;
+  }
+
+  private async handleMemoryRecall(message: MessageEnvelope, cleanedContent: string) {
+    const cards = await this.deps.prisma.horiUserMemoryCard.findMany({
+      where: {
+        guildId: message.guildId,
+        userId: message.userId,
+        active: true
+      },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+      select: {
+        id: true,
+        title: true
+      }
+    });
+
+    if (!cards.length) {
+      return "пока пусто.";
+    }
+
+    const selectionText = normalizeWhitespace(cleanedContent.replace(/^вспомни\b/i, ""));
+    const directSelection = this.parseMemorySelection(selectionText, cards);
+    if (directSelection) {
+      await this.activateRestoredContext(message, directSelection.id);
+      return `вспомнила: ${directSelection.title}`;
+    }
+
+    await this.deps.prisma.interactionRequest.updateMany({
+      where: {
+        guildId: message.guildId,
+        channelId: message.channelId,
+        userId: message.userId,
+        category: "hori_memory_recall",
+        status: "pending"
+      },
+      data: {
+        status: "cancelled",
+        answerText: "superseded"
+      }
+    });
+
+    await this.deps.prisma.interactionRequest.create({
+      data: {
+        guildId: message.guildId,
+        channelId: message.channelId,
+        messageId: message.messageId,
+        userId: message.userId,
+        requestType: "choice",
+        status: "pending",
+        title: "Хори, вспомни",
+        prompt: "напиши номер или название темы",
+        category: "hori_memory_recall",
+        expectedAnswerType: "number_or_title",
+        allowedOptions: cards.map((card) => card.title),
+        metadataJson: {
+          options: cards
+        } as never,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000)
+      }
+    });
+
+    return [
+      "вспомнила. есть темы:",
+      ...cards.map((card, index) => `${index + 1}. ${card.title}`),
+      "напиши номер или название."
+    ].join("\n");
   }
 
   private async handleMemoryForget(message: MessageEnvelope, cleanedContent: string) {
-    if (!message.isModerator) {
-      return "Не. Это только для модератора.";
+    const selectionText = normalizeWhitespace(cleanedContent.replace(/^забудь\b/i, ""));
+
+    if (!selectionText) {
+      return "скажи что забыть.";
     }
 
-    const factKey = buildMemoryKey(normalizeWhitespace(cleanedContent.replace(/^забудь\b/i, "")));
+    const cards = await this.deps.prisma.horiUserMemoryCard.findMany({
+      where: {
+        guildId: message.guildId,
+        userId: message.userId,
+        active: true
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: {
+        id: true,
+        title: true
+      }
+    });
 
-    if (!factKey) {
-      return "Скажи что забыть.";
+    if (/всё|все|обо мне/i.test(selectionText)) {
+      await this.deps.prisma.horiUserMemoryCard.updateMany({
+        where: {
+          guildId: message.guildId,
+          userId: message.userId,
+          active: true
+        },
+        data: {
+          active: false
+        }
+      });
+      await this.deps.prisma.horiRestoredContext.updateMany({
+        where: {
+          guildId: message.guildId,
+          userId: message.userId,
+          consumedAt: null
+        },
+        data: {
+          consumedAt: new Date()
+        }
+      });
+      return "забыла всё, что было сохранено.";
     }
 
-    await this.deps.retrieval.forgetServerFact(message.guildId, factKey);
-    return `Удалила память по ${factKey}.`;
+    const selected = this.parseMemorySelection(selectionText, cards);
+    if (!selected) {
+      return "не нашла такую тему.";
+    }
+
+    await this.deps.prisma.horiUserMemoryCard.update({
+      where: { id: selected.id },
+      data: { active: false }
+    });
+    await this.deps.prisma.horiRestoredContext.updateMany({
+      where: {
+        guildId: message.guildId,
+        channelId: message.channelId,
+        userId: message.userId,
+        memoryCardId: selected.id
+      },
+      data: {
+        consumedAt: new Date()
+      }
+    });
+
+    return `забыла: ${selected.title}`;
   }
 
   private async handleRewrite(
@@ -1270,34 +2024,23 @@ export class ChatOrchestrator {
       return;
     }
 
-    const isToxic = messageKind === "provocation" || (conflict.isConflict && conflict.score >= 0.4);
-
-    if (isToxic) {
-      try {
-        await this.deps.relationships.recordToxicBehavior(message.guildId, message.userId);
-      } catch (error) {
-        this.deps.logger.warn({ error }, "failed to record toxic behavior");
-      }
-      return;
-    }
-
     const baseSentiment: Record<ReturnType<typeof detectMessageKind>, number> = {
       direct_mention: 0.08,
       reply_to_bot: 0.1,
-      meta_feedback: -0.08,
+      meta_feedback: 0,
       casual_address: 0.04,
       smalltalk_hangout: 0.12,
       info_question: 0.06,
       opinion_question: 0.01,
       request_for_explanation: 0.1,
       meme_bait: 0.03,
-      provocation: -0.35,
-      repeated_question: -0.18,
-      low_signal_noise: -0.04,
+      provocation: 0,
+      repeated_question: 0,
+      low_signal_noise: 0,
       command_like_request: 0.03,
     };
 
-    const sentiment = clamp(baseSentiment[messageKind] - (conflict.isConflict ? conflict.score * 0.5 : 0), -1, 1);
+    const sentiment = clamp(baseSentiment[messageKind], -1, 1);
 
     try {
       await this.deps.relationships.recordInteraction(message.guildId, message.userId, sentiment);
@@ -1315,11 +2058,6 @@ export class ChatOrchestrator {
     }
 
     try {
-      if (microReaction.kind === "toxicity") {
-        await this.deps.relationships.recordToxicBehavior(message.guildId, message.userId);
-        return;
-      }
-
       await this.deps.relationships.recordInteraction(message.guildId, message.userId, 0.22);
     } catch (error) {
       this.deps.logger.warn({ error }, "failed to record micro reaction relationship signal");
@@ -1460,7 +2198,13 @@ export class ChatOrchestrator {
     return null;
   }
 
-  private async finish(trace: BotTrace, startedAt: number, reply?: string | BotReplyPayload, message?: MessageEnvelope) {
+  private async finish(
+    trace: BotTrace,
+    startedAt: number,
+    reply?: string | BotReplyPayload,
+    message?: MessageEnvelope,
+    meta: { moderationAction?: AggressionPipelineResult["moderationAction"] } = {}
+  ) {
     trace.latencyMs = Date.now() - startedAt;
 
     if (trace.responded) {
@@ -1494,7 +2238,7 @@ export class ChatOrchestrator {
       });
     }
 
-    return { reply, trace };
+    return { reply, trace, moderationAction: meta.moderationAction ?? null };
   }
 }
 

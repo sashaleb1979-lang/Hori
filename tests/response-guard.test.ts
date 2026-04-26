@@ -59,5 +59,11 @@ describe("normalizeOutput", () => {
   it("collapses excessive newlines", () => {
     expect(normalizeOutput("а\n\n\n\nб")).toBe("а\n\nб");
   });
+
+  it("strips the aggression marker fail-safe before delivery", () => {
+    const result = normalizeOutput("ответ по делу агрессивно...");
+    expect(result).not.toContain("агрессивно");
+    expect(result).toContain("ответ по делу");
+  });
 });
 

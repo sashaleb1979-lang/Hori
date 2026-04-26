@@ -16,7 +16,19 @@ import {
   TextInputStyle
 } from "discord.js";
 
-import { CONTEXT_ACTIONS, asErrorMessage, parseCsv, persistOllamaBaseUrl, type MemoryFormationJobPayload, type MessageEnvelope, type PersonaMode } from "@hori/shared";
+import {
+  CONTEXT_ACTIONS,
+  asErrorMessage,
+  parseCsv,
+  persistOllamaBaseUrl,
+  type MemoryFormationJobPayload,
+  type MemoryMode,
+  type MessageEnvelope,
+  type PersonaMode,
+  type RelationshipGrowthMode,
+  type RelationshipState,
+  type StylePresetMode
+} from "@hori/shared";
 import { RelationshipService } from "@hori/memory";
 import {
   isModelRoutingModelId,
@@ -640,6 +652,7 @@ async function handleHoriCommand(
       interaction.options.getBoolean("do-not-mock") !== null ||
       interaction.options.getBoolean("do-not-initiate") !== null ||
       interaction.options.getString("protected-topics") !== null ||
+      interaction.options.getString("relationship-state") !== null ||
       interaction.options.getNumber("closeness") !== null ||
       interaction.options.getNumber("trust") !== null ||
       interaction.options.getNumber("familiarity") !== null ||
@@ -657,6 +670,7 @@ async function handleHoriCommand(
             protectedTopics: interaction.options.getString("protected-topics")
               ? parseCsv(interaction.options.getString("protected-topics") ?? undefined)
               : undefined,
+            relationshipState: (interaction.options.getString("relationship-state") as RelationshipState | null) ?? undefined,
             closeness: interaction.options.getNumber("closeness") ?? undefined,
             trustLevel: interaction.options.getNumber("trust") ?? undefined,
             familiarity: interaction.options.getNumber("familiarity") ?? undefined,
@@ -671,6 +685,84 @@ async function handleHoriCommand(
       content,
       flags: MessageFlags.Ephemeral
     });
+    return;
+  }
+
+  if (subcommand === "runtime") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Runtime V5 режимы только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const updates: string[] = [];
+    const memoryMode = interaction.options.getString("memory-mode") as MemoryMode | null;
+    const growthMode = interaction.options.getString("relationship-growth-mode") as RelationshipGrowthMode | null;
+    const stylePresetMode = interaction.options.getString("style-preset-mode") as StylePresetMode | null;
+    const maxTimeoutMinutes = interaction.options.getInteger("max-timeout-minutes");
+
+    if (memoryMode) {
+      updates.push(await runtime.slashAdmin.setMemoryMode(memoryMode, interaction.user.id));
+    }
+
+    if (growthMode) {
+      updates.push(await runtime.slashAdmin.setRelationshipGrowthMode(growthMode, interaction.user.id));
+    }
+
+    if (stylePresetMode) {
+      updates.push(await runtime.slashAdmin.setStylePresetMode(stylePresetMode, interaction.user.id));
+    }
+
+    if (maxTimeoutMinutes !== null) {
+      updates.push(await runtime.slashAdmin.setMaxTimeoutMinutes(maxTimeoutMinutes, interaction.user.id));
+    }
+
+    const content = updates.length
+      ? [...updates, "", await runtime.slashAdmin.runtimeModesStatus()].join("\n")
+      : await runtime.slashAdmin.runtimeModesStatus();
+
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (subcommand === "aggression") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Aggression control только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const targetUserId = interaction.options.getUser("user", true).id;
+    const action = interaction.options.getString("action", true);
+    const content = action === "reset-escalation"
+      ? await runtime.slashAdmin.resetRelationshipEscalation(interaction.guildId, targetUserId)
+      : action === "reset-cold"
+        ? await runtime.slashAdmin.resetRelationshipCold(interaction.guildId, targetUserId, interaction.user.id)
+        : await runtime.slashAdmin.aggressionEvents(interaction.guildId, targetUserId, interaction.options.getInteger("limit") ?? 8);
+
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (subcommand === "memory-cards") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Memory cards доступны только модерам.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const targetUserId = interaction.options.getUser("user", true).id;
+    const action = interaction.options.getString("action", true);
+    const content = action === "remove"
+      ? await runtime.slashAdmin.removeMemoryCard(
+          interaction.guildId,
+          targetUserId,
+          interaction.options.getString("id") ?? ""
+        )
+      : await runtime.slashAdmin.listMemoryCards(
+          interaction.guildId,
+          targetUserId,
+          interaction.options.getInteger("limit") ?? 8
+        );
+
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
     return;
   }
 

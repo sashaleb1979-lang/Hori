@@ -208,6 +208,7 @@ export function detectMessageKind(options: {
     options.intent === "analytics" ||
     options.intent === "search" ||
     options.intent === "memory_write" ||
+    options.intent === "memory_recall" ||
     options.intent === "memory_forget" ||
     options.intent === "rewrite" ||
     commandLikePattern.test(content)

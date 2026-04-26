@@ -10,9 +10,6 @@ export class AffinityService {
     messageKind: MessageKind;
   }) {
     const valueByKind: Partial<Record<MessageKind, number>> = {
-      provocation: -0.35,
-      repeated_question: -0.25,
-      low_signal_noise: -0.1,
       request_for_explanation: 0.08,
       info_question: 0.05,
       casual_address: 0.03,

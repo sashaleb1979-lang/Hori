@@ -89,7 +89,7 @@ function compose(content: string, overrides: ComposeOverrides = {}) {
 }
 
 describe("composeBehaviorPrompt", () => {
-  it("builds deterministic blocks and trace defaults", () => {
+  it("builds deterministic v5 chat assembly and trace defaults", () => {
     const result = compose("привет");
     const uniqueBlocks = new Set(result.trace.blocksUsed);
 
@@ -102,15 +102,15 @@ describe("composeBehaviorPrompt", () => {
     expect(result.trace.contextEnergy).toBe("low");
     expect(result.trace.snarkConfidenceThreshold).toBe(0.68);
     expect(result.trace.mediaReactionEligible).toBe(false);
-    expect(result.prompt).not.toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
-    expect(result.prompt).not.toContain("[SELF-INITIATED INTERJECTION CONSTRAINTS BLOCK]");
-    expect(result.prompt).not.toContain("[STALE TAKE / MEDIA REACTION BLOCK]");
-    expect(result.prompt).toContain("[LOW-PRESSURE SMALLTALK BLOCK]");
+    expect(result.prompt).toContain("Ты Хори. Ты русскоязычный Discord-бот.");
+    expect(result.prompt).toContain("Turn instruction:");
+    expect(result.trace.promptShape).toBe("v5_chat");
     expect(result.prompt.length).toBeLessThanOrEqual(8500);
-    expect(result.trace.blocksUsed[0]).toBe("STABLE IDENTITY BLOCK");
-    expect(result.trace.blocksUsed).toContain("IDENTITY & CORE");
-    expect(result.trace.blocksUsed).toContain("REPLY MODE");
-    expect(result.trace.blocksUsed).toContain("FEW-SHOT TONE ANCHORS");
+    expect(result.trace.blocksUsed[0]).toBe("COMMON_CORE_BASE");
+    expect(result.trace.blocksUsed).toContain("BASE_TAIL");
+    expect(result.trace.blocksUsed).toContain("TURN_INSTRUCTION");
+    expect(result.trace.blocksUsed).not.toContain("SERVER_RULES");
+    expect(result.prompt).not.toContain("Правила сервера:");
     expect(result.trace.replyMode).toBeDefined();
     expect(uniqueBlocks.size).toBe(result.trace.blocksUsed.length);
   });
@@ -175,8 +175,7 @@ describe("composeBehaviorPrompt", () => {
     });
 
     expect(result.trace.messageKind).toBe("reply_to_bot");
-    expect(result.prompt).toContain("[CONCRETE CHAT GROUNDING BLOCK]");
-    expect(result.prompt).toContain("Пользователь сейчас сужает или правит прошлый ответ");
+    expect(result.prompt).toContain("Исправь только указанное. Не переписывай всё и не меняй остальное.");
     expect(result.limits.maxChars).toBeLessThanOrEqual(190);
   });
 
@@ -190,9 +189,9 @@ describe("composeBehaviorPrompt", () => {
     expect(result.trace.messageKind).toBe("meta_feedback");
     expect(result.trace.activeMode).toBe("dry");
     expect(result.trace.stylePreset).toBe("curt");
-    expect(result.prompt).toContain("[META-FEEDBACK BLOCK]");
+    expect(result.prompt).toContain("Исправь только указанное. Не переписывай всё и не меняй остальное.");
     expect(result.limits.maxChars).toBeLessThanOrEqual(120);
-    expect(result.prompt).toContain("Не говори: 'я не бот'");
+    expect(result.trace.promptShape).toBe("v5_chat");
   });
 
   it("keeps botness complaints short and free of self-lore guidance", () => {
@@ -203,9 +202,7 @@ describe("composeBehaviorPrompt", () => {
     });
 
     expect(result.trace.messageKind).toBe("meta_feedback");
-    expect(result.prompt).toContain("исправь конкретный сбой");
-    expect(result.prompt).toContain("Не спорь о том, бот ли ты");
-    expect(result.prompt).not.toContain("живой серверный персонаж Discord");
+    expect(result.prompt).toContain("Исправь только указанное. Не переписывай всё и не меняй остальное.");
     expect(result.limits.maxChars).toBeLessThanOrEqual(120);
   });
 
@@ -213,18 +210,19 @@ describe("composeBehaviorPrompt", () => {
     const result = compose("заткнись");
 
     expect(result.trace.messageKind).toBe("provocation");
-    expect(result.prompt).toContain("Лестница реакции на грубость");
-    expect(result.prompt).toContain("Не обещай тайм-аут");
+    expect(result.prompt).toContain("агрессивно");
+    expect(result.prompt).toContain("Если в сообщении есть нормальный вопрос — сначала ответь по делу.");
   });
 
-  it("adds direct-message punctuation guidance when the message is a DM", () => {
+  it("keeps direct-message chat on the same v5 prompt shape", () => {
     const result = compose("ладно", {
       message: {
         isDirectMessage: true
       }
     });
 
-    expect(result.prompt).toContain("Если это личка, короткие прямые сообщения заканчивай без финальной точки вообще.");
+    expect(result.trace.promptShape).toBe("v5_chat");
+    expect(result.prompt).toContain("Ты Хори. Ты русскоязычный Discord-бот.");
   });
 
   it("keeps what-is-this-nonsense replies in meta-feedback when aimed at the bot", () => {
@@ -242,12 +240,8 @@ describe("composeBehaviorPrompt", () => {
     const result = compose("что такое индексы в базе?");
 
     expect(result.trace.antiSlopProfile).toBe("strict");
-    expect(result.prompt).toContain("[ANTI-SLOP BLOCK]");
-    expect(result.prompt).toContain("[ANALOGY SUPPRESSION BLOCK]");
-    expect(result.prompt).toContain("это как если бы");
-    expect(result.prompt).toContain("это похоже на");
-    expect(result.prompt).toContain("аналогично тому как");
-    expect(result.prompt).toContain("imagine if");
+    expect(result.trace.promptShape).toBe("v5_chat");
+    expect(result.prompt).toContain("Turn instruction:");
   });
 
   it("enables ideological flavour only as a topical layer", () => {
@@ -259,17 +253,12 @@ describe("composeBehaviorPrompt", () => {
     });
 
     expect(political.trace.ideologicalFlavour).toBe("enabled");
-    expect(political.prompt).toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
-    expect(political.prompt).toContain("anarcho-capitalist");
-    expect(political.prompt).toContain("anti-state");
-    expect(political.prompt).toContain("серьёзнее, суше и жёстче");
+    expect(political.trace.promptShape).toBe("v5_chat");
     expect(nonPoliticalOpinion.trace.ideologicalFlavour).toBe("background");
-    expect(nonPoliticalOpinion.prompt).not.toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
-    expect(nonPoliticalOpinion.prompt).not.toContain("strong pro-Israel bias");
     expect(casual.trace.ideologicalFlavour).toBe("background");
     expect(casual.trace.messageKind).toBe("smalltalk_hangout");
     expect(disabled.trace.ideologicalFlavour).toBe("disabled");
-    expect(disabled.prompt).not.toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
+    expect(disabled.trace.promptShape).toBe("v5_chat");
   });
 
   it("detects low-pressure hangout smalltalk without forcing banter", () => {
@@ -281,11 +270,9 @@ describe("composeBehaviorPrompt", () => {
       expect(result.trace.messageKind).toBe("smalltalk_hangout");
       expect(result.trace.smalltalkContextHook).toBe(false);
       expect(result.trace.stylePreset).toBe("low_pressure_short");
-      expect(result.prompt).toContain("[LOW-PRESSURE SMALLTALK BLOCK]");
-      expect(result.prompt).not.toContain("[IDEOLOGICAL FLAVOUR BLOCK]");
-      expect(result.prompt).not.toContain("[STALE TAKE / MEDIA REACTION BLOCK]");
-      expect(result.prompt).not.toContain("[SELF-INITIATED INTERJECTION CONSTRAINTS BLOCK]");
-      expect(result.prompt).not.toContain("controlled bite");
+      expect(result.prompt).toContain("Turn instruction:");
+      expect(result.prompt).toContain("Ответь 1–2 короткими фразами. Не развивай тему без нужды.");
+      expect(result.trace.promptShape).toBe("v5_chat");
     }
   });
 
@@ -341,8 +328,8 @@ describe("composeBehaviorPrompt", () => {
 
     expect(result.trace.messageKind).toBe("smalltalk_hangout");
     expect(result.trace.smalltalkContextHook).toBe(true);
-    expect(result.prompt).toContain("[LOW-PRESSURE SMALLTALK BLOCK]");
-    expect(result.prompt).toContain("можно оставить больше привычной теплоты или колкости");
+    expect(result.prompt).toContain("Ответь коротко и естественно. Держись последних сообщений.");
+    expect(result.trace.relationshipState).toBe("teasing");
   });
 
   it("does not misclassify utility, opinion, search or provocation as hangout smalltalk", () => {
@@ -376,7 +363,7 @@ describe("composeBehaviorPrompt", () => {
     expect(result.limits.maxSentences).toBe(1);
     expect(result.limits.maxParagraphs).toBe(1);
     expect(result.limits.maxChars).toBeLessThanOrEqual(180);
-    expect(result.prompt).toContain("[SELF-INITIATED INTERJECTION CONSTRAINTS BLOCK]");
+    expect(result.trace.promptShape).toBe("v5_chat");
   });
 
   it("keeps depth earned and marks stale/gotcha context separately", () => {
@@ -406,7 +393,7 @@ describe("composeBehaviorPrompt", () => {
     expect(repeated.trace.stylePreset).toBe("dismissive_short");
     expect(repeated.trace.staleTakeDetected).toBe(true);
     expect(repeated.trace.mediaReactionEligible).toBe(true);
-    expect(repeated.prompt).toContain("[STALE TAKE / MEDIA REACTION BLOCK]");
+    expect(repeated.prompt).toContain("Заезженную тему закрывай короче и суше. Не разбирай её заново.");
   });
 
   it("falls back when playful mode is disabled", () => {

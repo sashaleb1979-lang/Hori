@@ -49,11 +49,6 @@ export class MicroReactionService {
       return null;
     }
 
-    const toxicityHit = toxicityPatterns.some((pattern) => pattern.test(content));
-    if (toxicityHit) {
-      return this.pick("toxicity", content, toxicityReplies, "direct_toxicity");
-    }
-
     const praiseHit = praisePatterns.some((pattern) => pattern.test(content));
     if (praiseHit) {
       return this.pick("praise", content, praiseReplies, "direct_praise");

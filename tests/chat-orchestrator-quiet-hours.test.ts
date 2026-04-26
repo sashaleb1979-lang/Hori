@@ -95,7 +95,11 @@ const runtimeSettings = {
   ollamaNumBatch: 256,
   mediaAutoGlobalCooldownSec: 7200,
   mediaAutoMinConfidence: 0.82,
-  mediaAutoMinIntensity: 0.62
+  mediaAutoMinIntensity: 0.62,
+  memoryMode: "OFF",
+  relationshipGrowthMode: "OFF",
+  stylePresetMode: "manual_only",
+  maxTimeoutMinutes: 15
 } as const;
 
 const emptyContext: ContextBundle = {
@@ -129,8 +133,8 @@ function baseMessage(overrides: Partial<MessageEnvelope> = {}): MessageEnvelope 
   };
 }
 
-function createOrchestrator() {
-  const chat = vi.fn(async (options: { format?: "json" }) => {
+function createOrchestrator(overrides: Partial<ChatOrchestratorDeps> = {}) {
+  const chat = vi.fn(async (options: { format?: "json"; messages?: Array<{ role: string; content: string }> }) => {
     if (options.format === "json") {
       return {
         message: {
@@ -167,7 +171,8 @@ function createOrchestrator() {
     toolOrchestrator: {},
     searchClient: {},
     embeddingAdapter: { embedOne: vi.fn(async () => [0.1, 0.2, 0.3]) },
-    runtimeConfig: {}
+    runtimeConfig: {},
+    ...overrides
   };
 
   return {
@@ -226,5 +231,78 @@ describe("chat orchestrator quiet hours", () => {
     expect(result.trace.responseBudget).toBeDefined();
     expect(result.trace.responseBudget?.contour).toBe("B");
     expect(result.trace.llmCalls?.some((call) => call.purpose === "chat" && call.model === "gpt-5.4-mini")).toBe(true);
+  });
+
+  it("assembles V5 chat messages from stable prompt, restored context and real turns", async () => {
+    const context = {
+      ...emptyContext,
+      recentMessages: [
+        { id: "other-1", author: "other", userId: "user-2", content: "это чужой диалог", createdAt: new Date("2026-04-19T04:18:00.000Z") },
+        { id: "user-1", author: "tester", userId: "user-1", content: "привет", createdAt: new Date("2026-04-19T04:19:00.000Z") },
+        { id: "bot-1", author: "hori", userId: "bot-1", isBot: true, content: "привет.", createdAt: new Date("2026-04-19T04:19:30.000Z") },
+        { id: "user-2", author: "tester", userId: "user-1", content: "вчера было странно", createdAt: new Date("2026-04-19T04:20:00.000Z") },
+        { id: "bot-2", author: "hori", userId: "bot-1", isBot: true, content: "бывает.", createdAt: new Date("2026-04-19T04:20:20.000Z") }
+      ]
+    } satisfies ContextBundle;
+
+    const restoredContextPrisma = {
+      moderatorPreference: { findUnique: vi.fn(async () => null) },
+      botEventLog: { create: vi.fn(async () => ({})) },
+      horiRestoredContext: {
+        findUnique: vi.fn(async () => ({
+          id: "restored-1",
+          expiresAt: new Date(Date.now() + 60_000),
+          consumedAt: null,
+          memoryCard: {
+            title: "Старый разговор",
+            summary: ["Пользователь вчера устал и слился с дел."],
+            details: ["Сработало, когда всё дробили на один шаг."],
+            openQuestions: ["Осталась ли та же проблема сегодня?"],
+            active: true
+          }
+        })),
+        update: vi.fn(async () => ({}))
+      }
+    };
+
+    const { orchestrator, chat } = createOrchestrator({
+      contextService: { buildContext: vi.fn(async () => context) } as never,
+      prisma: restoredContextPrisma as never
+    });
+
+    await orchestrator.handleMessage(baseMessage({
+      content: "и что теперь",
+      replyToMessageId: "bot-2",
+      triggerSource: "reply",
+      mentionsBotByName: false
+    }), {
+      guildSettings,
+      featureFlags,
+      channelPolicy: {
+        allowBotReplies: true,
+        allowInterjections: false,
+        isMuted: false,
+        topicInterestTags: [],
+        responseLengthOverride: null
+      },
+      runtimeSettings
+    });
+
+    const llmChatCall = chat.mock.calls.find((call) => !call[0].format)?.[0];
+    const messages = llmChatCall?.messages ?? [];
+
+    expect(messages).toHaveLength(8);
+    expect(messages[0]).toEqual(expect.objectContaining({ role: "system" }));
+    expect(messages[0].content).toContain("Ты Хори. Ты русскоязычный Discord-бот.");
+    expect(messages[1]).toEqual(expect.objectContaining({ role: "system" }));
+    expect(messages[1].content).toContain("Восстановленный контекст:");
+    expect(messages[2]).toEqual({ role: "user", content: "привет" });
+    expect(messages[3]).toEqual({ role: "assistant", content: "привет." });
+    expect(messages[4]).toEqual({ role: "user", content: "вчера было странно" });
+    expect(messages[5]).toEqual({ role: "assistant", content: "бывает." });
+    expect(messages[6]).toEqual(expect.objectContaining({ role: "system" }));
+    expect(messages[6].content).toContain("Turn instruction:");
+    expect(messages[7]).toEqual({ role: "user", content: "и что теперь" });
+    expect(messages.some((entry: { content: string }) => entry.content.includes("[BACKGROUND CONTEXT - calibration only]"))).toBe(false);
   });
 });

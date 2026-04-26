@@ -20,7 +20,8 @@ describe("enqueueBackgroundJobs", () => {
         summary: createQueue(),
         profile: createQueue(),
         embedding: createQueue(),
-        topic: createQueue()
+        topic: createQueue(),
+        session: createQueue()
       },
       logger: {
         warn: vi.fn()
@@ -40,7 +41,7 @@ describe("enqueueBackgroundJobs", () => {
       .map((entry) => entry.jobId)
       .filter((value): value is string => Boolean(value));
 
-    expect(jobIds).toHaveLength(4);
+    expect(jobIds).toHaveLength(5);
     expect(jobIds.every((value) => !value.includes(":"))).toBe(true);
   });
 });

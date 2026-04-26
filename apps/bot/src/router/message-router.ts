@@ -44,6 +44,82 @@ export function prepareReplyForDelivery(reply: string | BotReplyPayload | null |
     : reply;
 }
 
+function applyModerationReplacement(reply: string | BotReplyPayload | null | undefined, replacementText: string) {
+  if (typeof reply === "string") {
+    const base = reply.trim();
+    return base ? `${base} ${replacementText}` : replacementText;
+  }
+
+  if (!reply) {
+    return replacementText;
+  }
+
+  const base = reply.text.trim();
+  return {
+    ...reply,
+    text: base ? `${base} ${replacementText}` : replacementText
+  };
+}
+
+export async function resolveModerationReplyForDelivery(
+  runtime: BotRuntime,
+  message: Message,
+  reply: string | BotReplyPayload | null | undefined,
+  moderationAction?: { kind: "timeout"; durationMinutes: number; replacementText: string } | null
+) {
+  if (!moderationAction) {
+    return reply;
+  }
+
+  if (moderationAction.kind !== "timeout") {
+    return reply;
+  }
+
+  const timeoutApplied = await tryApplyModerationAction(runtime, message, moderationAction);
+  return timeoutApplied ? applyModerationReplacement(reply, moderationAction.replacementText) : reply;
+}
+
+async function tryApplyModerationAction(
+  runtime: BotRuntime,
+  message: Message,
+  action: { kind: "timeout"; durationMinutes: number }
+) {
+  if (!message.inGuild()) {
+    return false;
+  }
+
+  if (action.kind !== "timeout") {
+    return false;
+  }
+
+  try {
+    const me = message.guild.members.me ?? (await message.guild.members.fetchMe());
+    if (!me.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+      return false;
+    }
+
+    const targetMember = message.member ?? (await message.guild.members.fetch(message.author.id));
+    if (!targetMember.moderatable) {
+      return false;
+    }
+
+    await targetMember.timeout(Math.min(15, Math.max(1, action.durationMinutes)) * 60 * 1000, "Hori stage 4 aggression timeout");
+    return true;
+  } catch (error) {
+    runtime.logger.warn(
+      {
+        error,
+        guildId: message.guildId,
+        channelId: message.channelId,
+        userId: message.author.id,
+        action: action.kind
+      },
+      "failed to apply moderation action"
+    );
+    return false;
+  }
+}
+
 async function detectTriggerSource(message: Message, botName: string, botId: string): Promise<{ triggerSource?: TriggerSource; wasMentioned: boolean; implicitMentionKinds: Array<"reply_to_bot" | "name_in_text"> }> {
   const content = message.content.trim();
 
@@ -174,7 +250,7 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
       requireMention: true,
       allowedImplicitMentionKinds: ["reply_to_bot", "name_in_text"],
       allowTextCommands: true,
-      hasControlCommand: /^(запомни|забудь)\b/i.test(message.content.trim()),
+      hasControlCommand: /^(запомни|вспомни|забудь)\b/i.test(message.content.trim()),
       commandAuthorized: member.permissions.has(PermissionFlagsBits.ManageGuild),
     }
   );
@@ -291,7 +367,7 @@ async function processInvocation(
   const member = message.member ?? (await message.guild.members.fetch(message.author.id));
   const botName = routingConfig.guildSettings.botName;
   const botId = runtime.client.user.id;
-  const explicitInvocation = Boolean(triggerSource) || /^(запомни|забудь)\b/i.test((contentOverride ?? message.content).trim());
+  const explicitInvocation = Boolean(triggerSource) || /^(запомни|вспомни|забудь)\b/i.test((contentOverride ?? message.content).trim());
   const envelope = buildEnvelope(message, member, botName, botId, triggerSource, explicitInvocation, autoInterject, contentOverride);
   const preliminaryIntent = intentRouter.route(envelope, botName);
   const queueMessageKind = detectMessageKind({
@@ -336,7 +412,9 @@ async function processInvocation(
       return;
     }
 
-    const replyToSend = prepareReplyForDelivery(result.reply);
+    const replyForDelivery = await resolveModerationReplyForDelivery(runtime, message, result.reply, result.moderationAction);
+
+    const replyToSend = prepareReplyForDelivery(replyForDelivery);
     if (replyToSend !== result.reply) {
       runtime.logger.warn(
         {

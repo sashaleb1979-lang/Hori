@@ -1,4 +1,4 @@
-import type { ChannelKind, ContextEnergy, MessageKind, PersonaMode, PersonaResponseLimits, RequestedDepth } from "@hori/shared";
+import type { ChannelKind, ContextEnergy, MessageKind, PersonaMode, PersonaResponseLimits, RequestedDepth, RelationshipState } from "@hori/shared";
 
 import { buildAnalogySuppressionBlock, buildAntiSlopBlock, buildLowPressureSmalltalkBlock, resolveAntiSlopProfile } from "./antiSlop";
 import { buildChannelStyleBlock, depthTagValue, modeTagValue, resolveChannelKind } from "./channelStyles";
@@ -8,6 +8,7 @@ import { buildIdeologicalBlock, detectIdeologicalTopic, resolveIdeologicalFlavou
 import { buildMessageKindBlock, detectMessageKind } from "./messageKinds";
 import { buildToneBlock, fallbackDisabledMode, modeFromRequestedDepth } from "./modes";
 import { buildStylePresetBlock, resolveStylePreset, stylePresets } from "./presets";
+import { COMMON_CORE_BASE, resolveRelationshipState, resolveRelationshipTail } from "./prompt-spec";
 import { buildReplyModeBlock, resolveReplyMode } from "./replyMode";
 import { buildSelfInterjectionBlock } from "./selfInterjection";
 import { buildSlangBlock, resolveSlangProfile } from "./slang";
@@ -545,17 +546,13 @@ function detectRhetoricalQuestion(content: string, messageKind: MessageKind) {
 
   const normalized = content.trim().toLowerCase();
 
-  if (normalized.length > 120) {
-    return false;
-  }
-
   const hasConcreteMarker = /(что такое|как сделать|сколько|когда будет|где найти|в чем разница|как работает|как настроить|как установить|как подключить)/i.test(normalized);
 
   if (hasConcreteMarker) {
     return false;
   }
 
-  return /(откуда столько|почему все такие|зачем люди|почему люди|в чем смысл жизни|что не так с|почему мир|откуда берётся|откуда берется|зачем вообще)/i.test(normalized);
+  return /(откуда столько|почему все такие|зачем люди|почему люди|в чем смысл жизни|что не так с|почему мир|откуда берётся|откуда берется|зачем вообще|почему все|почему везде|почему всегда)/i.test(normalized);
 }
 
 function detectStaleTake(content: string, messageKind: MessageKind) {
@@ -563,6 +560,66 @@ function detectStaleTake(content: string, messageKind: MessageKind) {
     messageKind === "repeated_question" ||
     /gotcha|гоча|затаскан|заезж|стар(ый|ое) тейк|опять|снова|мы это уже|коммунизм.*работ|налог.*не.*воров|государств.*нужн/i.test(content)
   );
+}
+
+function shouldPreferSeriousRelationshipTail(options: {
+  input: ComposeBehaviorPromptInput;
+  messageKind: MessageKind;
+  requestedDepth: RequestedDepth;
+}) {
+  if (options.input.intent !== "chat") {
+    return false;
+  }
+
+  return (
+    options.messageKind === "command_like_request" ||
+    (options.messageKind === "request_for_explanation" && options.requestedDepth !== "tiny")
+  );
+}
+
+function buildTurnInstruction(options: {
+  messageKind: MessageKind;
+  limits: PersonaResponseLimits;
+  rhetoricalQuestion: boolean;
+  staleTakeDetected: boolean;
+  constraintFollowUp: boolean;
+  smalltalkContextHook: boolean;
+}) {
+  const lines: string[] = [];
+
+  if (options.messageKind === "meta_feedback" || options.constraintFollowUp) {
+    lines.push("Исправь только указанное. Не переписывай всё и не меняй остальное.");
+  } else if (options.messageKind === "reply_to_bot") {
+    lines.push("Держись предыдущей мысли. Не начинай тему заново.");
+  } else if (options.messageKind === "request_for_explanation") {
+    lines.push("Объясни по делу и без статьи. Дай ровно столько, сколько нужно для задачи.");
+  } else if (options.messageKind === "command_like_request") {
+    lines.push("Ответь ясно, коротко и по делу. Без вайба поверх инструкции.");
+  } else if (options.messageKind === "smalltalk_hangout" || options.messageKind === "casual_address") {
+    lines.push(
+      options.smalltalkContextHook
+        ? "Ответь коротко и естественно. Держись последних сообщений."
+        : "Ответь 1–2 короткими фразами. Не развивай тему без нужды."
+    );
+  } else if (options.messageKind === "provocation") {
+    lines.push("Если в сообщении есть нормальный вопрос — сначала ответь по делу. Обычную критику не считай грубостью.");
+  } else {
+    lines.push("Ответь коротко и прямо. Держись контекста последних сообщений.");
+  }
+
+  if (options.rhetoricalQuestion) {
+    lines.push("На риторический вопрос отвечай одной короткой фразой. Не превращай это в эссе.");
+  }
+
+  if (options.staleTakeDetected) {
+    lines.push("Заезженную тему закрывай короче и суше. Не разбирай её заново.");
+  }
+
+  if (options.limits.maxSentences <= 2) {
+    lines.push("Уложись в 1–2 короткие фразы.");
+  }
+
+  return lines.join("\n");
 }
 
 function buildWeakModelBrevityBlock(_persona: PersonaConfig, _requestedDepth: RequestedDepth): BlockResult | null {
@@ -947,6 +1004,22 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     relationship: input.relationship,
     isSelfInitiated
   });
+  const relationshipState: RelationshipState = resolveRelationshipState(input.relationship, {
+    preferSerious: shouldPreferSeriousRelationshipTail({ input, messageKind, requestedDepth })
+  });
+  const assembly = {
+    commonCore: COMMON_CORE_BASE,
+    relationshipTail: resolveRelationshipTail(relationshipState),
+    turnInstruction: buildTurnInstruction({
+      messageKind,
+      limits,
+      rhetoricalQuestion,
+      staleTakeDetected,
+      constraintFollowUp,
+      smalltalkContextHook
+    }),
+    relationshipState
+  };
   const blocks: BlockResult[] = [];
   const add = (block: BlockResult | null) => {
     if (block) {
@@ -954,73 +1027,93 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     }
   };
 
-  add(buildIdentityBlock(persona));
-  add(buildCoreBlock());
-  add(buildStyleRulesBlock(persona, { isDirectMessage }));
-  add(buildToneBlock(mode, persona.responseModeDefaults[mode]));
-  add(buildChannelStyleBlock(channelKind, persona.channelOverrides[channelKind]));
-  add(buildMessageKindBlock(messageKind));
-  add(buildReplyModeBlock(replyMode));
-  add(buildMetaFeedbackBlock(messageKind));
-  add(buildConcreteGroundingBlock({ messageKind, constraintFollowUp }));
-  if (messageKind !== "smalltalk_hangout" && messageKind !== "low_signal_noise") {
-    add(buildContextUsageBlock(input));
-  }
-  add(buildMemoryUsageBlock());
-  add(buildLengthBlock(limits));
-  add(buildWeakModelBrevityBlock(persona, requestedDepth));
-  add(buildSmartnessBlock());
-  add(buildStylePresetBlock(stylePreset, stylePresets[stylePreset]));
-  if (messageKind === "smalltalk_hangout") {
-    add(buildLowPressureSmalltalkBlock({ hasContextHook: smalltalkContextHook }));
-  }
-  const isLightMessage = messageKind === "smalltalk_hangout" || messageKind === "casual_address" || messageKind === "low_signal_noise" || messageKind === "reply_to_bot";
-  if (!isLightMessage) {
-    add(
-      buildSnarkConfidenceBlock({
-        threshold: snarkConfidenceThreshold,
-        isSelfInitiated,
-        contextPrecisionBias: persona.contextualBehavior.contextPrecisionBias,
-        contextConfidence: input.contextScores?.contextConfidence,
-        mockeryConfidence: input.contextScores?.mockeryConfidence
-      })
-    );
-    add(buildContextEnergyBlock(contextEnergy));
-  }
-  if (!isLightMessage) {
-    add(buildSlangBlock({ profile: slangProfile, rules: persona.slangRules }));
-    add(buildIdeologicalBlock({ state: ideologicalFlavour, config: persona.politicalFlavour }));
-  }
-  if (isSelfInitiated) {
-    add(
-      buildSelfInterjectionBlock({
-        enabled: input.featureFlags.selfInterjectionConstraintsEnabled,
-        isSelfInitiated,
-        rules: persona.selfInterjectionRules
-      })
-    );
-  }
-  if (!isLightMessage) {
-    add(buildStaleTakeMediaBlock({ staleTakeDetected, mediaReactionEligible }));
-  }
-  add(buildAntiSlopBlock({ profile: antiSlopProfile, rules: persona.antiSlopRules, forbiddenPatterns: persona.forbiddenPatterns }));
-  add(buildAnalogySuppressionBlock(analogyBan));
-  add(
-    buildFewShotBlock({
-      includeConcreteReplyAnchors: constraintFollowUp || messageKind === "reply_to_bot",
-      includeMetaFeedbackAnchors: messageKind === "meta_feedback"
-    })
-  );
-  add(buildLegacyServerOverlay(input));
-  add(buildModeratorOverlay(input));
-  add(buildRelationshipOverlay(input));
-  add(buildFinalSelectionRuleBlock());
+  let prompt: string;
+  let blocksUsed: string[];
 
-  const blocksUsed = blocks.map((block) => block.name);
+  if (input.intent === "chat") {
+    const sections = [
+      assembly.commonCore,
+      assembly.relationshipTail,
+      `Turn instruction:\n${assembly.turnInstruction}`
+    ].filter((section): section is string => Boolean(section));
+
+    prompt = sections.join("\n\n");
+    blocksUsed = [
+      "COMMON_CORE_BASE",
+      relationshipState === "cold_lowest" ? "COLD_TAIL" : `${relationshipState.toUpperCase()}_TAIL`,
+      "TURN_INSTRUCTION"
+    ];
+  } else {
+    add(buildIdentityBlock(persona));
+    add(buildCoreBlock());
+    add(buildStyleRulesBlock(persona, { isDirectMessage }));
+    add(buildToneBlock(mode, persona.responseModeDefaults[mode]));
+    add(buildChannelStyleBlock(channelKind, persona.channelOverrides[channelKind]));
+    add(buildMessageKindBlock(messageKind));
+    add(buildReplyModeBlock(replyMode));
+    add(buildMetaFeedbackBlock(messageKind));
+    add(buildConcreteGroundingBlock({ messageKind, constraintFollowUp }));
+    if (messageKind !== "smalltalk_hangout" && messageKind !== "low_signal_noise") {
+      add(buildContextUsageBlock(input));
+    }
+    add(buildMemoryUsageBlock());
+    add(buildLengthBlock(limits));
+    add(buildWeakModelBrevityBlock(persona, requestedDepth));
+    add(buildSmartnessBlock());
+    add(buildStylePresetBlock(stylePreset, stylePresets[stylePreset]));
+    if (messageKind === "smalltalk_hangout") {
+      add(buildLowPressureSmalltalkBlock({ hasContextHook: smalltalkContextHook }));
+    }
+    const isLightMessage = messageKind === "smalltalk_hangout" || messageKind === "casual_address" || messageKind === "low_signal_noise" || messageKind === "reply_to_bot";
+    if (!isLightMessage) {
+      add(
+        buildSnarkConfidenceBlock({
+          threshold: snarkConfidenceThreshold,
+          isSelfInitiated,
+          contextPrecisionBias: persona.contextualBehavior.contextPrecisionBias,
+          contextConfidence: input.contextScores?.contextConfidence,
+          mockeryConfidence: input.contextScores?.mockeryConfidence
+        })
+      );
+      add(buildContextEnergyBlock(contextEnergy));
+    }
+    if (!isLightMessage) {
+      add(buildSlangBlock({ profile: slangProfile, rules: persona.slangRules }));
+      add(buildIdeologicalBlock({ state: ideologicalFlavour, config: persona.politicalFlavour }));
+    }
+    if (isSelfInitiated) {
+      add(
+        buildSelfInterjectionBlock({
+          enabled: input.featureFlags.selfInterjectionConstraintsEnabled,
+          isSelfInitiated,
+          rules: persona.selfInterjectionRules
+        })
+      );
+    }
+    if (!isLightMessage) {
+      add(buildStaleTakeMediaBlock({ staleTakeDetected, mediaReactionEligible }));
+    }
+    add(buildAntiSlopBlock({ profile: antiSlopProfile, rules: persona.antiSlopRules, forbiddenPatterns: persona.forbiddenPatterns }));
+    add(buildAnalogySuppressionBlock(analogyBan));
+    add(
+      buildFewShotBlock({
+        includeConcreteReplyAnchors: constraintFollowUp || messageKind === "reply_to_bot",
+        includeMetaFeedbackAnchors: messageKind === "meta_feedback"
+      })
+    );
+    add(buildLegacyServerOverlay(input));
+    add(buildModeratorOverlay(input));
+    add(buildRelationshipOverlay(input));
+    add(buildFinalSelectionRuleBlock());
+
+    blocksUsed = blocks.map((block) => block.name);
+    prompt = blocks.map((block) => block.content).join("\n\n");
+  }
 
   return {
-    prompt: blocks.map((block) => block.content).join("\n\n"),
+    prompt,
     limits,
+    assembly,
     trace: {
       personaName: persona.personaId,
       activeMode: mode,
@@ -1051,7 +1144,9 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
       maxParagraphs: limits.maxParagraphs,
       bulletListAllowed: limits.bulletListAllowed,
       followUpAllowed: limits.followUpAllowed,
-      blocksUsed
+      blocksUsed,
+      promptShape: input.intent === "chat" ? "v5_chat" : "legacy",
+      relationshipState
     }
   };
 }
