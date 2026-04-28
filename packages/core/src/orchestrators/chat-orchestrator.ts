@@ -6,7 +6,7 @@ import { llmCachedTokensCounter, llmCostCounter, llmTokensCounter } from "@hori/
 import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, calculateCostUsd, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet } from "@hori/llm";
 import type { LlmChatResponse, LlmClient, LlmRequestMetadata, ModelRoutingSlot } from "@hori/llm";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
-import { ContextService, ReflectionService, RelationshipService, RetrievalService } from "@hori/memory";
+import { ContextService, ReflectionService, RelationshipService, RetrievalService, SessionBufferService } from "@hori/memory";
 import { BraveSearchClient, buildSourceDigest, extractLinksFromMessage, fetchWebPage } from "@hori/search";
 import { chooseConflictStrategy, detectConflict, type ConflictDetection } from "../brain/conflict-detector";
 import { EmotionLabel, type EmotionalState } from "../brain/emotion-state";
@@ -47,6 +47,8 @@ interface OrchestratorDeps {
   mood?: MoodService;
   media?: MediaReactionService;
   reflection?: ReflectionService;
+  sessionBuffer?: SessionBufferService;
+  promptSlots?: PromptSlotService;
 }
 
 export interface DebugTraceRecord {
@@ -325,6 +327,13 @@ export class ChatOrchestrator {
     }
 
     const corePromptTemplates = await this.deps.runtimeConfig.getCorePromptTemplates(message.guildId);
+    // V5.1 Phase B: получаем активный prompt-слот для канала, если есть.
+    const activePromptSlot = this.deps.promptSlots
+      ? await this.deps.promptSlots
+          .getActiveSlot(message.guildId, message.channelId)
+          .then((slot) => (slot ? { title: slot.title, content: slot.content } : null))
+          .catch(() => null)
+      : null;
     const behavior = this.persona.composeBehavior({
       guildSettings: {
         ...guildSettings,
@@ -343,6 +352,8 @@ export class ChatOrchestrator {
       contextScores,
       contextTrace,
       userLanguage: guildSettings.preferredLanguage,
+      guildDescription: guildSettings.guildDescription ?? null,
+      activePromptSlot,
       isMention: message.mentionedBot || message.mentionsBotByName,
       isReplyToBot: message.triggerSource === "reply",
       isSelfInitiated: message.triggerSource === "auto_interject",
@@ -1278,6 +1289,36 @@ export class ChatOrchestrator {
   }
 
   private async getLatestSession(message: MessageEnvelope) {
+    // Use SessionBufferService (Redis-backed) when available for consistency with context layer
+    if (this.deps.sessionBuffer) {
+      const contextMessages = await this.deps.sessionBuffer.getSessionMessages(
+        message.guildId,
+        message.userId,
+        message.channelId
+      );
+
+      const messages = contextMessages
+        .filter((msg) => msg.id !== message.messageId && normalizeWhitespace(msg.content).length > 0)
+        .map((msg) => ({
+          role: msg.isBot ? "Hori" as const : "User" as const,
+          content: msg.content,
+          createdAt: msg.createdAt
+        }));
+
+      const hasUser = messages.some((entry) => entry.role === "User");
+      const hasHori = messages.some((entry) => entry.role === "Hori");
+      if (!hasUser || !hasHori || messages.length < 3) {
+        return null;
+      }
+
+      return {
+        messages,
+        rangeStart: messages[0]?.createdAt ?? message.createdAt,
+        rangeEnd: messages[messages.length - 1]?.createdAt ?? message.createdAt
+      };
+    }
+
+    // Fallback: direct DB query
     const since = new Date(message.createdAt.getTime() - 3 * 60 * 60 * 1000);
     const rows = await this.deps.prisma.message.findMany({
       where: {

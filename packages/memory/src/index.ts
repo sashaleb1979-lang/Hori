@@ -9,5 +9,7 @@ export * from "./reflection/reflection-service";
 export * from "./relationships/relationship-service";
 export * from "./relationships/relationship-vector";
 export * from "./retrieval/retrieval-service";
+export * from "./session/session-buffer-service";
+export * from "./slots/prompt-slot-service";
 export * from "./summaries/summary-service";
 export * from "./topics/topic-service";

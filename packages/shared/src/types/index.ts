@@ -32,7 +32,8 @@ export type MemoryLayer =
   | "reply_chain"
   | "active_topic"
   | "topic_window"
-  | "entity_memory";
+  | "entity_memory"
+  | "session_buffer";
 
 export type PersonaMode = "normal" | "playful" | "dry" | "irritated" | "focused" | "sleepy" | "detached";
 
@@ -181,6 +182,8 @@ export interface PersonaSettings {
   preferredStyle: string;
   forbiddenWords: string[];
   forbiddenTopics: string[];
+  /** V5.1 Phase J: описание сервера для системного промпта. */
+  guildDescription?: string | null;
 }
 
 export interface RelationshipOverlay {
@@ -198,6 +201,11 @@ export interface RelationshipOverlay {
   escalationUpdatedAt?: Date | null;
   coldUntil?: Date | null;
   coldPermanent?: boolean;
+  /** V5.1: постоянная характеристика пользователя (3–5 коротких фраз). Обновляется evaluator'ом раз в N сессий. */
+  characteristic?: string | null;
+  /** V5.1: что произошло в последней сессии — короткий блок настроения/ключевого изменения. */
+  lastChange?: string | null;
+  characteristicUpdatedAt?: Date | null;
 }
 
 export interface MessageEnvelope {
@@ -496,6 +504,7 @@ export interface ContextBundleV2 extends ContextBundle {
   entities: ContextEntity[];
   entityMemories: Array<{ key: string; value: string; type: string; score: number }>;
   activeMemory?: ActiveMemoryContext;
+  sessionMessages?: ContextMessage[];
 }
 
 export interface AnalyticsTopItem {

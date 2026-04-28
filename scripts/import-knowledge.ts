@@ -12,9 +12,11 @@
  *     [--replace] \
  *     [--model gpt-5-nano]
  *
- * Folder layout: each `*.md` (or `*.txt`) file in `--dir` becomes one article.
- * Article title defaults to the filename without extension. Subfolders are walked
- * recursively; the title becomes the relative path with `/` separators.
+ * Folder layout: each `*.md` (or `*.txt`) file in `--dir` becomes one or more articles.
+ * Without `# Topic:` blocks, the file is imported as one article and the title defaults
+ * to the filename without extension. With `# Topic:` blocks, one file is expanded into
+ * multiple topic articles. Subfolders are walked recursively; the fallback title becomes
+ * the relative path with `/` separators.
  *
  * Optional frontmatter is supported:
  * ---
@@ -42,7 +44,7 @@ import { ModelRouter } from "../packages/llm/src/router/model-router";
 import { createLogger } from "../packages/shared/src/logger";
 import { createPrismaClient } from "../packages/shared/src/prisma";
 
-import { parseKnowledgeImportDocument } from "./import-knowledge-format";
+import { parseKnowledgeImportDocuments } from "./import-knowledge-format";
 
 interface CliArgs {
   guild: string;
@@ -186,8 +188,10 @@ async function main() {
     const content = await fs.readFile(file, "utf-8");
     const rel = path.relative(absDir, file).replace(/\\/g, "/");
     const fallbackTitle = rel.replace(/\.[^.]+$/, "");
-    const parsed = parseKnowledgeImportDocument(content, fallbackTitle);
-    articles.push({ title: parsed.title, content: parsed.content, sourceUrl: parsed.sourceUrl });
+    const parsedDocuments = parseKnowledgeImportDocuments(content, fallbackTitle);
+    for (const parsed of parsedDocuments) {
+      articles.push({ title: parsed.title, content: parsed.content, sourceUrl: parsed.sourceUrl });
+    }
   }
 
   if (args.dryRun) {

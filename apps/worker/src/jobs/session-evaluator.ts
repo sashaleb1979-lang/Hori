@@ -24,6 +24,44 @@ function parseVerdict(raw: string): "A" | "B" | "V" {
   return "B";
 }
 
+interface EvaluatorResult {
+  verdict: "A" | "B" | "V";
+  characteristic: string | null;
+  lastChange: string | null;
+}
+
+function clipBlock(value: unknown, maxLen: number): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.length > maxLen ? trimmed.slice(0, maxLen).trim() : trimmed;
+}
+
+function parseEvaluatorOutput(raw: string): EvaluatorResult {
+  // V5.1: evaluator возвращает JSON {verdict, characteristic, lastChange}.
+  // Fallback: если JSON не парсится, пробуем старый формат с буквой.
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const obj = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+      const verdictRaw = typeof obj.verdict === "string" ? obj.verdict.trim().toUpperCase() : "";
+      const verdict: "A" | "B" | "V" = verdictRaw === "A" ? "A" : verdictRaw === "V" ? "V" : "B";
+      return {
+        verdict,
+        characteristic: clipBlock(obj.characteristic, 400),
+        lastChange: clipBlock(obj.lastChange, 240)
+      };
+    } catch {
+      // fall through to plain parser
+    }
+  }
+  return {
+    verdict: parseVerdict(raw),
+    characteristic: null,
+    lastChange: null
+  };
+}
+
 export function createSessionJob(runtime: WorkerRuntime) {
   return async (job: Job<SessionJobPayload>) => {
     const runtimeSettings = await runtime.runtimeConfig.getRuntimeSettings();
@@ -86,18 +124,31 @@ export function createSessionJob(runtime: WorkerRuntime) {
     }
 
     const corePromptTemplates = await runtime.runtimeConfig.getCorePromptTemplates(job.data.guildId);
-    const prompt = corePromptTemplates.relationshipEvaluatorPrompt.replace("{session_messages}", formatSessionTranscript(sessionMessages));
+    const previousVector = await runtime.relationshipService.getVector(job.data.guildId, job.data.userId);
+    const previousCharacteristic = previousVector.characteristic ?? "(нет данных)";
+    const prompt = corePromptTemplates.relationshipEvaluatorPrompt
+      .replace("{session_messages}", formatSessionTranscript(sessionMessages))
+      .replace("{previous_characteristic}", previousCharacteristic);
     let verdict: "A" | "B" | "V" = "B";
+    let characteristic: string | null = null;
+    let lastChange: string | null = null;
 
     try {
+      // V5.1 Phase G: relationship evaluator идёт по слоту classifier (cheaper).
+      const evaluatorModel = runtimeSettings.modelRouting
+        ? runtime.modelRouter.pickModelForSlot("classifier", runtimeSettings.modelRouting)
+        : runtime.modelRouter.pickModel("summary", runtimeSettings.modelRouting);
       const response = await runtime.llmClient.chat({
-        model: runtime.modelRouter.pickModel("summary", runtimeSettings.modelRouting),
+        model: evaluatorModel,
         messages: [{ role: "system", content: prompt }],
         temperature: 0,
         topP: 0.1,
-        maxTokens: 8
+        maxTokens: 400
       });
-      verdict = parseVerdict(response.message.content);
+      const parsed = parseEvaluatorOutput(response.message.content);
+      verdict = parsed.verdict;
+      characteristic = parsed.characteristic;
+      lastChange = parsed.lastChange;
     } catch (error) {
       runtime.logger.warn(
         {
@@ -139,7 +190,16 @@ export function createSessionJob(runtime: WorkerRuntime) {
 
     if (autoApply && appliedVerdict !== "B") {
       await runtime.relationshipService.applySessionVerdict(job.data.guildId, job.data.userId, appliedVerdict, {
-        allowStatePromotion: runtimeSettings.relationshipGrowthMode === "FULL_AUTO"
+        allowStatePromotion: runtimeSettings.relationshipGrowthMode === "FULL_AUTO",
+        characteristic,
+        lastChange
+      });
+    } else if (autoApply && (characteristic !== null || lastChange !== null)) {
+      // V5.1: даже при verdict=B сохраняем обновлённые micro-blocks (characteristic/lastChange).
+      await runtime.relationshipService.applySessionVerdict(job.data.guildId, job.data.userId, "B", {
+        allowStatePromotion: false,
+        characteristic,
+        lastChange
       });
     }
 
@@ -158,7 +218,9 @@ export function createSessionJob(runtime: WorkerRuntime) {
           growthMode: runtimeSettings.relationshipGrowthMode,
           messageCount: sessionMessages.length,
           sessionStart: sessionStart.toISOString(),
-          sessionEnd: sessionEnd.toISOString()
+          sessionEnd: sessionEnd.toISOString(),
+          characteristic,
+          lastChange
         } as never
       }
     });
@@ -167,6 +229,8 @@ export function createSessionJob(runtime: WorkerRuntime) {
       skipped: false,
       verdict,
       appliedVerdict,
+      characteristic,
+      lastChange,
       growthMode: runtimeSettings.relationshipGrowthMode
     };
   };

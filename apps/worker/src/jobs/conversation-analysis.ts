@@ -149,8 +149,10 @@ export function createConversationAnalysisJob(runtime: WorkerRuntime) {
       return;
     }
 
-    // 5. Write new bio notes
-    if (result.new_notes?.length) {
+    // 5. Write new bio notes — only if memory mode allows it (V5: memory OFF by default)
+    const bioMemoryEnabled = runtimeSettings.memoryMode !== "OFF";
+
+    if (bioMemoryEnabled && result.new_notes?.length) {
       for (const note of result.new_notes.slice(0, 5)) {
         const key = `bio:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
         await runtime.prisma.userMemoryNote.create({
@@ -167,7 +169,7 @@ export function createConversationAnalysisJob(runtime: WorkerRuntime) {
     }
 
     // 6. Remove outdated notes (LLM returns note text, match by value)
-    if (result.remove_notes?.length) {
+    if (bioMemoryEnabled && result.remove_notes?.length) {
       for (const noteText of result.remove_notes.slice(0, 3)) {
         await runtime.prisma.userMemoryNote.updateMany({
           where: { guildId, userId, value: { contains: noteText.slice(0, 100) }, active: true },

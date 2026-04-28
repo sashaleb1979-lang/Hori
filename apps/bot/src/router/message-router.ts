@@ -475,7 +475,18 @@ async function processInvocation(
     }
 
     if (queueTrace.action === "busy_ack") {
-      await sendReply(message, "Ща, я ещё прошлое дожёвываю. Подожди чуть.");
+      // V5.1 Phase H: фраза выбирается из пула по уровню отношений и стадии (initial/followup).
+      const relationship = await runtime.relationshipService
+        .getRelationship(envelope.guildId, envelope.userId)
+        .catch(() => null);
+      const stage = queueTrace.reason === "already_queued" ? "followup" : "initial";
+      const phrase = runtime.queuePhrasePool.pickPhrase({
+        guildId: envelope.guildId,
+        userId: envelope.userId,
+        score: relationship?.relationshipScore ?? 0,
+        stage
+      });
+      await sendReply(message, phrase);
       return;
     }
 

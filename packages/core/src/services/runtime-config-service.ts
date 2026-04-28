@@ -84,10 +84,20 @@ const RUNTIME_OVERRIDE_DEFINITIONS: Record<string, { field: keyof Omit<Effective
   "runtime.moderation.max_timeout_minutes": { field: "maxTimeoutMinutes", parse: parseMaxTimeoutMinutes }
 };
 
+export type ChannelAccessMode = "full" | "silent" | "off";
+
 export interface EffectiveChannelPolicy {
   allowBotReplies: boolean;
   allowInterjections: boolean;
   isMuted: boolean;
+  /**
+   * V5.1 Phase C: явный 3-уровневый доступ.
+   *  full   — обычная работа.
+   *  silent — читает для контекста, но не отвечает.
+   *  off    — игнорирует канал полностью.
+   * Optional для обратной совместимости с тестовыми моками; если не задан — считаем "full".
+   */
+  accessMode?: ChannelAccessMode;
   topicInterestTags: string[];
   responseLengthOverride?: string | null;
 }
@@ -501,7 +511,8 @@ export class RuntimeConfigService {
       replyLength: (guild?.replyLength as PersonaSettings["replyLength"] | null) ?? defaultPersonaSettings.replyLength,
       preferredStyle: guild?.preferredStyle ?? defaultPersonaSettings.preferredStyle,
       forbiddenWords: guild?.forbiddenWords ?? [],
-      forbiddenTopics: guild?.forbiddenTopics ?? []
+      forbiddenTopics: guild?.forbiddenTopics ?? [],
+      guildDescription: (guild as { description?: string | null } | null)?.description ?? null
     };
   }
 
@@ -581,10 +592,24 @@ export class RuntimeConfigService {
       }
     });
 
+    // V5.1 Phase C: резолвим accessMode из явного поля, или из legacy-флагов.
+    const rawAccessMode = (config as { accessMode?: string | null } | null)?.accessMode ?? null;
+    let accessMode: ChannelAccessMode;
+    if (rawAccessMode === "full" || rawAccessMode === "silent" || rawAccessMode === "off") {
+      accessMode = rawAccessMode;
+    } else if (config?.isMuted) {
+      accessMode = "off";
+    } else if (config && !config.allowBotReplies) {
+      accessMode = "silent";
+    } else {
+      accessMode = "full";
+    }
+
     return {
-      allowBotReplies: config?.allowBotReplies ?? true,
-      allowInterjections: config?.allowInterjections ?? false,
-      isMuted: config?.isMuted ?? false,
+      allowBotReplies: accessMode === "full" && (config?.allowBotReplies ?? true),
+      allowInterjections: accessMode === "full" && (config?.allowInterjections ?? false),
+      isMuted: accessMode === "off" || (config?.isMuted ?? false),
+      accessMode,
       topicInterestTags: config?.topicInterestTags ?? [],
       responseLengthOverride: config?.responseLengthOverride ?? null
     };

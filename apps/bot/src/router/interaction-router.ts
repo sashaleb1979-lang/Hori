@@ -64,6 +64,7 @@ import {
   POWER_PROFILES,
   TAB_COLOR,
   TAB_EMOJI,
+  V5_PANEL_PREFIX,
   type HoriPanelTab,
   type PanelFeatureKey
 } from "../panel/constants";
@@ -1319,6 +1320,11 @@ async function routeStringSelectInteraction(
     return;
   }
 
+  if (interaction.customId.startsWith(`${V5_PANEL_PREFIX}:`)) {
+    await handleV5PanelSelect(runtime, interaction, isOwner);
+    return;
+  }
+
   if (interaction.customId.startsWith(`${LLM_PANEL_PREFIX}:`)) {
     await handleLlmPanelSelect(runtime, interaction, isOwner);
     return;
@@ -1471,7 +1477,7 @@ async function handleCorePromptPanelSelect(
   }
 
   const selectedKey = isCorePromptKey(interaction.values[0]) ? interaction.values[0] : "common_core_base";
-  await interaction.update(await buildCorePromptPanelResponse(runtime, interaction.guildId, selectedKey));
+  await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, selectedKey);
 }
 
 async function handleCorePromptPanelButton(
@@ -1493,15 +1499,28 @@ async function handleCorePromptPanelButton(
   const selectedKey = isCorePromptKey(rawKey) ? rawKey : "common_core_base";
 
   if (action === "edit") {
-    await interaction.showModal(
-      buildCorePromptModal(await runtime.runtimeConfig.getCorePromptTemplate(interaction.guildId, selectedKey))
-    );
+    try {
+      await interaction.showModal(
+        buildCorePromptModal(await runtime.runtimeConfig.getCorePromptTemplate(interaction.guildId, selectedKey))
+      );
+    } catch (error) {
+      console.error("[core-prompt-panel] failed to open edit modal", {
+        guildId: interaction.guildId,
+        selectedKey,
+        error: error instanceof Error ? { message: error.message, stack: error.stack } : error
+      });
+      const message = error instanceof Error ? error.message : "unknown error";
+      await interaction.reply({
+        content: `Не смогла открыть редактор: ${message}`,
+        flags: MessageFlags.Ephemeral
+      });
+    }
     return;
   }
 
   if (action === "reset") {
     await runtime.runtimeConfig.resetCorePromptTemplate(interaction.guildId, selectedKey);
-    await interaction.update(await buildCorePromptPanelResponse(runtime, interaction.guildId, selectedKey));
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, selectedKey);
     return;
   }
 
@@ -1968,7 +1987,27 @@ async function handleHoriPanelAction(
   }
 
   if (action === "core_prompt_panel") {
-    await interaction.update(await buildCorePromptPanelResponse(runtime, interaction.guildId, "common_core_base"));
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, "common_core_base");
+    return;
+  }
+
+  if (action === "v5_controls") {
+    if (!isOwner) {
+      await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    try {
+      await interaction.update(await buildV5ControlsPanelResponse(runtime, interaction.guildId));
+    } catch (error) {
+      console.error("[v5-panel] failed to open", { error });
+      const message = error instanceof Error ? error.message : "unknown error";
+      await interaction.reply({ content: `Не смогла открыть V5 Controls: ${message}`, flags: MessageFlags.Ephemeral });
+    }
+    return;
+  }
+
+  if (action === "v5_controls_back") {
+    await interaction.update(buildHoriPanelResponse("persona", isOwner, isModerator));
     return;
   }
 
@@ -2433,7 +2472,8 @@ function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boo
     ],
     persona: [
       { id: "style_edit_modal", label: "Текст чата", emoji: "✏️", modOnly: true, style: ButtonStyle.Primary },
-      { id: "core_prompt_panel", label: "Core prompts", emoji: "🧩", ownerOnly: true, style: ButtonStyle.Primary }
+      { id: "core_prompt_panel", label: "Core prompts", emoji: "🧩", ownerOnly: true, style: ButtonStyle.Primary },
+      { id: "v5_controls", label: "V5 Controls", emoji: "🎛️", ownerOnly: true, style: ButtonStyle.Primary }
     ],
     behavior: [
       { id: "read_chat_on", label: "Читать чат", emoji: "📖", modOnly: true, style: ButtonStyle.Primary },
@@ -2558,7 +2598,7 @@ function inferTabForHoriAction(action: string): HoriPanelTab {
   if (action.startsWith("search") || action.startsWith("channel") || action === "read_chat_on" || action === "read_chat_off" || action.startsWith("topic") || action.startsWith("queue") || action === "summary_current") return "channels";
   if (action.startsWith("llm")) return "llm";
   if (action.startsWith("lockdown") || action === "power_panel" || action === "state_panel" || action === "ai_url_modal" || action.startsWith("debug") || action === "feature_status" || action === "stats_week" || action.startsWith("state_")) return "system";
-  if (action === "core_prompt_panel" || action.startsWith("style") || action.startsWith("mood")) return "persona";
+  if (action === "core_prompt_panel" || action === "v5_controls" || action === "v5_controls_back" || action.startsWith("style") || action.startsWith("mood")) return "persona";
   if (action.startsWith("natural") || action === "media_list" || action === "media_sync") return "behavior";
   return "main";
 }
@@ -2976,6 +3016,33 @@ async function buildCorePromptPanelResponse(
   selectedKey: CorePromptKey
 ) {
   const templates = await runtime.runtimeConfig.listCorePromptTemplates(guildId);
+
+  if (!templates.length) {
+    return {
+      content: "",
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("🧩 Hori Core Prompts")
+          .setColor(0xED4245)
+          .setDescription(
+            [
+              "Список core prompts пустой. Возможно не накатились миграции БД или сборка устарела.",
+              `Guild: \`${guildId}\``
+            ].join("\n")
+          )
+      ],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`${HORI_ACTION_PREFIX}:panel_home`)
+            .setLabel("Panel")
+            .setEmoji("🏠")
+            .setStyle(ButtonStyle.Secondary)
+        )
+      ]
+    };
+  }
+
   const selected = templates.find((entry) => entry.key === selectedKey) ?? templates[0];
   const overriddenCount = templates.filter((entry) => entry.source === "runtime_setting").length;
   const lines = templates.map((entry) => {
@@ -2983,6 +3050,12 @@ async function buildCorePromptPanelResponse(
     const source = entry.source === "runtime_setting" ? "override" : "default";
     return `${marker} ${entry.label} · ${source}`;
   });
+
+  const updatedAtIso = selected.updatedAt instanceof Date
+    ? selected.updatedAt.toISOString()
+    : selected.updatedAt
+      ? new Date(selected.updatedAt as unknown as string | number).toISOString()
+      : null;
 
   return {
     content: "",
@@ -3005,7 +3078,7 @@ async function buildCorePromptPanelResponse(
             value: clipFieldText([
               selected.description,
               "",
-              selected.updatedAt ? `updated=${selected.updatedAt.toISOString()}${selected.updatedBy ? ` by ${selected.updatedBy}` : ""}` : "using built-in default",
+              updatedAtIso ? `updated=${updatedAtIso}${selected.updatedBy ? ` by ${selected.updatedBy}` : ""}` : "using built-in default",
               "",
               selected.content
             ].join("\n"), 1024)
@@ -3014,6 +3087,35 @@ async function buildCorePromptPanelResponse(
     ],
     components: buildCorePromptPanelRows(selected)
   };
+}
+
+async function safeCorePromptPanelUpdate(
+  runtime: BotRuntime,
+  interaction: StringSelectMenuInteraction | ButtonInteraction,
+  guildId: string,
+  selectedKey: CorePromptKey
+) {
+  try {
+    await interaction.update(await buildCorePromptPanelResponse(runtime, guildId, selectedKey));
+  } catch (error) {
+    console.error("[core-prompt-panel] failed to render", {
+      guildId,
+      selectedKey,
+      error: error instanceof Error ? { message: error.message, stack: error.stack } : error
+    });
+    const message = error instanceof Error ? error.message : "unknown error";
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({
+        content: `Не смогла открыть Core prompts: ${message}`,
+        flags: MessageFlags.Ephemeral
+      });
+    } else {
+      await interaction.reply({
+        content: `Не смогла открыть Core prompts: ${message}`,
+        flags: MessageFlags.Ephemeral
+      });
+    }
+  }
 }
 
 function buildCorePromptPanelRows(selected: {
@@ -3058,6 +3160,167 @@ function buildCorePromptPanelRows(selected: {
         .setStyle(ButtonStyle.Secondary)
     )
   ];
+}
+
+// ─── V5 Controls Panel ───────────────────────────────────────────────────────
+
+const MEMORY_MODE_OPTIONS: Array<{ value: MemoryMode; label: string; description: string }> = [
+  { value: "OFF", label: "OFF", description: "Память не сохраняется" },
+  { value: "TRUSTED_ONLY", label: "TRUSTED_ONLY", description: "Только для доверенных пользователей" },
+  { value: "ACTIVE_OPT_IN", label: "ACTIVE_OPT_IN", description: "Активна; пользователь отключает сам" },
+  { value: "ADMIN_SELECTED", label: "ADMIN_SELECTED", description: "Только по явному выбору /запомни" }
+];
+
+const GROWTH_MODE_OPTIONS: Array<{ value: RelationshipGrowthMode; label: string; description: string }> = [
+  { value: "OFF", label: "OFF", description: "Отношения не меняются автоматически" },
+  { value: "MANUAL_REVIEW", label: "MANUAL_REVIEW", description: "Оценка сохраняется, ожидает ревью" },
+  { value: "TRUSTED_AUTO", label: "TRUSTED_AUTO", description: "Авто-рост только для доверенных" },
+  { value: "FULL_AUTO", label: "FULL_AUTO", description: "Полностью автоматически (A/B/V evaluator)" }
+];
+
+const TIMEOUT_MINUTES_OPTIONS = [1, 5, 10, 15] as const;
+
+async function buildV5ControlsPanelResponse(runtime: BotRuntime, guildId: string) {
+  const settings = await runtime.runtimeConfig.getRuntimeSettings();
+
+  const memMode = settings.memoryMode ?? "OFF";
+  const growthMode = settings.relationshipGrowthMode ?? "OFF";
+  const timeoutMin = settings.maxTimeoutMinutes ?? 15;
+
+  const memDesc = MEMORY_MODE_OPTIONS.find((o) => o.value === memMode)?.description ?? memMode;
+  const growthDesc = GROWTH_MODE_OPTIONS.find((o) => o.value === growthMode)?.description ?? growthMode;
+
+  return {
+    content: "",
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("🎛️ V5 Controls")
+        .setColor(0xEB459E)
+        .setDescription([
+          "Управление тремя V5-режимами: память, рост отношений, таймаут за агрессию.",
+          `Guild: \`${guildId}\``
+        ].join("\n"))
+        .addFields(
+          { name: "Memory mode", value: `\`${memMode}\` — ${memDesc}`, inline: false },
+          { name: "Relationship growth", value: `\`${growthMode}\` — ${growthDesc}`, inline: false },
+          { name: "Max timeout", value: `${timeoutMin} мин · Stage 4 aggression Discord timeout`, inline: false }
+        )
+    ],
+    components: [
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`${V5_PANEL_PREFIX}:memory_mode`)
+          .setPlaceholder("Memory mode")
+          .addOptions(
+            MEMORY_MODE_OPTIONS.map((o) => ({
+              label: o.label,
+              value: o.value,
+              description: o.description,
+              default: o.value === memMode
+            }))
+          )
+      ),
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`${V5_PANEL_PREFIX}:growth_mode`)
+          .setPlaceholder("Relationship growth mode")
+          .addOptions(
+            GROWTH_MODE_OPTIONS.map((o) => ({
+              label: o.label,
+              value: o.value,
+              description: o.description,
+              default: o.value === growthMode
+            }))
+          )
+      ),
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`${V5_PANEL_PREFIX}:timeout_minutes`)
+          .setPlaceholder("Max timeout minutes (Stage 4)")
+          .addOptions(
+            TIMEOUT_MINUTES_OPTIONS.map((min) => ({
+              label: `${min} мин`,
+              value: String(min),
+              default: min === timeoutMin
+            }))
+          )
+      ),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${HORI_ACTION_PREFIX}:v5_controls_back`)
+          .setLabel("Persona")
+          .setEmoji("🎭")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${HORI_ACTION_PREFIX}:panel_home`)
+          .setLabel("Panel")
+          .setEmoji("🏠")
+          .setStyle(ButtonStyle.Secondary)
+      )
+    ]
+  };
+}
+
+async function handleV5PanelSelect(
+  runtime: BotRuntime,
+  interaction: StringSelectMenuInteraction,
+  isOwner: boolean
+) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (!isOwner) {
+    await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const [, field] = interaction.customId.split(":");
+  const value = interaction.values[0];
+
+  try {
+    if (field === "memory_mode") {
+      const mode = MEMORY_MODE_OPTIONS.find((o) => o.value === value);
+      if (!mode) {
+        await interaction.reply({ content: "Неизвестный memory mode.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await runtime.slashAdmin.setMemoryMode(mode.value, interaction.user.id);
+    } else if (field === "growth_mode") {
+      const mode = GROWTH_MODE_OPTIONS.find((o) => o.value === value);
+      if (!mode) {
+        await interaction.reply({ content: "Неизвестный relationship growth mode.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await runtime.slashAdmin.setRelationshipGrowthMode(mode.value, interaction.user.id);
+    } else if (field === "timeout_minutes") {
+      const minutes = parseInt(value, 10);
+      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 15) {
+        await interaction.reply({ content: "Неверное значение таймаута.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await runtime.slashAdmin.setMaxTimeoutMinutes(minutes, interaction.user.id);
+    } else {
+      await interaction.reply({ content: "Неизвестный V5 control.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.update(await buildV5ControlsPanelResponse(runtime, interaction.guildId));
+  } catch (error) {
+    console.error("[v5-panel] failed to apply setting", {
+      guildId: interaction.guildId,
+      field,
+      value,
+      error: error instanceof Error ? { message: error.message, stack: error.stack } : error
+    });
+    const message = error instanceof Error ? error.message : "unknown error";
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({ content: `Не смогла применить настройку: ${message}`, flags: MessageFlags.Ephemeral });
+    } else {
+      await interaction.reply({ content: `Не смогла применить настройку: ${message}`, flags: MessageFlags.Ephemeral });
+    }
+  }
 }
 
 function extractTraceLlmCalls(debugTrace: unknown) {
@@ -3374,6 +3637,9 @@ function buildCorePromptModal(current: {
     .setCustomId(`${HORI_MODAL_PREFIX}:core-prompt:${current.key}`)
     .setTitle(current.label.slice(0, 45));
 
+  // Discord text input limit is 4000 chars; clip current value to avoid 400 errors.
+  const safeContent = (current.content ?? "").slice(0, 4000);
+
   modal.addComponents(
     new ActionRowBuilder<TextInputBuilder>().addComponents(
       new TextInputBuilder()
@@ -3381,7 +3647,7 @@ function buildCorePromptModal(current: {
         .setLabel("Текст prompt")
         .setPlaceholder(getCorePromptDefaultContent(current.key).slice(0, 100))
         .setRequired(true)
-        .setValue(current.content)
+        .setValue(safeContent)
         .setMaxLength(4000)
         .setStyle(TextInputStyle.Paragraph)
     )

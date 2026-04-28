@@ -24,6 +24,9 @@ type RelationshipProfileRecord = RelationshipOverlay & {
   interactionCount?: number | null;
   proactivityPreference?: number | null;
   topicBoundaries?: unknown;
+  characteristic?: string | null;
+  lastChange?: string | null;
+  characteristicUpdatedAt?: Date | null;
 };
 
 type RelationshipProfileDelegate = {
@@ -55,6 +58,9 @@ export interface UpsertRelationshipInput {
   interactionCount?: number;
   proactivityPreference?: number;
   topicBoundaries?: Record<string, boolean>;
+  characteristic?: string | null;
+  lastChange?: string | null;
+  characteristicUpdatedAt?: Date | null;
 }
 
 export class RelationshipService {
@@ -103,6 +109,9 @@ export class RelationshipService {
         interactionCount: input.interactionCount ?? DEFAULT_SIGNALS.interactionCount,
         proactivityPreference: input.proactivityPreference ?? DEFAULT_SIGNALS.proactivityPreference,
         topicBoundaries: input.topicBoundaries ?? DEFAULT_SIGNALS.topicBoundaries,
+        characteristic: input.characteristic ?? null,
+        lastChange: input.lastChange ?? null,
+        characteristicUpdatedAt: input.characteristicUpdatedAt ?? null,
         updatedBy: input.updatedBy ?? undefined,
         updatedAt: new Date()
       },
@@ -129,6 +138,9 @@ export class RelationshipService {
         interactionCount: input.interactionCount ?? DEFAULT_SIGNALS.interactionCount,
         proactivityPreference: input.proactivityPreference ?? DEFAULT_SIGNALS.proactivityPreference,
         topicBoundaries: input.topicBoundaries ?? DEFAULT_SIGNALS.topicBoundaries,
+        characteristic: input.characteristic ?? null,
+        lastChange: input.lastChange ?? null,
+        characteristicUpdatedAt: input.characteristicUpdatedAt ?? null,
         updatedBy: input.updatedBy ?? undefined
       }
     });
@@ -303,6 +315,10 @@ export class RelationshipService {
     const now = options.now ?? new Date();
     const vector = await this.getVector(guildId, userId);
 
+    // V5.1: AGGRESSIVE confirmed → score -1 (нижний уровень новой шкалы -1..4),
+    // cold_lowest, escalationStage:
+    //   - после Stage 4 + timeout → откат до 3 немедленно (не 0);
+    //   - на Stage 2 confirm → как минимум 2.
     return this.upsertRelationship({
       guildId,
       userId,
@@ -314,9 +330,9 @@ export class RelationshipService {
       doNotInitiate: vector.doNotInitiate,
       protectedTopics: vector.protectedTopics,
       relationshipState: "cold_lowest",
-      relationshipScore: -1.5,
+      relationshipScore: -1,
       positiveMarks: 0,
-      escalationStage: options.timedOut ? 0 : Math.max(2, this.resolveEscalationStage(vector, now)),
+      escalationStage: options.timedOut ? 3 : Math.max(2, this.resolveEscalationStage(vector, now)),
       escalationUpdatedAt: now,
       coldUntil: null,
       coldPermanent: true,
@@ -361,7 +377,15 @@ export class RelationshipService {
 
   async setRelationshipState(guildId: string, userId: string, relationshipState: RelationshipState, updatedBy?: string | null) {
     const vector = await this.getVector(guildId, userId);
-    const nextScore = relationshipState === "cold_lowest" ? -1.5 : relationshipState === "sweet" ? 3 : relationshipState === "close" ? 2 : relationshipState === "warm" ? 1 : vector.relationshipScore ?? 0;
+    // V5.1 mapping: cold_lowest=-1, base=0, warm=1, close=2, teasing=3, sweet=4. serious \u2014 mood-override.
+    const nextScore =
+      relationshipState === "cold_lowest" ? -1 :
+      relationshipState === "sweet" ? 4 :
+      relationshipState === "teasing" ? 3 :
+      relationshipState === "close" ? 2 :
+      relationshipState === "warm" ? 1 :
+      relationshipState === "base" ? 0 :
+      vector.relationshipScore ?? 0;
 
     return this.upsertRelationship({
       guildId,
@@ -394,7 +418,14 @@ export class RelationshipService {
     guildId: string,
     userId: string,
     verdict: "A" | "B" | "V",
-    options: { allowStatePromotion?: boolean; updatedBy?: string | null } = {}
+    options: {
+      allowStatePromotion?: boolean;
+      updatedBy?: string | null;
+      /** V5.1: постоянная характеристика пользователя от evaluator (для обновления). */
+      characteristic?: string | null;
+      /** V5.1: короткое описание последнего изменения / настроения. */
+      lastChange?: string | null;
+    } = {}
   ) {
     const vector = await this.getVector(guildId, userId);
     const score = vector.relationshipScore ?? 0;
@@ -415,47 +446,81 @@ export class RelationshipService {
       nextPositiveMarks = 0;
     }
 
+    // V5.1 Phase F: нейтральная сессия → микро-апдейт +ε к score (медленный рост доверия).
+    if (verdict === "B") {
+      nextScore = clampRelationshipScore(score + 0.05);
+    }
+
+    // V5.1 recovery: \u0435\u0441\u043b\u0438 score \u043f\u043e\u0434\u043d\u044f\u043b\u0441\u044f \u0438\u0437 \u043e\u0442\u0440\u0438\u0446\u0430\u0442\u0435\u043b\u044c\u043d\u043e\u0439 \u0437\u043e\u043d\u044b \u0434\u043e 0+ \u2014 \u043f\u043e\u043b\u043d\u044b\u0439 \u0441\u0431\u0440\u043e\u0441 escalation \u0438 cold_lowest.
+    const recovered = score < 0 && nextScore >= 0;
+    const nextEscalationStage = recovered ? 0 : this.resolveEscalationStage(vector, new Date());
+    const nextColdPermanent = recovered ? false : vector.coldPermanent;
+    const baseStateForResolve = recovered ? "base" : (vector.relationshipState ?? "base");
+    const stateScore = options.allowStatePromotion ? nextScore : (vector.relationshipScore ?? 0);
+    const nextRelationshipState = recovered
+      ? resolveRelationshipStateFromScore(nextScore, "base")
+      : resolveRelationshipStateFromScore(stateScore, baseStateForResolve as RelationshipState);
+
     return this.upsertRelationship({
       guildId,
       userId,
       updatedBy: options.updatedBy,
-      toneBias: vector.toneBias,
+      toneBias: recovered && vector.toneBias === "sharp" ? "neutral" : vector.toneBias,
       roastLevel: vector.roastLevel,
       praiseBias: vector.praiseBias,
       interruptPriority: vector.interruptPriority,
       doNotMock: vector.doNotMock,
       doNotInitiate: vector.doNotInitiate,
       protectedTopics: vector.protectedTopics,
-      relationshipState: resolveRelationshipStateFromScore(
-        options.allowStatePromotion ? nextScore : vector.relationshipScore ?? 0,
-        vector.relationshipState
-      ),
+      relationshipState: nextRelationshipState,
       relationshipScore: nextScore,
       positiveMarks: nextPositiveMarks,
-      escalationStage: this.resolveEscalationStage(vector, new Date()),
-      escalationUpdatedAt: vector.escalationUpdatedAt,
+      escalationStage: nextEscalationStage,
+      escalationUpdatedAt: recovered ? new Date() : vector.escalationUpdatedAt,
       coldUntil: vector.coldUntil,
-      coldPermanent: vector.coldPermanent,
+      coldPermanent: nextColdPermanent,
       closeness: vector.closeness,
       trustLevel: vector.trustLevel,
       familiarity: vector.familiarity,
       interactionCount: vector.interactionCount,
       proactivityPreference: vector.proactivityPreference,
       topicBoundaries: vector.topicBoundaries,
+      characteristic: options.characteristic !== undefined ? options.characteristic : vector.characteristic ?? null,
+      lastChange: options.lastChange !== undefined ? options.lastChange : vector.lastChange ?? null,
+      characteristicUpdatedAt: options.characteristic !== undefined && options.characteristic !== (vector.characteristic ?? null)
+        ? new Date()
+        : vector.characteristicUpdatedAt ?? null,
     });
   }
 
-  private resolveEscalationStage(vector: Pick<RelationshipOverlay, "escalationStage" | "escalationUpdatedAt">, now: Date) {
-    if (!vector.escalationStage) {
+  private resolveEscalationStage(
+    vector: Pick<RelationshipOverlay, "escalationStage" | "escalationUpdatedAt" | "coldPermanent" | "relationshipState">,
+    now: Date
+  ) {
+    const stage = clampEscalationStage(vector.escalationStage ?? 0);
+    if (stage <= 0) {
       return 0;
     }
 
     if (!vector.escalationUpdatedAt) {
-      return clampEscalationStage(vector.escalationStage);
+      return stage;
     }
 
     const staleMs = now.getTime() - vector.escalationUpdatedAt.getTime();
-    return staleMs >= 24 * 60 * 60 * 1000 ? 0 : clampEscalationStage(vector.escalationStage);
+    if (staleMs < 24 * 60 * 60 * 1000) {
+      return stage;
+    }
+
+    // V5.1 правила сброса по 24 часам:
+    //  - Stage 1 (только warning, без AGGRESSIVE confirm) → полный сброс до 0;
+    //  - Stage 2/3/4 (был подтверждённый AGGRESSIVE или timeout) → понижается до 2,
+    //    ниже автоматически НЕ опускается. Полный сброс до 0 только через recovery
+    //    (поднятие score с отрицательного до 0).
+    const isPostAggressive = vector.coldPermanent === true || vector.relationshipState === "cold_lowest" || stage >= 2;
+    if (isPostAggressive) {
+      return 2;
+    }
+    return 0;
   }
 
   private async findProfile(guildId: string, userId: string): Promise<RelationshipProfileRecord | null> {
@@ -545,6 +610,9 @@ export class RelationshipService {
       escalationUpdatedAt: profile.escalationUpdatedAt ?? null,
       coldUntil: profile.coldUntil ?? null,
       coldPermanent: profile.coldPermanent ?? false,
+      characteristic: profile.characteristic ?? null,
+      lastChange: profile.lastChange ?? null,
+      characteristicUpdatedAt: profile.characteristicUpdatedAt ?? null,
     };
   }
 
@@ -617,7 +685,9 @@ function normalizeTopicBoundaries(value: unknown): Record<string, boolean> {
 }
 
 function clampRelationshipScore(value: number) {
-  return Math.max(-1.5, Math.min(3, value));
+  // V5.1 шкала: -1..4 (было -1.5..3).
+  // -1 — cold_lowest потолок снизу; 4 — sweet потолок сверху.
+  return Math.max(-1, Math.min(4, value));
 }
 
 function clampEscalationStage(value: number) {
@@ -625,22 +695,27 @@ function clampEscalationStage(value: number) {
 }
 
 function resolveRelationshipStateFromScore(score: number, current?: RelationshipState) {
-  if (current === "cold_lowest" || score <= -1.5) {
+  // V5.1 шкала -1..4. serious — это mood-override, не позиция на шкале.
+  // Ниже 0 — всегда флор-округление (любой минус → cold_lowest).
+  // Выше 0 — переключение только при достижении абсолютного целого.
+  if (current === "serious") {
+    return current;
+  }
+  if (score < 0) {
     return "cold_lowest" as const;
   }
-
-  if (score >= 3) {
-    return current === "teasing" ? "teasing" : "sweet";
+  if (score >= 4) {
+    return "sweet" as const;
   }
-
+  if (score >= 3) {
+    return "teasing" as const;
+  }
   if (score >= 2) {
     return "close" as const;
   }
-
   if (score >= 1) {
     return "warm" as const;
   }
-
   return "base" as const;
 }
 

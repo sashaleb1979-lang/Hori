@@ -48,6 +48,7 @@ interface RankedRecentMessage {
 const CONTEXT_SECTION_BASE_PRIORITY: Record<string, number> = {
   dialogue_capsule: 1.25,
   active_memory: 1.05,
+  session_buffer: 0.98,
   entity_memory: 0.96,
   entities: 0.84,
   user_profile: 0.62,
@@ -269,6 +270,24 @@ export class ContextBuilderService {
           messageKind: options.messageKind
         }),
         content: `Профиль юзера: ${bundle.userProfile.summaryShort}. Стиль: ${bundle.userProfile.styleTags.join(", ")}. Темы: ${bundle.userProfile.topicTags.join(", ")}. Confidence: ${bundle.userProfile.confidenceScore}.`
+      });
+    }
+
+    if (bundle.sessionMessages?.length) {
+      const sessionLines = bundle.sessionMessages
+        .slice(-15)
+        .map((msg) => formatMessage(msg.author, msg.content));
+      warmSections.push({
+        key: "session_buffer",
+        memoryLayers: ["session_buffer"],
+        priorityScore: scoreContextSection({
+          key: "session_buffer",
+          contentParts: bundle.sessionMessages.map((msg) => msg.content),
+          queryTokens,
+          activeTopic: bundle.activeTopic?.summaryShort,
+          messageKind: options.messageKind
+        }),
+        content: "[SESSION CONTEXT]\n" + sessionLines.join("\n")
       });
     }
 

@@ -1,83 +1,82 @@
 # JJS Knowledge Import
 
-Этот поток нужен для быстрой массовой загрузки Jujutsu Shurigan в knowledge-кластер без ручной правки JSON и без кормления базы знаний кусками через чат.
+Теперь knowledge import поддерживает не только формат “один файл = одна статья”, но и универсальный формат “один файл = пачка тем”.
 
-## Что уже умеет импорт
+Это нужно для случаев, когда исходная страница вики или заметка содержит мешанину из нескольких механик, статусов, режимов, предметов или персонажей.
 
-- Один файл `.md` или `.txt` = одна статья.
-- Папка обходится рекурсивно.
-- Если в файле есть frontmatter, импорт берёт из него `title` и `sourceUrl`.
-- `aliases`, `keywords` и `category` автоматически добавляются в ingest-контент как явные строки, чтобы lexical search их видел.
-- Если frontmatter нет, title берётся из имени файла.
+## Что делает импортёр
 
-Основной импортёр: [scripts/import-knowledge.ts](scripts/import-knowledge.ts)
+- читает `.md` и `.txt` файлы;
+- понимает frontmatter с общими тегами страницы;
+- если в файле нет `# Topic:`, импортирует его как одну статью;
+- если в файле есть несколько `# Topic:`, разворачивает один файл в несколько knowledge-статей;
+- для каждой темы подмешивает в ingest:
+  - общие теги страницы;
+  - теги темы;
+  - aliases темы;
+  - keywords темы;
+  - список подтем;
+  - теги подтем;
+- общий контекст до первого `# Topic:` автоматически добавляет в каждую тему как shared context.
 
-## Рекомендуемая структура папки
+Основной формат теперь лежит здесь: [examples/knowledge/knowledge-theme-pack.template.md](examples/knowledge/knowledge-theme-pack.template.md)
 
-```text
-jjs-wiki/
-  mechanics/
-    domain-expansion.md
-    sure-hit.md
-  characters/
-    gojo.md
-    sukuna.md
-  skills/
-    black-flash.md
-  items/
-    prison-realm.md
-  modes/
-    ranked.md
-```
+Prompt для ChatGPT лежит здесь: [examples/knowledge/knowledge-theme-pack.prompt.md](examples/knowledge/knowledge-theme-pack.prompt.md)
 
-Правило простое: один файл = одна тема, которую пользователь реально спросит одним сообщением.
-
-## Рекомендуемый формат файла
-
-Смотри готовый шаблон: [examples/knowledge/jjs-article.template.md](examples/knowledge/jjs-article.template.md)
+## Универсальный шаблон
 
 ```md
 ---
-title: Domain Expansion
-sourceUrl: https://example.com/wiki/domain-expansion
+title: Название исходной страницы или пачки заметок
+sourceUrl: https://example.com/wiki/source-page
 category: mechanics
+tags:
+  - jjs
+  - общий тег
+  - русский термин
+  - english term
 aliases:
-  - DE
-  - domain
+  - разговорное имя страницы
 keywords:
-  - domain expansion
-  - домен
-  - де
-  - sure-hit
+  - основной поиск
+  - сленг
+  - англ термин кириллицей
 ---
 
-# Domain Expansion
+Общий контекст страницы.
 
-## Short answer
+# Topic: Название главной темы 1
+Tags: тег темы 1, тег темы 2, сленг, англ термин, англ термин кириллицей
+Aliases: короткое имя, разговорное имя, чтение на кириллице
+Keywords: поиск 1, поиск 2, сокращение, частая ошибка
 
-Короткий ответ по сути.
+Подробное введение в тему.
 
-## Core facts
+## Subtopic: Подтема 1
+Tags: тег подтемы 1, тег подтемы 2, сленг
 
-- факт
-- факт
+Максимально подробное объяснение подтемы.
 
-## How it works
+## Subtopic: Подтема 2
+Tags: тег подтемы 1, тег подтемы 2, сленг
 
-Плотное объяснение.
+Максимально подробное объяснение подтемы.
 ```
 
-## Что просить у ChatGPT
+## Как думать про структуру
 
-Смотри готовый prompt: [examples/knowledge/jjs-chatgpt-normalizer.prompt.md](examples/knowledge/jjs-chatgpt-normalizer.prompt.md)
+- `# Topic:` = очевидная главная мысль или сущность.
+- `## Subtopic:` = 5-10 крупных аспектов этой мысли.
+- Один и тот же файл может содержать несколько тем.
+- Но каждая тема должна быть смысловым центром, который можно спросить отдельным сообщением.
 
-Суть:
+## Как должен работать ChatGPT при подготовке
 
-- не придумывать новые факты;
-- не сглаживать жаргон;
-- вытаскивать точные игровые термины;
-- отдельно выписывать `aliases` и `keywords`;
-- вычищать мусор вики-страниц.
+- сам выделяет темы и подтемы;
+- сам собирает теги для страницы, темы и подтем;
+- переводит всё на русский;
+- термины, сленг и англ-слова даёт по-русски, а рядом в скобках пишет кириллическое чтение;
+- не режет контекст слишком сильно, а старается сохранить максимум полезной игровой информации.
 
 ## Как загружать
 
@@ -92,19 +91,3 @@ pnpm knowledge:import -- --guild YOUR_GUILD_ID --cluster jjs --title "Jujutsu Sh
 ```powershell
 pnpm knowledge:import -- --guild YOUR_GUILD_ID --cluster jjs --title "Jujutsu Shurigan Wiki" --trigger ? --dir .\jjs-wiki --replace
 ```
-
-## Что проверять после загрузки
-
-Прогоняй реальные вопросы игроков через `?`:
-
-- `?как работает domain expansion`
-- `?что делает black flash`
-- `?чем sure-hit отличается от barrier`
-- `?что такое prison realm`
-
-Если ответ находится плохо:
-
-- усиливай `keywords`;
-- уточняй `title`;
-- режь слишком широкую страницу на 2-3 статьи;
-- поднимай важные отличия в секции `Short answer` или `Core facts`.

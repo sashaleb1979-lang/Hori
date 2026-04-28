@@ -244,6 +244,11 @@ export interface ComposeBehaviorPromptInput {
   } | null;
   relationship?: RelationshipOverlay | null;
   context?: ContextBundle | null;
+  /**
+   * V5.1 Phase B: активный prompt-слот для канала (если есть).
+   * Вставляется в system prompt сразу после core+micro-blocks.
+   */
+  activePromptSlot?: { title?: string | null; content: string } | null;
   requestedDepth?: RequestedDepth;
   activeMode?: PersonaMode;
   channelKind?: ChannelKind;
@@ -252,6 +257,8 @@ export interface ComposeBehaviorPromptInput {
   isReplyToBot?: boolean;
   isSelfInitiated?: boolean;
   channelName?: string | null;
+  /** V5.1 Phase J: описание сервера, добавляется в шапку system prompt. */
+  guildDescription?: string | null;
   userLanguage?: string;
   timeOfDayHint?: string;
   compactnessBias?: RequestedDepth;

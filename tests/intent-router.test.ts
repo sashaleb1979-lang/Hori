@@ -38,5 +38,18 @@ describe("IntentRouter", () => {
     expect(result.intent).toBe("search");
     expect(result.requiresSearch).toBe(true);
   });
+
+  it("routes search via ? sigil at start", () => {
+    const result = router.route({ ...baseMessage, content: "Хори ?когда выйдет gpt-6" }, "Хори");
+    expect(result.intent).toBe("search");
+    expect(result.requiresSearch).toBe(true);
+    expect(result.reason).toContain("sigil");
+    expect(result.cleanedContent).toBe("когда выйдет gpt-6");
+  });
+
+  it("falls back to help when ? sigil has no payload", () => {
+    const result = router.route({ ...baseMessage, content: "Хори ?" }, "Хори");
+    expect(result.intent).toBe("help");
+  });
 });
 

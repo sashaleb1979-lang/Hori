@@ -2,10 +2,10 @@ import type { Client } from "discord.js";
 
 import { AnalyticsQueryService, MessageIngestService } from "@hori/analytics";
 import { assertEnvForRole, loadEnv } from "@hori/config";
-import { AffinityService, createChatOrchestrator, createRuntimeLlmClient, KnowledgeService, MediaReactionService, MoodService, ReplyQueueService, RuntimeConfigService, SlashAdminService } from "@hori/core";
+import { AffinityService, createChatOrchestrator, createRuntimeLlmClient, FlashTrollingService, KnowledgeService, MediaReactionService, MoodService, QueuePhrasePoolService, ReplyQueueService, RuntimeConfigService, SlashAdminService } from "@hori/core";
 import { EmbeddingAdapter, ModelRouter, ToolOrchestrator } from "@hori/llm";
 import type { LlmClient } from "@hori/llm";
-import { ActiveMemoryService, ContextService, InteractionRequestService, MemoryAlbumService, ProfileService, ReflectionService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
+import { ActiveMemoryService, ContextService, InteractionRequestService, MemoryAlbumService, ProfileService, ReflectionService, RelationshipService, RetrievalService, SessionBufferService, SummaryService } from "@hori/memory";
 import { BraveSearchClient, SearchCacheService } from "@hori/search";
 import { createLogger, createPrismaClient, createRedisClient, createAppQueues, ensureInfrastructureReady } from "@hori/shared";
 
@@ -45,6 +45,10 @@ export interface BotRuntime {
   runtimeConfig: RuntimeConfigService;
   orchestrator: ReturnType<typeof createChatOrchestrator>;
   replyQueue: ReplyQueueService;
+  queuePhrasePool: QueuePhrasePoolService;
+  flashTrolling: FlashTrollingService;
+  relationshipService: RelationshipService;
+  promptSlots: PromptSlotService;
   knowledge: KnowledgeService;
 }
 
@@ -116,7 +120,11 @@ export async function bootstrapBot() {
   const moodService = new MoodService(prisma);
   const mediaReactionService = new MediaReactionService(prisma);
   const replyQueueService = new ReplyQueueService(prisma, env.REPLY_QUEUE_BUSY_TTL_SEC);
-  const contextService = new ContextService(prisma, summaryService, profileService, relationshipService, retrievalService, activeMemoryService, redisReady ? redis : undefined);
+  const queuePhrasePoolService = new QueuePhrasePoolService();
+  const flashTrollingService = new FlashTrollingService();
+  const promptSlotService = new PromptSlotService(prisma);
+  const sessionBufferService = redisReady ? new SessionBufferService(prisma, redis) : new SessionBufferService(prisma);
+  const contextService = new ContextService(prisma, summaryService, profileService, relationshipService, retrievalService, activeMemoryService, redisReady ? redis : undefined, sessionBufferService);
 
   const { client: llmClient } = createRuntimeLlmClient(env, logger, runtimeConfig, "bot");
 
@@ -176,7 +184,9 @@ export async function bootstrapBot() {
     affinity: affinityService,
     mood: moodService,
     media: mediaReactionService,
-    reflection: reflectionService
+    reflection: reflectionService,
+    sessionBuffer: sessionBufferService,
+    promptSlots: promptSlotService
   });
 
   const runtime: BotRuntime = {
@@ -195,6 +205,10 @@ export async function bootstrapBot() {
     runtimeConfig,
     orchestrator,
     replyQueue: replyQueueService,
+    queuePhrasePool: queuePhrasePoolService,
+    flashTrolling: flashTrollingService,
+    relationshipService,
+    promptSlots: promptSlotService,
     knowledge: knowledgeService
   };
 

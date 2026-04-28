@@ -1,12 +1,32 @@
 import type { BotIntent, IntentResult, MessageEnvelope } from "@hori/shared";
 
+/**
+ * V5.1 Phase D: Sigil router — знаки в начале сообщения (после bot name strip)
+ * сразу переключают сообщение в специальный режим.
+ *
+ * Стартовый набор:
+ *  - `?` в начале → question mode: web-search + подробный ответ.
+ *
+ * Остальные знаки заложены в схему, но пока выключены (sigil registry —
+ * отдельная итерация, см. план фазы D3).
+ */
+const SIGILS: Array<{
+  char: string;
+  intent: Exclude<BotIntent, "chat" | "ignore">;
+  requiresSearch: boolean;
+  enabled: boolean;
+  reason: string;
+}> = [
+  { char: "?", intent: "search", requiresSearch: true, enabled: true, reason: "sigil:?" }
+];
+
 const PATTERNS: Array<{
   intent: Exclude<BotIntent, "chat" | "ignore">;
   requiresSearch?: boolean;
   regex: RegExp;
   reason: string;
 }> = [
-  { intent: "help", regex: /^(help|помощь|что умеешь|\?)$/i, reason: "help keyword" },
+  { intent: "help", regex: /^(help|помощь|что умеешь)$/i, reason: "help keyword" },
   {
     intent: "summary",
     regex: /(кратко|что было|пока меня не было|о чем спорили|что решили|перескажи)/i,
@@ -86,6 +106,30 @@ export class IntentRouter {
         reason: "empty invocation defaults to help",
         cleanedContent,
         requiresSearch: false
+      };
+    }
+
+    // V5.1 Phase D: sigil-роутинг — проверяем первый не-пробельный символ.
+    const firstChar = cleanedContent[0];
+    const sigil = SIGILS.find((entry) => entry.enabled && entry.char === firstChar);
+    if (sigil) {
+      const stripped = cleanedContent.slice(1).trim();
+      // Голый знак без текста → fallback на help/chat (не запускаем search впустую).
+      if (stripped.length === 0) {
+        return {
+          intent: "help",
+          confidence: 0.95,
+          reason: `sigil ${sigil.char} without payload → help`,
+          cleanedContent,
+          requiresSearch: false
+        };
+      }
+      return {
+        intent: sigil.intent,
+        confidence: 0.95,
+        reason: sigil.reason,
+        cleanedContent: stripped,
+        requiresSearch: sigil.requiresSearch
       };
     }
 

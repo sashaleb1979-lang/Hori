@@ -8,7 +8,7 @@ import { buildIdeologicalBlock, detectIdeologicalTopic, resolveIdeologicalFlavou
 import { buildMessageKindBlock, detectMessageKind } from "./messageKinds";
 import { buildToneBlock, fallbackDisabledMode, modeFromRequestedDepth } from "./modes";
 import { buildStylePresetBlock, resolveStylePreset, stylePresets } from "./presets";
-import { DEFAULT_CORE_PROMPT_TEMPLATES, resolveRelationshipState, resolveRelationshipTail } from "./prompt-spec";
+import { DEFAULT_CORE_PROMPT_TEMPLATES, resolveRelationshipState, resolveRelationshipTail, buildRelationshipMicroBlocks, buildActivePromptSlotBlock, buildServerDescriptionBlock } from "./prompt-spec";
 import { buildReplyModeBlock, resolveReplyMode } from "./replyMode";
 import { buildSelfInterjectionBlock } from "./selfInterjection";
 import { buildSlangBlock, resolveSlangProfile } from "./slang";
@@ -1092,8 +1092,14 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     preferSerious: shouldPreferSeriousRelationshipTail({ input, messageKind, requestedDepth })
   });
   const corePromptTemplates = input.corePromptTemplates ?? DEFAULT_CORE_PROMPT_TEMPLATES;
+  const relationshipMicroBlocks = buildRelationshipMicroBlocks(input.relationship);
+  const activePromptSlotBlock = buildActivePromptSlotBlock(input.activePromptSlot);
+  const serverDescriptionBlock = buildServerDescriptionBlock(input.guildDescription);
   const assembly = {
     commonCore: corePromptTemplates.commonCore,
+    relationshipMicroBlocks,
+    activePromptSlotBlock,
+    serverDescriptionBlock,
     relationshipTail: resolveRelationshipTail(relationshipState, corePromptTemplates),
     turnInstruction: buildTurnInstruction({
       messageKind,
@@ -1124,6 +1130,9 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   if (input.intent === "chat") {
     const sections = [
       assembly.commonCore,
+      assembly.serverDescriptionBlock,
+      assembly.relationshipMicroBlocks,
+      assembly.activePromptSlotBlock,
       assembly.relationshipTail,
       `Turn instruction:\n${assembly.turnInstruction}`,
       "Сейчас идёт лента сообщений из Discord-чата. Ответь на последнее сообщение пользователя."
@@ -1132,6 +1141,9 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     prompt = sections.join("\n\n");
     blocksUsed = [
       "COMMON_CORE_BASE",
+      ...(assembly.serverDescriptionBlock ? ["SERVER_DESCRIPTION"] : []),
+      ...(assembly.relationshipMicroBlocks ? ["RELATIONSHIP_MICRO_BLOCKS"] : []),
+      ...(assembly.activePromptSlotBlock ? ["ACTIVE_PROMPT_SLOT"] : []),
       relationshipState === "cold_lowest" ? "COLD_TAIL" : `${relationshipState.toUpperCase()}_TAIL`,
       "TURN_INSTRUCTION"
     ];

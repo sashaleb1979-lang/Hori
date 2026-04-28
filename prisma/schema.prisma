@@ -10,6 +10,7 @@ datasource db {
 model Guild {
   id                 String                @id
   name               String?
+  description        String?
   botName            String                @default("Хори")
   preferredLanguage  String                @default("ru")
   roughnessLevel     Int                   @default(2)
@@ -48,6 +49,7 @@ model Guild {
   userMemoryCards    HoriUserMemoryCard[]
   restoredContexts   HoriRestoredContext[]
   knowledgeClusters  KnowledgeCluster[]
+  promptSlots        HoriPromptSlot[]
 }
 
 model ChannelConfig {
@@ -58,6 +60,12 @@ model ChannelConfig {
   allowBotReplies   Boolean  @default(true)
   allowInterjections Boolean @default(false)
   isMuted           Boolean  @default(false)
+  // V5.1 Phase C: явный 3-уровневый доступ к каналу.
+  //  full   — обычная работа (read + reply + interject).
+  //  silent — читает (контекст/аналитика), но не отвечает и не встревает.
+  //  off    — игнорирует канал полностью.
+  // Если null — резолвится из старых полей (allowBotReplies/isMuted) для обратной совместимости.
+  accessMode        String?
   topicInterestTags String[] @default([])
   responseLengthOverride String?
   createdAt         DateTime @default(now())
@@ -83,6 +91,7 @@ model User {
   userMemoryNotes  UserMemoryNote[]      @relation("UserMemoryTarget")
   userMemoryCards  HoriUserMemoryCard[]
   restoredContexts HoriRestoredContext[]
+  promptSlots      HoriPromptSlot[]
   userDailyAggregates UserDailyAggregate[]
 }
 
@@ -145,6 +154,9 @@ model RelationshipProfile {
   interactionCount Int      @default(0)
   proactivityPreference Float @default(0.5)
   topicBoundaries  Json?
+  characteristic   String?  @db.Text
+  lastChange       String?  @db.Text
+  characteristicUpdatedAt DateTime?
   updatedBy        String?
   updatedAt        DateTime @updatedAt
   guild            Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
@@ -784,6 +796,31 @@ model KnowledgeChunk {
 
   @@index([clusterId, dimensions])
   @@index([articleId, chunkIndex])
+}
+
+// V5.1: Prompt-слоты заменяют memory cards.
+// Слот — короткая инструкция/контекст, которую владелец активирует;
+// активна 10 минут с момента активации, потом 6 часов cooldown.
+// ownerLevel — снэпшот уровня отношений владельца (-1..4), используется
+// для разрешения конфликтов между слотами разных пользователей.
+model HoriPromptSlot {
+  id             String    @id @default(cuid())
+  guildId        String
+  channelId      String?   // null = глобальный (на сервер); не-null = только в одном канале
+  ownerUserId    String
+  ownerLevel     Int       @default(0)
+  title          String?
+  content        String    @db.Text
+  activatedAt    DateTime?
+  cooldownUntil  DateTime?
+  active         Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  guild          Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  owner          User      @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, channelId, active, activatedAt])
+  @@index([guildId, ownerUserId])
 }
 
 

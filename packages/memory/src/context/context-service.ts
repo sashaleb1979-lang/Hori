@@ -1,6 +1,8 @@
 import type { AppPrismaClient, BotIntent, ContextBundleV2, ContextEntity, MessageEnvelope } from "@hori/shared";
 import type { AppRedisClient } from "@hori/shared";
 
+import { SessionBufferService } from "../session/session-buffer-service";
+
 import { SummaryService } from "../summaries/summary-service";
 import { ProfileService } from "../profiles/profile-service";
 import { RelationshipService } from "../relationships/relationship-service";
@@ -19,7 +21,8 @@ export class ContextService {
     private readonly relationships: RelationshipService,
     private readonly retrieval: RetrievalService,
     private readonly activeMemory?: ActiveMemoryService,
-    private readonly redis?: AppRedisClient
+    private readonly redis?: AppRedisClient,
+    private readonly sessionBuffer?: SessionBufferService
   ) {}
 
   async buildContext(options: {
@@ -32,7 +35,7 @@ export class ContextService {
     intent?: BotIntent;
   }): Promise<ContextBundleV2> {
     const entities = detectEntities(options.message?.content ?? "");
-    const [recentMessages, summaries, userProfile, relationship, serverMemories, replyChain, activeTopic, entityMemories, activeMemory] = await Promise.all([
+    const [recentMessages, summaries, userProfile, relationship, serverMemories, replyChain, activeTopic, entityMemories, activeMemory, sessionMessages] = await Promise.all([
       this.prisma.message.findMany({
         where: {
           guildId: options.guildId,
@@ -56,7 +59,8 @@ export class ContextService {
         query: options.message?.content ?? "",
         queryEmbedding: options.queryEmbedding,
         limit: 10
-      }) ?? Promise.resolve(undefined)
+      }) ?? Promise.resolve(undefined),
+      this.sessionBuffer?.getSessionMessages(options.guildId, options.userId, options.channelId) ?? Promise.resolve(undefined)
     ]);
     const topicWindow = activeTopic ? await this.getTopicWindow(activeTopic.topicId) : [];
 
@@ -83,7 +87,8 @@ export class ContextService {
       topicWindow,
       entities,
       entityMemories,
-      activeMemory
+      activeMemory,
+      sessionMessages: sessionMessages?.length ? sessionMessages : undefined
     };
   }
 

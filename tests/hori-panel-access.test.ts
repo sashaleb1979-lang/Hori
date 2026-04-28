@@ -355,7 +355,7 @@ describe("/hori panel access", () => {
         component.data?.label ?? component.toJSON?.().label ?? ""
     );
 
-    expect(labels).toEqual(["Текст чата", "Core prompts"]);
+    expect(labels).toEqual(["Текст чата", "Core prompts", "V5 Controls"]);
   });
 
   it("lets the owner open the core prompt panel from persona actions", async () => {
