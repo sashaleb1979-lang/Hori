@@ -131,6 +131,10 @@ const coreEnvSchema = z.object({
   OPENAI_EMBED_MODEL: z.string().default("text-embedding-3-small"),
   OPENAI_EMBED_DIMENSIONS: intish.default(768),
 
+  DEEPSEEK_API_KEY: z.string().optional(),
+  DEEPSEEK_BASE_URL: urlish.default("https://api.deepseek.com"),
+  DEEPSEEK_MODEL: z.string().default("deepseek-v4-flash"),
+
   GOOGLE_API_KEY: z.string().optional(),
   GEMINI_FLASH_MODEL: z.string().default("gemini-2.5-flash"),
   GEMINI_PRO_MODEL: z.string().default("gemini-2.5-pro"),
@@ -145,12 +149,14 @@ const coreEnvSchema = z.object({
   GITHUB_MODEL_SECONDARY: z.string().default("openai/gpt-5-chat"),
   GITHUB_MODEL_TERTIARY: z.string().default("openai/gpt-5-nano"),
 
+  AI_ROUTER_ENABLE_DEEPSEEK: boolish.default(true),
   AI_ROUTER_ENABLE_GEMINI: boolish.default(true),
   AI_ROUTER_ENABLE_CLOUDFLARE: boolish.default(true),
   AI_ROUTER_ENABLE_GITHUB: boolish.default(true),
   AI_ROUTER_ENABLE_OPENAI: boolish.default(true),
   AI_ROUTER_LOG_VERBOSE: boolish.default(false),
   AI_ROUTER_USE_GEMINI_PRO_FOR_COMPLEX: boolish.default(true),
+  AI_ROUTER_DEEPSEEK_COOLDOWN_MS: intish.default(300000),
   AI_ROUTER_GEMINI_FLASH_DAILY_LIMIT: intish.default(250),
   AI_ROUTER_GEMINI_PRO_DAILY_LIMIT: intish.default(100),
   AI_ROUTER_CLOUDFLARE_COOLDOWN_MS: intish.default(900000),
@@ -386,7 +392,7 @@ const legacyAdvancedSchema = z
 export interface AppEnv extends z.infer<typeof coreEnvSchema>, RuntimeTuning {}
 export type AppRole = "bot" | "api" | "worker";
 
-export const AI_ROUTER_PROVIDER_NAMES = ["gemini", "cloudflare", "github", "openai"] as const;
+export const AI_ROUTER_PROVIDER_NAMES = ["deepseek", "gemini", "cloudflare", "github", "openai"] as const;
 export type AiRouterProviderName = (typeof AI_ROUTER_PROVIDER_NAMES)[number];
 
 export interface AiRouterProviderEnvState {
@@ -428,6 +434,9 @@ const envAliasMap = {
   OAI_SMART: "OPENAI_SMART_MODEL",
   OAI_EMBED: "OPENAI_EMBED_MODEL",
   OAI_EMBED_DIMS: "OPENAI_EMBED_DIMENSIONS",
+  DS_KEY: "DEEPSEEK_API_KEY",
+  DS_URL: "DEEPSEEK_BASE_URL",
+  DS_MODEL: "DEEPSEEK_MODEL",
   GOOGLE_KEY: "GOOGLE_API_KEY",
   GEMINI_FLASH: "GEMINI_FLASH_MODEL",
   GEMINI_PRO: "GEMINI_PRO_MODEL",
@@ -490,6 +499,9 @@ function mapCoreAliases(raw: NodeJS.ProcessEnv) {
     OPENAI_SMART_MODEL: raw.OAI_SMART ?? raw.OPENAI_SMART_MODEL ?? raw.OAI_MODEL ?? raw.OPENAI_MODEL,
     OPENAI_EMBED_MODEL: raw.OAI_EMBED ?? raw.OPENAI_EMBED_MODEL,
     OPENAI_EMBED_DIMENSIONS: raw.OAI_EMBED_DIMS ?? raw.OPENAI_EMBED_DIMENSIONS,
+    DEEPSEEK_API_KEY: raw.DS_KEY ?? raw.DEEPSEEK_API_KEY,
+    DEEPSEEK_BASE_URL: raw.DS_URL ?? raw.DEEPSEEK_BASE_URL,
+    DEEPSEEK_MODEL: raw.DS_MODEL ?? raw.DEEPSEEK_MODEL,
     GOOGLE_API_KEY: raw.GOOGLE_KEY ?? raw.GOOGLE_API_KEY,
     GEMINI_FLASH_MODEL: raw.GEMINI_FLASH ?? raw.GEMINI_FLASH_MODEL,
     GEMINI_PRO_MODEL: raw.GEMINI_PRO ?? raw.GEMINI_PRO_MODEL,
@@ -501,12 +513,14 @@ function mapCoreAliases(raw: NodeJS.ProcessEnv) {
     GITHUB_MODEL_PRIMARY: raw.GH_MODEL_PRIMARY ?? raw.GITHUB_MODEL_PRIMARY,
     GITHUB_MODEL_SECONDARY: raw.GH_MODEL_SECONDARY ?? raw.GITHUB_MODEL_SECONDARY,
     GITHUB_MODEL_TERTIARY: raw.GH_MODEL_TERTIARY ?? raw.GITHUB_MODEL_TERTIARY,
+    AI_ROUTER_ENABLE_DEEPSEEK: raw.AI_ROUTER_ENABLE_DEEPSEEK,
     AI_ROUTER_ENABLE_GEMINI: raw.AI_ROUTER_ENABLE_GEMINI,
     AI_ROUTER_ENABLE_CLOUDFLARE: raw.AI_ROUTER_ENABLE_CLOUDFLARE,
     AI_ROUTER_ENABLE_GITHUB: raw.AI_ROUTER_ENABLE_GITHUB,
     AI_ROUTER_ENABLE_OPENAI: raw.AI_ROUTER_ENABLE_OPENAI,
     AI_ROUTER_LOG_VERBOSE: raw.AI_ROUTER_LOG_VERBOSE,
     AI_ROUTER_USE_GEMINI_PRO_FOR_COMPLEX: raw.AI_ROUTER_USE_GEMINI_PRO_FOR_COMPLEX,
+    AI_ROUTER_DEEPSEEK_COOLDOWN_MS: raw.AI_ROUTER_DEEPSEEK_COOLDOWN_MS,
     AI_ROUTER_GEMINI_FLASH_DAILY_LIMIT: raw.AI_ROUTER_GEMINI_FLASH_DAILY_LIMIT,
     AI_ROUTER_GEMINI_PRO_DAILY_LIMIT: raw.AI_ROUTER_GEMINI_PRO_DAILY_LIMIT,
     AI_ROUTER_CLOUDFLARE_COOLDOWN_MS: raw.AI_ROUTER_CLOUDFLARE_COOLDOWN_MS,
@@ -517,6 +531,9 @@ function mapCoreAliases(raw: NodeJS.ProcessEnv) {
 
 export function resolveAiRouterEnvState(env: AppEnv): AiRouterEnvState {
   return {
+    deepseek: buildProviderState("deepseek", env.AI_ROUTER_ENABLE_DEEPSEEK, [
+      ["DEEPSEEK_API_KEY", env.DEEPSEEK_API_KEY]
+    ]),
     gemini: buildProviderState("gemini", env.AI_ROUTER_ENABLE_GEMINI, [
       ["GOOGLE_API_KEY", env.GOOGLE_API_KEY]
     ]),

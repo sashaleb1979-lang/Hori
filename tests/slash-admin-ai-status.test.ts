@@ -53,7 +53,8 @@ describe("SlashAdminService aiStatus", () => {
 
     expect(result).toContain("AI router status");
     expect(result).toContain("Order:");
-    expect(result).toContain("Providers: gemini:on");
+    expect(result).toContain("deepseek:off(missing:DEEPSEEK_API_KEY)");
+    expect(result).toContain("gemini:on");
     expect(result).toContain("cloudflare:on");
     expect(result).toContain("Embeddings: openai:on text-embedding-3-small dim=768");
     expect(result).toContain("Cooldowns: ");
@@ -102,7 +103,8 @@ describe("SlashAdminService aiStatus", () => {
 
     const result = await service.aiStatus();
 
-    expect(result).toContain("Providers: gemini:off(missing:GOOGLE_API_KEY)");
+    expect(result).toContain("deepseek:off(missing:DEEPSEEK_API_KEY)");
+    expect(result).toContain("gemini:off(missing:GOOGLE_API_KEY)");
     expect(result).toContain("Fallbacks: cloudflare=0");
     expect(result).toContain("ok cloudflare/@cf/zai-org/glm-4.7-flash d0");
   });

@@ -125,6 +125,23 @@ describe("loadEnv", () => {
     expect(getEnabledAiRouterProviders(env)).toEqual(["gemini", "cloudflare", "github", "openai"]);
   });
 
+  it("enables DeepSeek in router mode when a key is provided", () => {
+    const env = loadEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      AI_PROVIDER: "router",
+      DEEPSEEK_API_KEY: "deepseek-key"
+    });
+
+    const state = resolveAiRouterEnvState(env);
+
+    expect(env.DEEPSEEK_BASE_URL).toBe("https://api.deepseek.com");
+    expect(env.DEEPSEEK_MODEL).toBe("deepseek-v4-flash");
+    expect(state.deepseek.enabled).toBe(true);
+    expect(state.deepseek.missing).toEqual([]);
+    expect(getEnabledAiRouterProviders(env)).toEqual(["deepseek"]);
+  });
+
   it("disables only missing router providers instead of crashing startup", () => {
     const env = loadEnv({
       DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",

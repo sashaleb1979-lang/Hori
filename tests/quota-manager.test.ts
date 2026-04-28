@@ -8,6 +8,7 @@ describe("AiRouterQuotaManager", () => {
     const manager = new AiRouterQuotaManager(store, {
       geminiFlashModel: "gemini-2.5-flash",
       geminiProModel: "gemini-2.5-pro",
+      deepseekCooldownMs: 300000,
       geminiFlashDailyLimit: 250,
       geminiProDailyLimit: 100,
       cloudflareCooldownMs: 900000,
@@ -37,6 +38,7 @@ describe("AiRouterQuotaManager", () => {
     const manager = new AiRouterQuotaManager(store, {
       geminiFlashModel: "gemini-2.5-flash",
       geminiProModel: "gemini-2.5-pro",
+      deepseekCooldownMs: 300000,
       geminiFlashDailyLimit: 1,
       geminiProDailyLimit: 100,
       cloudflareCooldownMs: 900000,
@@ -87,6 +89,7 @@ describe("AiRouterQuotaManager", () => {
     const manager = new AiRouterQuotaManager(store, {
       geminiFlashModel: "gemini-2.5-flash",
       geminiProModel: "gemini-2.5-pro",
+      deepseekCooldownMs: 300000,
       geminiFlashDailyLimit: 1,
       geminiProDailyLimit: 100,
       cloudflareCooldownMs: 900000,

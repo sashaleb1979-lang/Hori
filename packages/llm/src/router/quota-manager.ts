@@ -20,6 +20,7 @@ const DEFAULT_RESERVATION_TTL_MS = 10 * 60 * 1000;
 export interface AiRouterQuotaConfig {
   geminiFlashModel: string;
   geminiProModel: string;
+  deepseekCooldownMs: number;
   geminiFlashDailyLimit: number;
   geminiProDailyLimit: number;
   cloudflareCooldownMs: number;
@@ -391,6 +392,17 @@ export class AiRouterQuotaManager {
   }
 
   private getPolicy(provider: string, model: string, now: Date): ProviderQuotaPolicy {
+    if (provider === "deepseek") {
+      return {
+        provider,
+        model,
+        resetTimeZone: UTC_RESET_TIMEZONE,
+        baseCooldownMs: this.config.deepseekCooldownMs,
+        transientCooldownMs: this.config.transientCooldownMs ?? DEFAULT_TRANSIENT_COOLDOWN_MS,
+        now
+      };
+    }
+
     if (provider === "gemini") {
       const isPro = model === this.config.geminiProModel;
       return {

@@ -27,6 +27,13 @@ describe("model-pricing", () => {
     expect(cost).toBeCloseTo(0.00028, 8);
   });
 
+  it("uses model-specific cached pricing when available", () => {
+    const pricing = getModelPricing("deepseek-v4-flash");
+
+    expect(pricing.cachedInputPerMillion).toBe(0.0028);
+    expect(calculateCostUsd("deepseek-v4-flash", 1000, 500, 400)).toBeCloseTo(0.00022512, 8);
+  });
+
   it("clamps cached tokens to prompt token count", () => {
     const cost = calculateCostUsd("gpt-5-nano", 1000, 0, 5000);
     expect(cost).toBeCloseTo(0.00005, 8);

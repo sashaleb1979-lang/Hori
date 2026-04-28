@@ -6,6 +6,7 @@
 export interface ModelPricing {
   inputPerMillion: number;
   outputPerMillion: number;
+  cachedInputPerMillion?: number;
 }
 
 const PRICING_TABLE: Record<string, ModelPricing> = {
@@ -14,6 +15,9 @@ const PRICING_TABLE: Record<string, ModelPricing> = {
   "gpt-5-mini":           { inputPerMillion: 0.30,  outputPerMillion: 1.20 },
   "gpt-5.4-nano":         { inputPerMillion: 0.10,  outputPerMillion: 0.40 },
   "gpt-5.4-mini":         { inputPerMillion: 0.40,  outputPerMillion: 1.60 },
+  "deepseek-v4-flash":    { inputPerMillion: 0.14,  outputPerMillion: 0.28, cachedInputPerMillion: 0.0028 },
+  "deepseek-chat":        { inputPerMillion: 0.14,  outputPerMillion: 0.28, cachedInputPerMillion: 0.0028 },
+  "deepseek-reasoner":    { inputPerMillion: 0.14,  outputPerMillion: 0.28, cachedInputPerMillion: 0.0028 },
   "text-embedding-3-small": { inputPerMillion: 0.02, outputPerMillion: 0 },
 };
 
@@ -33,9 +37,10 @@ export function calculateCostUsd(
   const pricing = getModelPricing(model);
   const safeCachedTokens = Math.max(0, Math.min(cachedTokens, promptTokens));
   const nonCachedPrompt = Math.max(0, promptTokens - safeCachedTokens);
+  const cachedInputRate = pricing.cachedInputPerMillion ?? pricing.inputPerMillion * 0.5;
   return (
     nonCachedPrompt * pricing.inputPerMillion +
-    safeCachedTokens * pricing.inputPerMillion * 0.5 +
+    safeCachedTokens * cachedInputRate +
     completionTokens * pricing.outputPerMillion
   ) / 1_000_000;
 }

@@ -50,21 +50,22 @@ tests/
 - PostgreSQL 15+ with `pgvector`
 - Redis
 - OpenAI API key for the final paid fallback and embeddings
-- Optional provider credentials for Gemini, Cloudflare Workers AI and GitHub Models
+- Optional provider credentials for DeepSeek, Gemini, Cloudflare Workers AI and GitHub Models
 - Brave Search API key
 
 ## AI Router
 Default runtime mode is `AI_PROVIDER=router`.
 
 Deterministic fallback order:
-1. `Gemini Pro` only for complex prompts when enabled and quota/health allow it
-2. `Gemini Flash` as the default free tier
-3. `Cloudflare Workers AI` as the next free fallback
-4. `GitHub Models` as reserve
-5. `OpenAI gpt-5-nano` as the final paid fallback
+1. `DeepSeek V4 Flash` in non-thinking mode as the default primary chat tier when `DEEPSEEK_API_KEY` is configured
+2. `Gemini Pro` only for complex prompts when enabled and quota/health allow it
+3. `Gemini Flash` as the default free fallback tier
+4. `Cloudflare Workers AI` as the next fallback
+5. `GitHub Models` as reserve
+6. `OpenAI gpt-5-nano` as the final paid fallback
 
 Health and quota status:
-- Use `/hori ai-status` for enabled providers, active order, cooldowns, Gemini daily counters, recent routes and fallback counts.
+- Use `/hori ai-status` for enabled providers, active order, cooldowns, DeepSeek availability, Gemini daily counters, recent routes and fallback counts.
 - In router mode, bot and worker now use the same AI router policy. There is no worker-only direct OpenAI bypass anymore.
 - Router-mode embeddings still use OpenAI embeddings. If `OAI_KEY` / `OPENAI_API_KEY` is missing, startup warns and `/hori ai-status` shows embeddings as unavailable.
 - `/hori state tab:brain` now shows router mode and points to `/hori ai-status` for detailed diagnostics.
@@ -110,7 +111,7 @@ pnpm build
 ## Environment Variables
 See [.env.example](./.env.example). Short aliases are the preferred setup for Railway:
 - Required in most setups: `BOT_TOKEN`, `BOT_ID`, `DB_URL`, `KV_URL`
-- Default production path: `AI_PROVIDER=router` plus `GOOGLE_API_KEY`, `CF_ACCOUNT_ID`, `CF_API_TOKEN`, `GITHUB_TOKEN`, `OAI_KEY`
+- Default production path: `AI_PROVIDER=router` plus `DEEPSEEK_API_KEY`, `GOOGLE_API_KEY`, `CF_ACCOUNT_ID`, `CF_API_TOKEN`, `GITHUB_TOKEN`, `OAI_KEY`
 - Direct fallback-only mode: `AI_PROVIDER=openai` plus `OAI_KEY`, with optional `OAI_CHAT`, `OAI_SMART`, `OAI_EMBED`
 - Usually set too: `BOT_OWNERS`, `BOT_NAME`, `BRAVE_KEY`
 - Optional top-level overrides: `BOT_LANG`, `HOST`, `PORT`, `ADMIN_KEY`
@@ -123,6 +124,7 @@ BOT_ID=...
 DB_URL=postgresql://...
 KV_URL=redis://...
 AI_PROVIDER=router
+DEEPSEEK_API_KEY=...
 GOOGLE_API_KEY=...
 CF_ACCOUNT_ID=...
 CF_API_TOKEN=...
@@ -156,7 +158,7 @@ Notes:
 - For verbose AI router transition logs, set `AI_ROUTER_LOG_VERBOSE=true`.
 - Prisma-based scripts use the alias bridge automatically, so `DB_URL` is enough if you run the provided `pnpm prisma:*` and `pnpm seed` scripts.
 - API-only deployments can skip LLM vars entirely; bot and worker need either `AI_PROVIDER=router` with provider keys or `AI_PROVIDER=openai` with `OAI_KEY`/`OPENAI_API_KEY`.
-- In `AI_PROVIDER=router`, `OAI_KEY` is still recommended because it powers the final paid fallback and OpenAI embeddings used by retrieval/profile/topic jobs.
+- In `AI_PROVIDER=router`, `DEEPSEEK_API_KEY` enables the default primary chat tier, while `OAI_KEY` is still recommended because it powers the final paid fallback and OpenAI embeddings used by retrieval/profile/topic jobs.
 - In Railway, prefer using the built-in managed database variable names directly for service references: `DATABASE_URL=${{Postgres.DATABASE_URL}}` and `REDIS_URL=${{Redis.REDIS_URL}}`.
 
 ## Slash Commands
@@ -208,7 +210,7 @@ Do not use `pnpm dev`, `tsx watch`, or workspace-local dev commands in Railway.
 ### Infra
 - Attach a managed PostgreSQL instance.
 - Attach a managed Redis instance.
-- Default AI path: set `AI_PROVIDER=router` and provide `GOOGLE_API_KEY`, `CF_ACCOUNT_ID`, `CF_API_TOKEN`, `GITHUB_TOKEN`, `OAI_KEY`.
+- Default AI path: set `AI_PROVIDER=router` and provide `DEEPSEEK_API_KEY`, `GOOGLE_API_KEY`, `CF_ACCOUNT_ID`, `CF_API_TOKEN`, `GITHUB_TOKEN`, `OAI_KEY`.
 - Direct paid-only fallback mode: set `AI_PROVIDER=openai` and provide `OAI_KEY`, optionally `OAI_CHAT`, `OAI_SMART`, `OAI_EMBED`.
 - Link database and Redis variables with Railway references, for example:
 ```env

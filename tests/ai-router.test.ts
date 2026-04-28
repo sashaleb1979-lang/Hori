@@ -12,6 +12,62 @@ import {
 } from "@hori/llm";
 
 describe("AiRouterClient", () => {
+  it("routes simple requests to DeepSeek first when configured", async () => {
+    const deepseek = createMockProvider("deepseek", async (request) => successResponse("deepseek", request.model, "ds ok"));
+    const gemini = createMockProvider("gemini", async (request) => successResponse("gemini", request.model, "pro ok"));
+    const cloudflare = createMockProvider("cloudflare", async (request) => successResponse("cloudflare", request.model, "cf ok"));
+    const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh ok"));
+    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa ok"));
+
+    const client = createRouterWithEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      AI_PROVIDER: "router",
+      DEEPSEEK_API_KEY: "deepseek-key",
+      OPENAI_API_KEY: "openai-key"
+    }, { deepseek, gemini, cloudflare, github, openai });
+
+    const response = await client.chat({
+      model: "ignored",
+      messages: [{ role: "user", content: "коротко ответь" }],
+      metadata: { requestId: "req-deepseek-1", userKey: "u:123", complexityHint: "simple" }
+    });
+
+    expect(response.routing?.provider).toBe("deepseek");
+    expect(response.routing?.model).toBe("deepseek-v4-flash");
+    expect(deepseek.send).toHaveBeenCalledTimes(1);
+    expect(gemini.send).not.toHaveBeenCalled();
+    expect(cloudflare.send).not.toHaveBeenCalled();
+  });
+
+  it("skips DeepSeek when paid fallback is disabled", async () => {
+    const deepseek = createMockProvider("deepseek", async (request) => successResponse("deepseek", request.model, "ds ok"));
+    const gemini = createMockProvider("gemini", async (request) => successResponse("gemini", request.model, "flash ok"));
+    const cloudflare = createMockProvider("cloudflare", async (request) => successResponse("cloudflare", request.model, "cf ok"));
+    const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh ok"));
+    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa ok"));
+
+    const client = createRouterWithEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      AI_PROVIDER: "router",
+      DEEPSEEK_API_KEY: "deepseek-key",
+      GOOGLE_API_KEY: "google-key",
+      OPENAI_API_KEY: "openai-key"
+    }, { deepseek, gemini, cloudflare, github, openai });
+
+    const response = await client.chat({
+      model: "ignored",
+      messages: [{ role: "user", content: "коротко ответь" }],
+      metadata: { requestId: "req-deepseek-2", userKey: "u:123", complexityHint: "simple", allowPaidFallback: false }
+    });
+
+    expect(response.routing?.provider).toBe("gemini");
+    expect(response.routing?.model).toBe("gemini-2.5-flash");
+    expect(deepseek.send).not.toHaveBeenCalled();
+    expect(gemini.send).toHaveBeenCalledTimes(1);
+  });
+
   it("routes complex requests to Gemini Pro first", async () => {
     const gemini = createMockProvider("gemini", async (request) => successResponse("gemini", request.model, "pro ok"));
     const cloudflare = createMockProvider("cloudflare", async (request) => successResponse("cloudflare", request.model, "cf ok"));
@@ -61,7 +117,7 @@ describe("AiRouterClient", () => {
     expect(response.routing?.provider).toBe("gemini");
     expect(response.routing?.model).toBe("gemini-2.5-flash");
     expect(response.routing?.fallbackDepth).toBe(1);
-    expect(response.routing?.routedFrom).toEqual(["gemini:gemini-2.5-pro"]);
+    expect(response.routing?.routedFrom).toEqual(["deepseek:deepseek-v4-flash", "gemini:gemini-2.5-pro"]);
     expect(gemini.send).toHaveBeenCalledTimes(2);
     expect(gemini.send).toHaveBeenNthCalledWith(1, expect.objectContaining({ model: "gemini-2.5-pro" }));
     expect(gemini.send).toHaveBeenNthCalledWith(2, expect.objectContaining({ model: "gemini-2.5-flash" }));
@@ -234,7 +290,7 @@ describe("AiRouterClient", () => {
 
     const snapshot = await client.getStatusSnapshot();
 
-    expect(snapshot.activeOrder[0]).toContain("gemini:gemini-2.5-pro");
+    expect(snapshot.activeOrder[0]).toContain("deepseek:deepseek-v4-flash");
     expect(snapshot.recentRoutes.some((entry) => entry.requestId === "req-status-1" && entry.provider === "cloudflare" && entry.success)).toBe(true);
     expect(snapshot.fallbackCounts.cloudflare).toBe(1);
     expect(snapshot.enabledProviders.find((entry) => entry.provider === "gemini")?.enabled).toBe(true);
@@ -296,7 +352,7 @@ describe("AiRouterClient skipped providers", () => {
 
     expect(response.routing?.provider).toBe("cloudflare");
     expect(response.routing?.fallbackDepth).toBe(0);
-    expect(response.routing?.routedFrom).toEqual(["gemini:gemini-2.5-flash"]);
+    expect(response.routing?.routedFrom).toEqual(["deepseek:deepseek-v4-flash", "gemini:gemini-2.5-flash"]);
     expect(snapshot.fallbackCounts.cloudflare).toBe(0);
     expect(snapshot.recentRoutes.find((entry) => entry.requestId === "req-skip-1" && entry.success)?.fallbackDepth).toBe(0);
   });

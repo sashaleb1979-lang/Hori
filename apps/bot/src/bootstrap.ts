@@ -5,7 +5,7 @@ import { assertEnvForRole, loadEnv } from "@hori/config";
 import { AffinityService, createChatOrchestrator, createRuntimeLlmClient, FlashTrollingService, KnowledgeService, MediaReactionService, MoodService, QueuePhrasePoolService, ReplyQueueService, RuntimeConfigService, SlashAdminService } from "@hori/core";
 import { EmbeddingAdapter, ModelRouter, ToolOrchestrator } from "@hori/llm";
 import type { LlmClient } from "@hori/llm";
-import { ActiveMemoryService, ContextService, InteractionRequestService, MemoryAlbumService, ProfileService, ReflectionService, RelationshipService, RetrievalService, SessionBufferService, SummaryService } from "@hori/memory";
+import { ActiveMemoryService, ContextService, InteractionRequestService, MemoryAlbumService, ProfileService, PromptSlotService, ReflectionService, RelationshipService, RetrievalService, SessionBufferService, SummaryService } from "@hori/memory";
 import { BraveSearchClient, SearchCacheService } from "@hori/search";
 import { createLogger, createPrismaClient, createRedisClient, createAppQueues, ensureInfrastructureReady } from "@hori/shared";
 

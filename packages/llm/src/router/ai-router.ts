@@ -11,6 +11,7 @@ import type { AppLogger } from "@hori/shared";
 import { asErrorMessage, normalizeWhitespace } from "@hori/shared";
 
 import { CloudflareProvider } from "../client/cloudflare-provider";
+import { DeepSeekProvider } from "../client/deepseek-provider";
 import { GeminiProvider } from "../client/gemini-provider";
 import { GitHubModelsProvider } from "../client/github-models-provider";
 import type {
@@ -83,6 +84,7 @@ export class AiRouterClient implements LlmClient {
       {
         geminiFlashModel: env.GEMINI_FLASH_MODEL,
         geminiProModel: env.GEMINI_PRO_MODEL,
+        deepseekCooldownMs: env.AI_ROUTER_DEEPSEEK_COOLDOWN_MS,
         geminiFlashDailyLimit: env.AI_ROUTER_GEMINI_FLASH_DAILY_LIMIT,
         geminiProDailyLimit: env.AI_ROUTER_GEMINI_PRO_DAILY_LIMIT,
         cloudflareCooldownMs: env.AI_ROUTER_CLOUDFLARE_COOLDOWN_MS,
@@ -105,7 +107,7 @@ export class AiRouterClient implements LlmClient {
     let lastError: Error | undefined;
 
     for (const [index, attempt] of attempts.entries()) {
-      if (!allowPaidFallback && attempt.providerName === "openai") {
+      if (!allowPaidFallback && (attempt.providerName === "deepseek" || attempt.providerName === "openai")) {
         continue;
       }
 
@@ -349,18 +351,24 @@ export class AiRouterClient implements LlmClient {
     const attempts: RouterAttempt[] = [];
     const isComplex = this.shouldUseGeminiPro(options);
 
+    attempts.push({
+      providerName: "deepseek",
+      model: this.env.DEEPSEEK_MODEL,
+      reason: "default_chat_primary"
+    });
+
     if (isComplex) {
       attempts.push({
         providerName: "gemini",
         model: this.env.GEMINI_PRO_MODEL,
-        reason: "complex_request"
+        reason: "deepseek_unavailable_complex_request"
       });
     }
 
     attempts.push({
       providerName: "gemini",
       model: this.env.GEMINI_FLASH_MODEL,
-      reason: isComplex ? "gemini_pro_unavailable_or_failed" : "default_free_tier"
+      reason: isComplex ? "gemini_pro_unavailable_or_failed" : "deepseek_unavailable"
     });
     attempts.push({
       providerName: "cloudflare",
@@ -432,6 +440,7 @@ export class AiRouterClient implements LlmClient {
 
   private describeActiveOrder() {
     const order = [
+      `deepseek:${this.env.DEEPSEEK_MODEL}`,
       `gemini:${this.env.GEMINI_PRO_MODEL} (complex only)`,
       `gemini:${this.env.GEMINI_FLASH_MODEL}`,
       `cloudflare:${this.env.CF_MODEL}`,
@@ -472,6 +481,13 @@ export class AiRouterClient implements LlmClient {
 
 function buildProviders(env: AppEnv, logger: AppLogger): Partial<Record<AiRouterProviderName, ChatProvider>> {
   return {
+    deepseek: env.DEEPSEEK_API_KEY
+      ? new DeepSeekProvider(env.DEEPSEEK_API_KEY, env.DEEPSEEK_BASE_URL, logger, {
+          timeoutMs: env.OLLAMA_TIMEOUT_MS,
+          logTraffic: env.AI_ROUTER_LOG_VERBOSE,
+          logMaxChars: env.OLLAMA_LOG_MAX_CHARS
+        })
+      : undefined,
     gemini: env.GOOGLE_API_KEY
       ? new GeminiProvider(env.GOOGLE_API_KEY, logger, {
           timeoutMs: env.OLLAMA_TIMEOUT_MS,

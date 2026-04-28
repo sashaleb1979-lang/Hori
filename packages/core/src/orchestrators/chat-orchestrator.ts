@@ -6,7 +6,7 @@ import { llmCachedTokensCounter, llmCostCounter, llmTokensCounter } from "@hori/
 import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, calculateCostUsd, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet } from "@hori/llm";
 import type { LlmChatResponse, LlmClient, LlmRequestMetadata, ModelRoutingSlot } from "@hori/llm";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
-import { ContextService, ReflectionService, RelationshipService, RetrievalService, SessionBufferService } from "@hori/memory";
+import { ContextService, type PromptSlotService, ReflectionService, RelationshipService, RetrievalService, SessionBufferService } from "@hori/memory";
 import { BraveSearchClient, buildSourceDigest, extractLinksFromMessage, fetchWebPage } from "@hori/search";
 import { chooseConflictStrategy, detectConflict, type ConflictDetection } from "../brain/conflict-detector";
 import { EmotionLabel, type EmotionalState } from "../brain/emotion-state";

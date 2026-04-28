@@ -1,6 +1,7 @@
 export * from "./adapters/embedding-adapter";
 export * from "./client/llm-client";
 export * from "./client/cloudflare-provider";
+export * from "./client/deepseek-provider";
 export * from "./client/gemini-provider";
 export * from "./client/github-models-provider";
 export * from "./client/ollama-client";
