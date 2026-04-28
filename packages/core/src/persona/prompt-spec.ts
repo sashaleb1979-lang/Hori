@@ -304,37 +304,37 @@ export const CORE_PROMPT_DEFINITIONS = {
   },
   relationship_base: {
     label: "RELATIONSHIP_BASE",
-    description: "Базовый relationship tail для новых и нейтральных пользователей.",
+    description: "Level 0 — базовый tail для нейтрального/нового пользователя (default).",
     defaultContent: RELATIONSHIP_TAILS.base
   },
   relationship_warm: {
     label: "RELATIONSHIP_WARM",
-    description: "Relationship tail для тёплого, но ещё не близкого режима.",
+    description: "Level 1 — тёплый, но ещё не близкий режим.",
     defaultContent: RELATIONSHIP_TAILS.warm
   },
   relationship_close: {
     label: "RELATIONSHIP_CLOSE",
-    description: "Relationship tail для близкого dry-friendly режима.",
+    description: "Level 2 — близкий dry-friendly режим.",
     defaultContent: RELATIONSHIP_TAILS.close
   },
   relationship_teasing: {
     label: "RELATIONSHIP_TEASING",
-    description: "Relationship tail для лёгкого teasing/заигрывания.",
+    description: "Level 3 — teasing/лёгкое заигрывание (свой со подколами).",
     defaultContent: RELATIONSHIP_TAILS.teasing
   },
   relationship_sweet: {
     label: "RELATIONSHIP_SWEET",
-    description: "Relationship tail для самого тёплого режима.",
+    description: "Level 4 — самый тёплый режим.",
     defaultContent: RELATIONSHIP_TAILS.sweet
   },
   relationship_serious: {
     label: "RELATIONSHIP_SERIOUS",
-    description: "Relationship tail для серьёзного/делового режима.",
+    description: "Временный mode (вне level scale): серьёзный/деловой тон.",
     defaultContent: RELATIONSHIP_TAILS.serious
   },
   cold_tail: {
     label: "COLD_TAIL",
-    description: "Cold relationship tail и примеры агрессии.",
+    description: "Level −1 — cold_lowest tail после подтверждённой грубости (raw examples).",
     defaultContent: COLD_TAIL
   },
   aggression_checker: {
@@ -425,6 +425,76 @@ export function getCorePromptTemplateContent(templates: CorePromptTemplates, key
 }
 
 const RELATIONSHIP_STATES = ["base", "warm", "close", "teasing", "sweet", "cold_lowest", "serious"] as const;
+
+/**
+ * Integer relationship level (V6 panel surface).
+ * −1 = cold_lowest (после подтверждённой грубости)
+ *  0 = base (default)
+ *  1 = warm
+ *  2 = close
+ *  3 = teasing
+ *  4 = sweet
+ *
+ * `serious` — вне level scale, временный режим.
+ *
+ * Правила округления:
+ *  - level < 0 всегда округляется вниз;
+ *  - level > 0 — кор-промт меняется только при достижении целого.
+ */
+export const RELATIONSHIP_LEVEL_MIN = -1;
+export const RELATIONSHIP_LEVEL_MAX = 4;
+export const RELATIONSHIP_LEVEL_DEFAULT = 0;
+
+const LEVEL_TO_STATE: Record<number, Exclude<RelationshipState, "serious">> = {
+  [-1]: "cold_lowest",
+  0: "base",
+  1: "warm",
+  2: "close",
+  3: "teasing",
+  4: "sweet"
+};
+
+const STATE_TO_LEVEL: Partial<Record<RelationshipState, number>> = {
+  cold_lowest: -1,
+  base: 0,
+  warm: 1,
+  close: 2,
+  teasing: 3,
+  sweet: 4
+};
+
+const LEVEL_TO_CORE_PROMPT_KEY: Record<number, CorePromptKey> = {
+  [-1]: "cold_tail",
+  0: "relationship_base",
+  1: "relationship_warm",
+  2: "relationship_close",
+  3: "relationship_teasing",
+  4: "relationship_sweet"
+};
+
+export function clampRelationshipLevel(value: number): number {
+  if (!Number.isFinite(value)) {
+    return RELATIONSHIP_LEVEL_DEFAULT;
+  }
+  // Округление: ниже 0 — всегда вниз; выше 0 — порог по целому числу.
+  const rounded = value < 0 ? Math.floor(value) : Math.floor(value);
+  return Math.max(RELATIONSHIP_LEVEL_MIN, Math.min(RELATIONSHIP_LEVEL_MAX, rounded));
+}
+
+export function relationshipStateForLevel(level: number): Exclude<RelationshipState, "serious"> {
+  const clamped = clampRelationshipLevel(level);
+  return LEVEL_TO_STATE[clamped] ?? "base";
+}
+
+export function levelForRelationshipState(state: RelationshipState): number | null {
+  const value = STATE_TO_LEVEL[state];
+  return value === undefined ? null : value;
+}
+
+export function corePromptKeyForLevel(level: number): CorePromptKey {
+  const clamped = clampRelationshipLevel(level);
+  return LEVEL_TO_CORE_PROMPT_KEY[clamped] ?? "relationship_base";
+}
 
 export interface MemoryCardPromptPayload {
   title: string;

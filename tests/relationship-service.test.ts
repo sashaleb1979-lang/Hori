@@ -78,4 +78,51 @@ describe("RelationshipService", () => {
     expect(relationship?.praiseBias).toBeGreaterThan(0);
     expect(relationship?.interruptPriority).toBeGreaterThan(0);
   });
+
+  it("V6 level API: setLevel maps integer to relationshipState and getLevel reads it back", async () => {
+    const records = new Map<string, Record<string, unknown>>();
+
+    const prisma = {
+      relationshipProfile: {
+        async findUnique(args: { where: { guildId_userId: { guildId: string; userId: string } } }) {
+          const key = `${args.where.guildId_userId.guildId}:${args.where.guildId_userId.userId}`;
+          return (records.get(key) ?? null) as Record<string, unknown> | null;
+        },
+        async upsert(args: {
+          where: { guildId_userId: { guildId: string; userId: string } };
+          update: Record<string, unknown>;
+          create: Record<string, unknown>;
+        }) {
+          const key = `${args.where.guildId_userId.guildId}:${args.where.guildId_userId.userId}`;
+          const existing = records.get(key);
+          const next = existing
+            ? { ...existing, ...args.update }
+            : { id: "rel_1", ...args.create, updatedAt: new Date() };
+          records.set(key, next);
+          return next;
+        },
+      },
+    } as unknown as AppPrismaClient;
+
+    const service = new RelationshipService(prisma);
+
+    // default
+    expect(await service.getLevel("g", "u")).toBe(0);
+
+    // each integer level −1..4
+    for (const level of [-1, 0, 1, 2, 3, 4]) {
+      await service.setLevel("g", "u", level);
+      expect(await service.getLevel("g", "u")).toBe(level);
+    }
+
+    // out-of-range clamps; below 0 rounds floor.
+    await service.setLevel("g", "u", -5);
+    expect(await service.getLevel("g", "u")).toBe(-1);
+    await service.setLevel("g", "u", 99);
+    expect(await service.getLevel("g", "u")).toBe(4);
+    await service.setLevel("g", "u", -0.4);
+    expect(await service.getLevel("g", "u")).toBe(-1);
+    await service.setLevel("g", "u", 1.9);
+    expect(await service.getLevel("g", "u")).toBe(1);
+  });
 });

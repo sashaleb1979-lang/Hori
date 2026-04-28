@@ -414,6 +414,34 @@ export class RelationshipService {
     });
   }
 
+  /**
+   * V6 integer level API (−1..4). Wraps `relationshipState`.
+   *  −1 cold_lowest · 0 base · 1 warm · 2 close · 3 teasing · 4 sweet.
+   * `serious` → returns null (out of level scale).
+   */
+  async getLevel(guildId: string, userId: string): Promise<number> {
+    const vector = await this.getVector(guildId, userId);
+    const state = vector.relationshipState;
+    if (state === "cold_lowest") return -1;
+    if (state === "sweet") return 4;
+    if (state === "teasing") return 3;
+    if (state === "close") return 2;
+    if (state === "warm") return 1;
+    return 0;
+  }
+
+  async setLevel(guildId: string, userId: string, level: number, updatedBy?: string | null) {
+    // Below 0 round down; above 0 — only at integer thresholds (Math.floor for both as per spec).
+    const clamped = Math.max(-1, Math.min(4, Math.floor(Number.isFinite(level) ? level : 0)));
+    const state: RelationshipState =
+      clamped === -1 ? "cold_lowest" :
+      clamped === 4 ? "sweet" :
+      clamped === 3 ? "teasing" :
+      clamped === 2 ? "close" :
+      clamped === 1 ? "warm" : "base";
+    return this.setRelationshipState(guildId, userId, state, updatedBy);
+  }
+
   async applySessionVerdict(
     guildId: string,
     userId: string,
