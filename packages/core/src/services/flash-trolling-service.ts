@@ -31,7 +31,8 @@ export const DEFAULT_FLASH_TROLLING_CONFIG: FlashTrollingConfig = {
   enabled: false,
   intervalMinutes: 60,
   minMessageLength: 80,
-  weights: { retort: 40, question: 20, meme: 40 },
+  // V6 Phase G: ratio retort:question:meme = 4:1:4 (per V6 spec).
+  weights: { retort: 40, question: 10, meme: 40 },
   channelAllowlist: []
 };
 

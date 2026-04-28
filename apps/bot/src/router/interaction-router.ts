@@ -2297,6 +2297,32 @@ async function resolveHoriActionContent(
       return buildChannelPolicyStatus(runtime, guildId, interaction.channelId);
     case "debug_latest":
       return buildLatestDebugTrace(runtime, guildId);
+    case "v6_relationship_status":
+      return buildV6RelationshipStatus(runtime, guildId, interaction.user.id);
+    case "v6_relationship_deltas":
+      return buildV6RelationshipDeltas(runtime);
+    case "v6_recall_status":
+      return buildV6RecallStatus(runtime, guildId, interaction.channelId);
+    case "v6_sigils_status":
+      return buildV6SigilsStatus(runtime);
+    case "v6_sigils_question_on":
+      if (!isOwner) return "Sigils изменяет только владелец.";
+      return setV6SigilState(runtime, "?", true, interaction.user.id);
+    case "v6_sigils_question_off":
+      if (!isOwner) return "Sigils изменяет только владелец.";
+      return setV6SigilState(runtime, "?", false, interaction.user.id);
+    case "v6_queue_status":
+      return buildV6QueueStatus(runtime);
+    case "v6_queue_reset":
+      if (!isOwner) return "Сброс phrase pools только для владельца.";
+      return resetV6QueuePools(runtime);
+    case "v6_flash_status":
+      return buildV6FlashStatus(runtime);
+    case "v6_flash_memes":
+      return buildV6FlashMemes(runtime);
+    case "v6_audit_log":
+      if (!isOwner) return "Audit log только для владельца.";
+      return buildV6AuditLog(runtime, guildId);
     default:
       return "Неизвестная кнопка панели.";
   }
@@ -2334,7 +2360,13 @@ function buildHoriPanelEmbed(tab: HoriPanelTab, isOwner: boolean, isModerator: b
     memory: "Всё про память: Active Memory, hybrid recall, memory-build, topic engine, album, reflection, профили людей и отношения.",
     channels: "Каналы: policy, mute, reply length override, topic tags, поиск, summary. Web search и link understanding тоже тут.",
     llm: "LLM routing: preset, модели по функциям, legacy fallback и диагностика токенов без россыпи env.",
-    system: "Система: State panel, Power profile, lockdown, AI URL, debug trace, feature flags, context/safety diagnostics и эксперименты."
+    system: "Система: State panel, Power profile, lockdown, AI URL, debug trace, feature flags, context/safety diagnostics и эксперименты.",
+    relationship: "V6 Relationship: дельты привязанности, escalation decay, уровни 0–5 и core-prompt привязка через corePromptKeyForLevel.",
+    recall: "V6 Recall: PromptSlot активации (10 мин active / 6 ч cooldown), уровневая преемптация, channel-vs-global приоритет.",
+    sigils: "V6 Sigils: реестр триггеров (?, !, *, >, ^), включение/отключение через панель.",
+    queue: "V6 Queue: панель-настраиваемые phrase pools (initial/followup × warm/neutral/cold).",
+    flash: "V6 Flash trolling: weighted 4:1:4 (retort:question:meme), MemeIndexer как single source of truth по assets/memes/catalog.json.",
+    audit: "V6 Audit: история изменений core prompt и других runtime-настроек (кто/когда/что)."
   };
 
   const actions = getHoriTabActions(tab, isOwner, isModerator).map((a) => a.label).join(" · ") || "—";
@@ -2579,6 +2611,35 @@ function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boo
       { id: "state_trace", label: "Trace", emoji: "📜", ownerOnly: true },
       { id: "state_tokens", label: "Tokens", emoji: "🪙", ownerOnly: true },
       { id: "state_search", label: "Search state", emoji: "🔎", ownerOnly: true }
+    ],
+    relationship: [
+      { id: "v6_relationship_status", label: "Status", emoji: "📊", style: ButtonStyle.Primary },
+      { id: "v6_relationship_deltas", label: "Deltas", emoji: "🔢", ownerOnly: true },
+      { id: "relationship_self", label: "Моё отношение", emoji: "💞" },
+      { id: "relationship_edit_modal", label: "Edit relation", emoji: "✏️", ownerOnly: true }
+    ],
+    recall: [
+      { id: "v6_recall_status", label: "Active slots", emoji: "🔮", style: ButtonStyle.Primary },
+      { id: "memory_status", label: "Memory", emoji: "🧠" },
+      { id: "summary_current", label: "Summary", emoji: "📝" }
+    ],
+    sigils: [
+      { id: "v6_sigils_status", label: "Sigils", emoji: "🔣", style: ButtonStyle.Primary },
+      { id: "v6_sigils_question_on", label: "? ON", emoji: "✅", ownerOnly: true },
+      { id: "v6_sigils_question_off", label: "? OFF", emoji: "❌", ownerOnly: true }
+    ],
+    queue: [
+      { id: "v6_queue_status", label: "Pools", emoji: "📬", style: ButtonStyle.Primary },
+      { id: "queue_status", label: "Текущая", emoji: "📋" },
+      { id: "queue_clear", label: "Clear", emoji: "🧹", modOnly: true },
+      { id: "v6_queue_reset", label: "Reset packs", emoji: "♻️", ownerOnly: true }
+    ],
+    flash: [
+      { id: "v6_flash_status", label: "Flash cfg", emoji: "🎯", style: ButtonStyle.Primary },
+      { id: "v6_flash_memes", label: "Memes", emoji: "🖼️" }
+    ],
+    audit: [
+      { id: "v6_audit_log", label: "Last 25", emoji: "📜", style: ButtonStyle.Primary, ownerOnly: true }
     ]
   };
 
@@ -2601,7 +2662,13 @@ function horiTabLabel(tab: HoriPanelTab) {
     memory: "🧠 Память и люди",
     channels: "📡 Каналы и поиск",
     llm: "🤖 LLM",
-    system: "⚙️ Система"
+    system: "⚙️ Система",
+    relationship: "💞 Relationship",
+    recall: "🔮 Recall",
+    sigils: "🔣 Sigils",
+    queue: "📬 Queue",
+    flash: "🎯 Flash",
+    audit: "📜 Audit"
   };
   return labels[tab];
 }
@@ -2612,6 +2679,12 @@ function inferTabForHoriAction(action: string): HoriPanelTab {
     return inferPanelTabForFeatureKey(featureToggle.key);
   }
 
+  if (action.startsWith("v6_relationship") || action === "relationship_self" || action === "relationship_edit_modal") return "relationship";
+  if (action.startsWith("v6_recall")) return "recall";
+  if (action.startsWith("v6_sigils")) return "sigils";
+  if (action.startsWith("v6_queue")) return "queue";
+  if (action.startsWith("v6_flash")) return "flash";
+  if (action.startsWith("v6_audit")) return "audit";
   if (action.startsWith("memory") || action.startsWith("reflection") || action.startsWith("profile") || action.startsWith("relationship") || action === "dossier_modal") return "memory";
   if (action.startsWith("search") || action.startsWith("channel") || action === "read_chat_on" || action === "read_chat_off" || action.startsWith("topic") || action.startsWith("queue") || action === "summary_current") return "channels";
   if (action.startsWith("llm")) return "llm";
@@ -3980,3 +4053,148 @@ function parseReplyLengthSelection(value: string | null | undefined) {
 function booleanToFieldValue(value: boolean | undefined) {
   return value === undefined ? "" : value ? "true" : "false";
 }
+
+// === V6 Phase K helpers (panel actions) ===
+
+async function buildV6RelationshipStatus(runtime: BotRuntime, guildId: string, userId: string) {
+  try {
+    const level = await runtime.relationshipService.getLevel(guildId, userId);
+    const vector = await runtime.relationshipService.getVector(guildId, userId);
+    const lines = [
+      `**V6 Relationship — твоё**`,
+      `level: \`${level}\``,
+      `state: \`${vector.relationshipState}\``,
+      `closeness: \`${vector.closeness?.toFixed?.(2) ?? "—"}\``,
+      `trust: \`${vector.trust?.toFixed?.(2) ?? "—"}\``,
+      `escalationStage: \`${vector.escalationStage ?? 0}\``
+    ];
+    return lines.join("\n");
+  } catch (error) {
+    return `Не удалось получить relationship: ${asErrorMessage(error)}`;
+  }
+}
+
+async function buildV6RelationshipDeltas(runtime: BotRuntime) {
+  try {
+    const status = await runtime.runtimeConfig.getRelationshipDeltasStatus();
+    const lines = [
+      `**Relationship deltas** (source: ${status.source})`,
+      "```json",
+      JSON.stringify(status.value, null, 2),
+      "```"
+    ];
+    if (status.updatedBy) lines.push(`updatedBy: ${status.updatedBy}`);
+    return lines.join("\n");
+  } catch (error) {
+    return `Не удалось получить deltas: ${asErrorMessage(error)}`;
+  }
+}
+
+async function buildV6RecallStatus(runtime: BotRuntime, guildId: string, channelId: string) {
+  try {
+    const active = await runtime.promptSlots.getActiveSlot(guildId, channelId);
+    if (!active) return "**V6 Recall** — активных PromptSlot нет (10 мин active / 6 ч cooldown).";
+    return [
+      `**V6 Recall — активный slot**`,
+      `kind: \`${active.kind ?? "—"}\``,
+      `priority: \`${active.priority ?? "—"}\``,
+      `activatedAt: \`${active.activatedAt?.toISOString?.() ?? "—"}\``,
+      `expiresAt: \`${active.expiresAt?.toISOString?.() ?? "—"}\``
+    ].join("\n");
+  } catch (error) {
+    return `Не удалось получить recall: ${asErrorMessage(error)}`;
+  }
+}
+
+async function buildV6SigilsStatus(runtime: BotRuntime) {
+  try {
+    const enabled = await runtime.runtimeConfig.getEnabledSigils();
+    return [
+      `**V6 Sigils**`,
+      `enabled: ${enabled ? `\`${enabled.join(" ")}\`` : "по умолчанию (`?`)"}`,
+      `Управление: только владелец, через кнопки или \`/hori\`.`
+    ].join("\n");
+  } catch (error) {
+    return `Не удалось получить sigils: ${asErrorMessage(error)}`;
+  }
+}
+
+async function setV6SigilState(runtime: BotRuntime, sigil: string, enabled: boolean, updatedBy: string) {
+  try {
+    const current = (await runtime.runtimeConfig.getEnabledSigils()) ?? ["?"];
+    const set = new Set(current);
+    if (enabled) set.add(sigil); else set.delete(sigil);
+    await runtime.runtimeConfig.setEnabledSigils(Array.from(set), updatedBy);
+    return `Sigil \`${sigil}\` ${enabled ? "включен" : "выключен"}.`;
+  } catch (error) {
+    return `Не удалось обновить sigils: ${asErrorMessage(error)}`;
+  }
+}
+
+async function buildV6QueueStatus(runtime: BotRuntime) {
+  try {
+    const pools = runtime.queuePhrasePool.getPools();
+    const counts = (Object.entries(pools) as Array<[string, Record<string, string[]>]>)
+      .map(([stage, buckets]) => {
+        const parts = Object.entries(buckets).map(([b, list]) => `${b}: ${list.length}`).join(", ");
+        return `\`${stage}\` → ${parts}`;
+      })
+      .join("\n");
+    const override = await runtime.runtimeConfig.getQueuePhrasePoolsOverride();
+    return [`**V6 Queue phrase pools**`, counts, override ? "_(custom override активен)_" : "_(default pools)_"].join("\n");
+  } catch (error) {
+    return `Не удалось получить queue: ${asErrorMessage(error)}`;
+  }
+}
+
+async function resetV6QueuePools(runtime: BotRuntime) {
+  try {
+    await runtime.runtimeConfig.resetQueuePhrasePoolsOverride();
+    return "Phrase pools сброшены к default.";
+  } catch (error) {
+    return `Не удалось сбросить: ${asErrorMessage(error)}`;
+  }
+}
+
+function buildV6FlashStatus(runtime: BotRuntime) {
+  try {
+    const cfg = runtime.flashTrolling.getConfig();
+    const w = cfg.weights;
+    return [
+      `**V6 Flash trolling**`,
+      `weights: retort=\`${w.retort}\` question=\`${w.question}\` meme=\`${w.meme}\``,
+      `cooldownMs: \`${cfg.cooldownMs ?? "—"}\``
+    ].join("\n");
+  } catch (error) {
+    return `Не удалось получить flash cfg: ${asErrorMessage(error)}`;
+  }
+}
+
+async function buildV6FlashMemes(_runtime: BotRuntime) {
+  try {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const catalogPath = path.resolve(process.cwd(), "assets/memes/catalog.json");
+    const raw = await fs.readFile(catalogPath, "utf-8");
+    const parsed = JSON.parse(raw) as { items?: unknown[] } | unknown[];
+    const items = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.items) ? parsed.items : [];
+    return `**V6 MemeIndexer** — записей в catalog.json: \`${items.length}\``;
+  } catch (error) {
+    return `Не удалось прочитать catalog.json: ${asErrorMessage(error)}`;
+  }
+}
+
+async function buildV6AuditLog(runtime: BotRuntime, guildId: string) {
+  try {
+    const entries = await runtime.runtimeConfig.listCorePromptAuditTrail(guildId, 10);
+    if (!entries.length) return "**V6 Audit** — нет записей по core prompts для этой гильдии.";
+    const lines = entries.map((entry) => {
+      const ts = entry.createdAt instanceof Date ? entry.createdAt.toISOString() : String(entry.createdAt);
+      return `\`${ts}\` · **${entry.action}** · key=\`${entry.key ?? "?"}\` · by=\`${entry.updatedBy ?? "—"}\``;
+    });
+    return [`**V6 Audit — последние ${entries.length}**`, ...lines].join("\n");
+  } catch (error) {
+    return `Не удалось получить audit: ${asErrorMessage(error)}`;
+  }
+}
+

@@ -37,7 +37,7 @@ function clipBlock(value: unknown, maxLen: number): string | null {
   return trimmed.length > maxLen ? trimmed.slice(0, maxLen).trim() : trimmed;
 }
 
-function parseEvaluatorOutput(raw: string): EvaluatorResult {
+export function parseEvaluatorOutput(raw: string): EvaluatorResult {
   // V5.1: evaluator возвращает JSON {verdict, characteristic, lastChange}.
   // Fallback: если JSON не парсится, пробуем старый формат с буквой.
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
@@ -115,11 +115,10 @@ export function createSessionJob(runtime: WorkerRuntime) {
         createdAt: row.createdAt
       }));
 
-    if (
-      sessionMessages.length < 3 ||
-      !sessionMessages.some((entry) => entry.role === "User") ||
-      !sessionMessages.some((entry) => entry.role === "Hori")
-    ) {
+    // V6 Phase C: ≥3 USER replies AND ≥1 Hori reply.
+    const userReplyCount = sessionMessages.filter((entry) => entry.role === "User").length;
+    const horiReplyCount = sessionMessages.filter((entry) => entry.role === "Hori").length;
+    if (userReplyCount < 3 || horiReplyCount < 1) {
       return { skipped: true, reason: "session too small" };
     }
 

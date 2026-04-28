@@ -1,24 +1,90 @@
 import type { BotIntent, IntentResult, MessageEnvelope } from "@hori/shared";
 
 /**
- * V5.1 Phase D: Sigil router — знаки в начале сообщения (после bot name strip)
- * сразу переключают сообщение в специальный режим.
+ * V6 Phase D: Sigil registry — каждый знак имеет постоянный entry, panel может
+ * включать/выключать через RuntimeConfigService key `intents.sigils.enabled`.
  *
- * Стартовый набор:
- *  - `?` в начале → question mode: web-search + подробный ответ.
- *
- * Остальные знаки заложены в схему, но пока выключены (sigil registry —
- * отдельная итерация, см. план фазы D3).
+ * `?` включён по умолчанию (search). Остальные — reserved-slots: shape известен,
+ * но они отключены пока не реализована соответствующая обработка.
  */
-const SIGILS: Array<{
+export interface SigilDefinition {
   char: string;
   intent: Exclude<BotIntent, "chat" | "ignore">;
   requiresSearch: boolean;
-  enabled: boolean;
+  enabledByDefault: boolean;
+  /** Reserved sigils пока не имеют обработчика — включать только когда intent готов. */
+  reserved: boolean;
+  label: string;
+  description: string;
   reason: string;
-}> = [
-  { char: "?", intent: "search", requiresSearch: true, enabled: true, reason: "sigil:?" }
+}
+
+export const SIGIL_REGISTRY: ReadonlyArray<SigilDefinition> = [
+  {
+    char: "?",
+    intent: "search",
+    requiresSearch: true,
+    enabledByDefault: true,
+    reserved: false,
+    label: "Question / Search",
+    description: "Web-search + развёрнутый ответ. Включён по умолчанию.",
+    reason: "sigil:?"
+  },
+  {
+    char: "!",
+    intent: "rewrite",
+    requiresSearch: false,
+    enabledByDefault: false,
+    reserved: true,
+    label: "Force rewrite",
+    description: "(reserved) Перезапросить с другим стилем. По умолчанию выключен.",
+    reason: "sigil:!"
+  },
+  {
+    char: "*",
+    intent: "summary",
+    requiresSearch: false,
+    enabledByDefault: false,
+    reserved: true,
+    label: "Summary marker",
+    description: "(reserved) Кратко пересказать. По умолчанию выключен.",
+    reason: "sigil:*"
+  },
+  {
+    char: ">",
+    intent: "profile",
+    requiresSearch: false,
+    enabledByDefault: false,
+    reserved: true,
+    label: "Profile inspect",
+    description: "(reserved) Посмотреть профиль автора цитаты. По умолчанию выключен.",
+    reason: "sigil:>"
+  },
+  {
+    char: "^",
+    intent: "analytics",
+    requiresSearch: false,
+    enabledByDefault: false,
+    reserved: true,
+    label: "Activity stats",
+    description: "(reserved) Быстрая активность канала. По умолчанию выключен.",
+    reason: "sigil:^"
+  }
 ];
+
+export interface IntentRouterOptions {
+  /** Override per-guild enabled set. `undefined` = use defaults. */
+  enabledSigils?: ReadonlyArray<string>;
+}
+
+function buildActiveSigils(options: IntentRouterOptions | undefined): SigilDefinition[] {
+  if (!options?.enabledSigils) {
+    return SIGIL_REGISTRY.filter((entry) => entry.enabledByDefault).slice();
+  }
+  const allowed = new Set(options.enabledSigils);
+  return SIGIL_REGISTRY.filter((entry) => allowed.has(entry.char));
+}
+
 
 const PATTERNS: Array<{
   intent: Exclude<BotIntent, "chat" | "ignore">;
@@ -86,6 +152,17 @@ function stripBotName(content: string, botName: string) {
 }
 
 export class IntentRouter {
+  private readonly activeSigils: SigilDefinition[];
+
+  constructor(options?: IntentRouterOptions) {
+    this.activeSigils = buildActiveSigils(options);
+  }
+
+  /** Текущий набор активных sigils — для панели/диагностики. */
+  getActiveSigils(): ReadonlyArray<SigilDefinition> {
+    return this.activeSigils;
+  }
+
   route(message: MessageEnvelope, botName: string): IntentResult {
     const cleanedContent = stripBotName(message.content, botName);
 
@@ -109,9 +186,9 @@ export class IntentRouter {
       };
     }
 
-    // V5.1 Phase D: sigil-роутинг — проверяем первый не-пробельный символ.
+    // V6 Phase D: sigil-роутинг — проверяем первый не-пробельный символ.
     const firstChar = cleanedContent[0];
-    const sigil = SIGILS.find((entry) => entry.enabled && entry.char === firstChar);
+    const sigil = this.activeSigils.find((entry) => entry.char === firstChar);
     if (sigil) {
       const stripped = cleanedContent.slice(1).trim();
       // Голый знак без текста → fallback на help/chat (не запускаем search впустую).

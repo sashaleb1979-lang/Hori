@@ -161,7 +161,10 @@ export class RelationshipService {
     if (!profile) {
       return createDefaultVector(userId, guildId);
     }
-    return this.toVector(profile);
+    const vector = this.toVector(profile);
+    // V6 Phase B: surface read-time escalation decay so panel/UI reflects live stage.
+    const decayedStage = this.resolveEscalationStage(vector, new Date());
+    return decayedStage === vector.escalationStage ? vector : { ...vector, escalationStage: decayedStage };
   }
 
   /**

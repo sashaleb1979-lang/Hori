@@ -18,7 +18,9 @@
 export type QueuePhraseStage = "initial" | "followup";
 export type QueuePhraseBucket = "warm" | "neutral" | "cold";
 
-const DEFAULT_POOLS: Record<QueuePhraseStage, Record<QueuePhraseBucket, string[]>> = {
+export type QueuePhrasePools = Record<QueuePhraseStage, Record<QueuePhraseBucket, string[]>>;
+
+export const DEFAULT_QUEUE_PHRASE_POOLS: QueuePhrasePools = {
   initial: {
     warm: [
       "Секунду, я ещё прошлое дожую — и к тебе.",
@@ -103,10 +105,38 @@ function keyOf(input: AntiRepeatKey): string {
 
 export class QueuePhrasePoolService {
   private readonly lastUsed = new Map<string, string>();
+  private pools: QueuePhrasePools;
 
-  constructor(
-    private readonly pools: Record<QueuePhraseStage, Record<QueuePhraseBucket, string[]>> = DEFAULT_POOLS
-  ) {}
+  constructor(pools: QueuePhrasePools = DEFAULT_QUEUE_PHRASE_POOLS) {
+    this.pools = pools;
+  }
+
+  /** V6 Phase F: panel-tunable. Подменить пулы (частично — мерджит с текущими). */
+  setPools(overrides: Partial<{ [S in QueuePhraseStage]: Partial<Record<QueuePhraseBucket, string[]>> }>): void {
+    const next: QueuePhrasePools = {
+      initial: { ...this.pools.initial },
+      followup: { ...this.pools.followup }
+    };
+    for (const stage of ["initial", "followup"] as const) {
+      const stageOverride = overrides[stage];
+      if (!stageOverride) continue;
+      for (const bucket of ["warm", "neutral", "cold"] as const) {
+        const list = stageOverride[bucket];
+        if (Array.isArray(list) && list.length) {
+          next[stage][bucket] = list.filter((p) => typeof p === "string" && p.trim().length > 0);
+        }
+      }
+    }
+    this.pools = next;
+    this.lastUsed.clear();
+  }
+
+  getPools(): QueuePhrasePools {
+    return {
+      initial: { ...this.pools.initial },
+      followup: { ...this.pools.followup }
+    };
+  }
 
   /**
    * Выбрать фразу из пула. score — текущий relationship.relationshipScore (-1..4).
@@ -120,7 +150,8 @@ export class QueuePhrasePoolService {
     stage: QueuePhraseStage;
   }): string {
     const bucket = bucketFromScore(input.score);
-    const pool = this.pools[input.stage][bucket];
+    const stage = this.pools[input.stage];
+    const pool = stage[bucket];
     if (!pool.length) {
       return "Подожди.";
     }

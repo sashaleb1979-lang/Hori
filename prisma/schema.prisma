@@ -497,6 +497,20 @@ model RuntimeSetting {
   updatedAt DateTime @updatedAt
 }
 
+model RuntimeSettingAudit {
+  id            String   @id @default(cuid())
+  key           String
+  guildId       String?
+  previousValue String?  @db.Text
+  newValue      String?  @db.Text
+  action        String
+  updatedBy     String?
+  createdAt     DateTime @default(now())
+
+  @@index([key, createdAt(sort: Desc)])
+  @@index([guildId, createdAt(sort: Desc)])
+}
+
 model MemoryBuildRun {
   id             String   @id @default(cuid())
   guildId        String

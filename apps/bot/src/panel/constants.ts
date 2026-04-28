@@ -9,7 +9,21 @@ export const CORE_PROMPT_PANEL_PREFIX = "core-prompt-panel";
 export const V5_PANEL_PREFIX = "v5-panel";
 
 export const POWER_PROFILES = ["economy", "balanced", "expanded", "max"] as const;
-export const HORI_PANEL_TABS = ["main", "persona", "behavior", "memory", "channels", "llm", "system"] as const;
+export const HORI_PANEL_TABS = [
+  "main",
+  "persona",
+  "behavior",
+  "memory",
+  "channels",
+  "llm",
+  "system",
+  "relationship",
+  "recall",
+  "sigils",
+  "queue",
+  "flash",
+  "audit"
+] as const;
 
 export type HoriPanelTab = (typeof HORI_PANEL_TABS)[number];
 
@@ -20,7 +34,13 @@ export const TAB_EMOJI: Record<HoriPanelTab, string> = {
   memory: "🧠",
   channels: "📡",
   llm: "🤖",
-  system: "⚙️"
+  system: "⚙️",
+  relationship: "💞",
+  recall: "🔮",
+  sigils: "🔣",
+  queue: "📬",
+  flash: "🎯",
+  audit: "📜"
 };
 
 export const TAB_COLOR: Record<HoriPanelTab, number> = {
@@ -30,7 +50,13 @@ export const TAB_COLOR: Record<HoriPanelTab, number> = {
   memory: 0x57F287,
   channels: 0x5865F2,
   llm: 0x57F287,
-  system: 0xEB459E
+  system: 0xEB459E,
+  relationship: 0xED4245,
+  recall: 0x9B59B6,
+  sigils: 0xF39C12,
+  queue: 0x3498DB,
+  flash: 0xE74C3C,
+  audit: 0x95A5A6
 };
 
 export const PANEL_FEATURE_LABELS = {

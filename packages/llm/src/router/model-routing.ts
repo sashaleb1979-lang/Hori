@@ -14,7 +14,9 @@ export const MODEL_ROUTING_SLOTS = [
   "search",
   "analytics",
   "profile",
-  "memory"
+  "memory",
+  "relationship_eval",
+  "code_analysis"
 ] as const;
 
 export type ModelRoutingSlot = (typeof MODEL_ROUTING_SLOTS)[number];
@@ -45,7 +47,9 @@ const balancedOpenAiSlots: ModelRoutingSlots = {
   search: "gpt-5.4-nano",
   analytics: "gpt-5.4-nano",
   profile: "gpt-5.4-nano",
-  memory: "gpt-5.4-nano"
+  memory: "gpt-5.4-nano",
+  relationship_eval: "gpt-5-nano",
+  code_analysis: "gpt-5.4-mini"
 };
 
 export const MODEL_ROUTING_PRESETS = {
@@ -69,7 +73,9 @@ export const MODEL_ROUTING_PRESETS = {
       search: "gpt-5-nano",
       analytics: "gpt-5-nano",
       profile: "gpt-5-nano",
-      memory: "gpt-5-nano"
+      memory: "gpt-5-nano",
+      relationship_eval: "gpt-5-nano",
+      code_analysis: "gpt-5-nano"
     }
   },
   quality_openai: {
@@ -83,7 +89,9 @@ export const MODEL_ROUTING_PRESETS = {
       search: "gpt-5.4-nano",
       analytics: "gpt-5.4-nano",
       profile: "gpt-5.4-nano",
-      memory: "gpt-5.4-nano"
+      memory: "gpt-5.4-nano",
+      relationship_eval: "gpt-5-nano",
+      code_analysis: "gpt-5.4-mini"
     }
   }
 } as const satisfies Record<string, ModelRoutingPreset>;
@@ -154,6 +162,10 @@ export function slotForIntent(intent: string): ModelRoutingSlot {
     case "memory_write":
     case "memory_forget":
       return "memory";
+    case "relationship_eval":
+      return "relationship_eval";
+    case "code_analysis":
+      return "code_analysis";
     default:
       return "chat";
   }
@@ -269,7 +281,9 @@ function buildPresetSlots(env: AppEnv, preset: ModelRoutingPresetName): ModelRou
       search: legacy.smart,
       analytics: legacy.smart,
       profile: legacy.smart,
-      memory: legacy.smart
+      memory: legacy.smart,
+      relationship_eval: legacy.chat,
+      code_analysis: legacy.smart
     };
   }
 

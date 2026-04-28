@@ -741,7 +741,9 @@ function createSessionJob(runtime) {
       content: row.content,
       createdAt: row.createdAt
     }));
-    if (sessionMessages.length < 3 || !sessionMessages.some((entry) => entry.role === "User") || !sessionMessages.some((entry) => entry.role === "Hori")) {
+    const userReplyCount = sessionMessages.filter((entry) => entry.role === "User").length;
+    const horiReplyCount = sessionMessages.filter((entry) => entry.role === "Hori").length;
+    if (userReplyCount < 3 || horiReplyCount < 1) {
       return { skipped: true, reason: "session too small" };
     }
     const corePromptTemplates = await runtime.runtimeConfig.getCorePromptTemplates(job.data.guildId);

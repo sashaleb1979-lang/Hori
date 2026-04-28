@@ -25,6 +25,7 @@ import {
   CORE_PROMPT_KEYS,
   buildCorePromptTemplates,
   getCorePromptDefaultContent,
+  isCorePromptKey,
   type CorePromptKey,
   type CorePromptTemplates
 } from "../persona/prompt-spec";
@@ -66,6 +67,88 @@ export const OPENAI_EMBED_DIMENSIONS_SETTING_KEY = "llm.openai_embed_dimensions"
 export const MEMORY_HYDE_SETTING_KEY = "memory.hyde_enabled";
 export const AI_ROUTER_STATE_SETTING_KEY = "llm.ai_router_state";
 export const PREFERRED_CHAT_PROVIDER_SETTING_KEY = "llm.active_chat_provider";
+
+/**
+ * V6 Phase B: per-source relationship deltas (panel-tunable).
+ * Все храним в одном RuntimeSetting JSON-blob.
+ */
+export const RELATIONSHIP_DELTAS_SETTING_KEY = "relationship.deltas";
+
+export type RelationshipDeltaSource =
+  | "session_evaluator_a"
+  | "session_evaluator_b"
+  | "session_evaluator_v"
+  | "microreaction_positive"
+  | "microreaction_negative"
+  | "recall_invocation"
+  | "aggression_event"
+  | "mod_manual";
+
+export interface RelationshipDeltaConfig {
+  /** A-verdict positive mark contribution (раз в 2 = +0.5 score). */
+  session_evaluator_a: number;
+  /** B-verdict (нейтральная сессия) — медленный микро-апдейт. */
+  session_evaluator_b: number;
+  /** V-verdict (грубая сессия) — мгновенный штраф. */
+  session_evaluator_v: number;
+  /** Положительная micro-реакция (спасибо/похвала). */
+  microreaction_positive: number;
+  /** Негативная micro-реакция (без агрессии). */
+  microreaction_negative: number;
+  /** Активация recall-промта пользователем. */
+  recall_invocation: number;
+  /** Подтверждённое агрессивное событие (на Stage 2/4). */
+  aggression_event: number;
+  /** Ручная коррекция модератором. */
+  mod_manual: number;
+}
+
+export const DEFAULT_RELATIONSHIP_DELTAS: RelationshipDeltaConfig = {
+  session_evaluator_a: 1,
+  session_evaluator_b: 0.05,
+  session_evaluator_v: -0.5,
+  microreaction_positive: 0.05,
+  microreaction_negative: -0.05,
+  recall_invocation: 0.1,
+  aggression_event: -1.5,
+  mod_manual: 0
+};
+
+/** Человекочитаемые описания (RU) для панели. */
+export const RELATIONSHIP_DELTA_LABELS_RU: Record<RelationshipDeltaSource, string> = {
+  session_evaluator_a: "Сессия А (positive mark, 2 шт = +0.5)",
+  session_evaluator_b: "Сессия B (нейтральная, медленный апдейт)",
+  session_evaluator_v: "Сессия V (грубая, мгновенный штраф)",
+  microreaction_positive: "Micro-реакция позитивная (спасибо)",
+  microreaction_negative: "Micro-реакция негативная (без агрессии)",
+  recall_invocation: "Активация recall-промта",
+  aggression_event: "Подтверждённая агрессия (Stage 2/4)",
+  mod_manual: "Ручная коррекция (по умолчанию 0)"
+};
+
+/**
+ * V6 Phase D: enabled sigils. Хранится JSON-array of single-character strings.
+ * Если ключ не задан — IntentRouter использует defaults (только `?`).
+ */
+export const ENABLED_SIGILS_SETTING_KEY = "intents.sigils.enabled";
+
+/**
+ * V6 Phase F: queue phrase pools override.
+ * Хранится JSON: `{ initial?: { warm?: string[], neutral?: string[], cold?: string[] }, followup?: ... }`.
+ */
+export const QUEUE_PHRASE_POOLS_SETTING_KEY = "queue.phrase_pools";
+
+export type QueuePhrasePoolsOverride = {
+  initial?: { warm?: string[]; neutral?: string[]; cold?: string[] };
+  followup?: { warm?: string[]; neutral?: string[]; cold?: string[] };
+};
+
+/**
+ * V6 Phase H: channel access matrix.
+ * Хранится JSON: `[{ channelId: string, mode: "default"|"muted"|"active"|"ignored" }, ...]`.
+ */
+export const CHANNEL_ACCESS_SETTING_KEY = "channels.access";
+
 const CORE_PROMPT_SETTING_PREFIX = "prompt.core";
 
 const RUNTIME_OVERRIDE_DEFINITIONS: Record<string, { field: keyof Omit<EffectiveRuntimeSettings, "powerProfile" | "modelRouting">; parse: (value: string) => string | number | boolean | undefined }> = {
@@ -150,6 +233,16 @@ export interface CorePromptTemplateStatus {
   defaultContent: string;
   updatedBy?: string | null;
   updatedAt?: Date | null;
+}
+
+export interface CorePromptAuditEntry {
+  id: string;
+  key: CorePromptKey | null;
+  action: string;
+  updatedBy: string | null;
+  previousValue: string | null;
+  newValue: string | null;
+  createdAt: Date;
 }
 
 export type ModelRoutingStatus = ResolvedModelRouting & {
@@ -553,6 +646,203 @@ export class RuntimeConfigService {
     return this.getPreferredChatProviderStatus();
   }
 
+  /**
+   * V6 Phase B: per-source relationship deltas. Хранится одним JSON-blob,
+   * частично переопределяет дефолты. Несконфигурированные ключи берутся из
+   * `DEFAULT_RELATIONSHIP_DELTAS`.
+   */
+  async getRelationshipDeltas(): Promise<RelationshipDeltaConfig> {
+    const row = await this.getRuntimeSettingRow(RELATIONSHIP_DELTAS_SETTING_KEY);
+    if (!row?.value) {
+      return { ...DEFAULT_RELATIONSHIP_DELTAS };
+    }
+    try {
+      const parsed = JSON.parse(row.value) as Partial<RelationshipDeltaConfig>;
+      return { ...DEFAULT_RELATIONSHIP_DELTAS, ...sanitizeDeltas(parsed) };
+    } catch {
+      return { ...DEFAULT_RELATIONSHIP_DELTAS };
+    }
+  }
+
+  async getRelationshipDeltasStatus(): Promise<RuntimeOverrideStatus<RelationshipDeltaConfig>> {
+    const row = await this.getRuntimeSettingRow(RELATIONSHIP_DELTAS_SETTING_KEY);
+    const value = await this.getRelationshipDeltas();
+    if (!row?.value) {
+      return { value, source: "default" };
+    }
+    return {
+      value,
+      source: "runtime_setting",
+      updatedBy: row.updatedBy,
+      updatedAt: row.updatedAt
+    };
+  }
+
+  async setRelationshipDelta(
+    source: RelationshipDeltaSource,
+    value: number,
+    updatedBy?: string
+  ) {
+    if (!Number.isFinite(value)) {
+      throw new Error(`Relationship delta must be finite: ${value}`);
+    }
+    const current = await this.getRelationshipDeltas();
+    const next: RelationshipDeltaConfig = { ...current, [source]: value };
+    await this.prisma.runtimeSetting.upsert({
+      where: { key: RELATIONSHIP_DELTAS_SETTING_KEY },
+      update: {
+        value: JSON.stringify(next),
+        updatedBy: updatedBy ?? null,
+        updatedAt: new Date()
+      },
+      create: {
+        key: RELATIONSHIP_DELTAS_SETTING_KEY,
+        value: JSON.stringify(next),
+        updatedBy: updatedBy ?? null
+      }
+    });
+    this.invalidate();
+    return next;
+  }
+
+  async resetRelationshipDeltas() {
+    await this.prisma.runtimeSetting.deleteMany({
+      where: { key: RELATIONSHIP_DELTAS_SETTING_KEY }
+    });
+    this.invalidate();
+    return { ...DEFAULT_RELATIONSHIP_DELTAS };
+  }
+
+  /**
+   * V6 Phase D: enabled sigils. `null` → IntentRouter использует defaults.
+   * Возвращаем массив одно-символьных строк.
+   */
+  async getEnabledSigils(): Promise<string[] | null> {
+    const row = await this.getRuntimeSettingRow(ENABLED_SIGILS_SETTING_KEY);
+    if (!row?.value) return null;
+    try {
+      const parsed = JSON.parse(row.value);
+      if (!Array.isArray(parsed)) return null;
+      const valid = parsed.filter((entry): entry is string => typeof entry === "string" && entry.length === 1);
+      return valid;
+    } catch {
+      return null;
+    }
+  }
+
+  async setEnabledSigils(chars: string[], updatedBy?: string) {
+    const sanitized = Array.from(new Set(chars.filter((c) => typeof c === "string" && c.length === 1)));
+    await this.prisma.runtimeSetting.upsert({
+      where: { key: ENABLED_SIGILS_SETTING_KEY },
+      update: {
+        value: JSON.stringify(sanitized),
+        updatedBy: updatedBy ?? null,
+        updatedAt: new Date()
+      },
+      create: {
+        key: ENABLED_SIGILS_SETTING_KEY,
+        value: JSON.stringify(sanitized),
+        updatedBy: updatedBy ?? null
+      }
+    });
+    this.invalidate();
+    return sanitized;
+  }
+
+  async resetEnabledSigils() {
+    await this.prisma.runtimeSetting.deleteMany({
+      where: { key: ENABLED_SIGILS_SETTING_KEY }
+    });
+    this.invalidate();
+    return null;
+  }
+
+  /**
+   * V6 Phase F: queue phrase pool overrides.
+   */
+  async getQueuePhrasePoolsOverride(): Promise<QueuePhrasePoolsOverride | null> {
+    const row = await this.getRuntimeSettingRow(QUEUE_PHRASE_POOLS_SETTING_KEY);
+    if (!row?.value) return null;
+    try {
+      const parsed = JSON.parse(row.value);
+      return sanitizeQueuePoolsOverride(parsed);
+    } catch {
+      return null;
+    }
+  }
+
+  async setQueuePhrasePoolsOverride(value: QueuePhrasePoolsOverride, updatedBy?: string) {
+    const sanitized = sanitizeQueuePoolsOverride(value) ?? {};
+    await this.prisma.runtimeSetting.upsert({
+      where: { key: QUEUE_PHRASE_POOLS_SETTING_KEY },
+      update: {
+        value: JSON.stringify(sanitized),
+        updatedBy: updatedBy ?? null,
+        updatedAt: new Date()
+      },
+      create: {
+        key: QUEUE_PHRASE_POOLS_SETTING_KEY,
+        value: JSON.stringify(sanitized),
+        updatedBy: updatedBy ?? null
+      }
+    });
+    this.invalidate();
+    return sanitized;
+  }
+
+  async resetQueuePhrasePoolsOverride() {
+    await this.prisma.runtimeSetting.deleteMany({
+      where: { key: QUEUE_PHRASE_POOLS_SETTING_KEY }
+    });
+    this.invalidate();
+    return null;
+  }
+
+  /**
+   * V6 Phase H: channel access matrix.
+   * Returns array of `{ channelId, mode }` rules. Если ничего не задано — `[]`.
+   */
+  async getChannelAccessRules(): Promise<Array<{ channelId: string; mode: "default" | "muted" | "active" | "ignored" }>> {
+    const row = await this.getRuntimeSettingRow(CHANNEL_ACCESS_SETTING_KEY);
+    if (!row?.value) return [];
+    try {
+      const parsed = JSON.parse(row.value);
+      return sanitizeChannelAccessRules(parsed);
+    } catch {
+      return [];
+    }
+  }
+
+  async setChannelAccessRules(
+    rules: Array<{ channelId: string; mode: "default" | "muted" | "active" | "ignored" }>,
+    updatedBy?: string
+  ) {
+    const sanitized = sanitizeChannelAccessRules(rules);
+    await this.prisma.runtimeSetting.upsert({
+      where: { key: CHANNEL_ACCESS_SETTING_KEY },
+      update: {
+        value: JSON.stringify(sanitized),
+        updatedBy: updatedBy ?? null,
+        updatedAt: new Date()
+      },
+      create: {
+        key: CHANNEL_ACCESS_SETTING_KEY,
+        value: JSON.stringify(sanitized),
+        updatedBy: updatedBy ?? null
+      }
+    });
+    this.invalidate();
+    return sanitized;
+  }
+
+  async resetChannelAccessRules() {
+    await this.prisma.runtimeSetting.deleteMany({
+      where: { key: CHANNEL_ACCESS_SETTING_KEY }
+    });
+    this.invalidate();
+    return [];
+  }
+
   async getGuildSettings(guildId: string): Promise<PersonaSettings> {
     const guild = await this.prisma.guild.findUnique({
       where: { id: guildId }
@@ -630,13 +920,108 @@ export class RuntimeConfigService {
       throw new Error(`Prompt ${CORE_PROMPT_DEFINITIONS[key].label} не может быть пустым.`);
     }
 
-    await this.writeRuntimeSetting(buildCorePromptSettingKey(guildId, key), normalized, updatedBy);
+    const settingKey = buildCorePromptSettingKey(guildId, key);
+    const previous = await this.getRuntimeSettingRow(settingKey);
+    await this.writeRuntimeSetting(settingKey, normalized, updatedBy);
+    await this.recordRuntimeSettingAudit({
+      key: settingKey,
+      guildId,
+      previousValue: previous?.value ?? null,
+      newValue: normalized,
+      action: previous ? "update" : "create",
+      updatedBy
+    });
     return this.getCorePromptTemplate(guildId, key);
   }
 
-  async resetCorePromptTemplate(guildId: string, key: CorePromptKey) {
-    await this.deleteRuntimeSetting(buildCorePromptSettingKey(guildId, key));
+  async resetCorePromptTemplate(guildId: string, key: CorePromptKey, updatedBy?: string) {
+    const settingKey = buildCorePromptSettingKey(guildId, key);
+    const previous = await this.getRuntimeSettingRow(settingKey);
+    await this.deleteRuntimeSetting(settingKey);
+    if (previous) {
+      await this.recordRuntimeSettingAudit({
+        key: settingKey,
+        guildId,
+        previousValue: previous.value,
+        newValue: null,
+        action: "reset",
+        updatedBy
+      });
+    }
     return this.getCorePromptTemplate(guildId, key);
+  }
+
+  async listCorePromptAuditTrail(guildId: string, limit = 25): Promise<CorePromptAuditEntry[]> {
+    const prismaClient = this.prisma as unknown as {
+      runtimeSettingAudit?: {
+        findMany: (args: {
+          where: Record<string, unknown>;
+          orderBy: { createdAt: "asc" | "desc" };
+          take: number;
+        }) => Promise<Array<{
+          id: string;
+          key: string;
+          guildId: string | null;
+          previousValue: string | null;
+          newValue: string | null;
+          action: string;
+          updatedBy: string | null;
+          createdAt: Date;
+        }>>;
+      };
+    };
+    if (!prismaClient.runtimeSettingAudit) return [];
+    const rows = await prismaClient.runtimeSettingAudit.findMany({
+      where: {
+        guildId,
+        key: { startsWith: `${CORE_PROMPT_SETTING_PREFIX}.` }
+      },
+      orderBy: { createdAt: "desc" },
+      take: Math.max(1, Math.min(limit, 200))
+    });
+    return rows.map((row) => {
+      const parts = row.key.split(".");
+      const promptKey = parts[parts.length - 1];
+      return {
+        id: row.id,
+        key: isCorePromptKey(promptKey) ? promptKey : null,
+        action: row.action,
+        updatedBy: row.updatedBy,
+        previousValue: row.previousValue,
+        newValue: row.newValue,
+        createdAt: row.createdAt
+      };
+    });
+  }
+
+  private async recordRuntimeSettingAudit(entry: {
+    key: string;
+    guildId: string | null;
+    previousValue: string | null;
+    newValue: string | null;
+    action: string;
+    updatedBy?: string;
+  }) {
+    const prismaClient = this.prisma as unknown as {
+      runtimeSettingAudit?: {
+        create: (args: { data: Record<string, unknown> }) => Promise<unknown>;
+      };
+    };
+    if (!prismaClient.runtimeSettingAudit) return;
+    try {
+      await prismaClient.runtimeSettingAudit.create({
+        data: {
+          key: entry.key,
+          guildId: entry.guildId,
+          previousValue: entry.previousValue,
+          newValue: entry.newValue,
+          action: entry.action,
+          updatedBy: entry.updatedBy ?? null
+        }
+      });
+    } catch {
+      // audit is best-effort; never block writes
+    }
   }
 
   async getChannelPolicy(guildId: string, channelId: string): Promise<EffectiveChannelPolicy> {
@@ -929,6 +1314,38 @@ function parseMemoryMode(value: string) {
   return ["OFF", "TRUSTED_ONLY", "ACTIVE_OPT_IN", "ADMIN_SELECTED"].includes(value) ? value : undefined;
 }
 
+function sanitizeDeltas(input: Partial<RelationshipDeltaConfig>): Partial<RelationshipDeltaConfig> {
+  const out: Partial<RelationshipDeltaConfig> = {};
+  for (const key of Object.keys(DEFAULT_RELATIONSHIP_DELTAS) as RelationshipDeltaSource[]) {
+    const v = input[key];
+    if (typeof v === "number" && Number.isFinite(v)) {
+      out[key] = v;
+    }
+  }
+  return out;
+}
+
+function sanitizeQueuePoolsOverride(input: unknown): QueuePhrasePoolsOverride | null {
+  if (!input || typeof input !== "object") return null;
+  const src = input as Record<string, unknown>;
+  const out: QueuePhrasePoolsOverride = {};
+  for (const stage of ["initial", "followup"] as const) {
+    const stageVal = src[stage];
+    if (!stageVal || typeof stageVal !== "object") continue;
+    const stageObj = stageVal as Record<string, unknown>;
+    const stageOut: { warm?: string[]; neutral?: string[]; cold?: string[] } = {};
+    for (const bucket of ["warm", "neutral", "cold"] as const) {
+      const list = stageObj[bucket];
+      if (Array.isArray(list)) {
+        const cleaned = list.filter((p): p is string => typeof p === "string" && p.trim().length > 0);
+        if (cleaned.length) stageOut[bucket] = cleaned;
+      }
+    }
+    if (Object.keys(stageOut).length) out[stage] = stageOut;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 function parseRelationshipGrowthMode(value: string) {
   return ["OFF", "MANUAL_REVIEW", "TRUSTED_AUTO", "FULL_AUTO"].includes(value) ? value : undefined;
 }
@@ -1084,6 +1501,23 @@ function parseAiRouterStateValue(rawValue?: string | null): AiRouterState {
 
 function buildCorePromptSettingKey(guildId: string, key: CorePromptKey) {
   return `${CORE_PROMPT_SETTING_PREFIX}.${guildId}.${key}`;
+}
+
+function sanitizeChannelAccessRules(input: unknown): Array<{ channelId: string; mode: "default" | "muted" | "active" | "ignored" }> {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<string>();
+  const out: Array<{ channelId: string; mode: "default" | "muted" | "active" | "ignored" }> = [];
+  for (const entry of input) {
+    if (!entry || typeof entry !== "object") continue;
+    const channelId = (entry as { channelId?: unknown }).channelId;
+    const mode = (entry as { mode?: unknown }).mode;
+    if (typeof channelId !== "string" || !channelId.length) continue;
+    if (mode !== "default" && mode !== "muted" && mode !== "active" && mode !== "ignored") continue;
+    if (seen.has(channelId)) continue;
+    seen.add(channelId);
+    out.push({ channelId, mode });
+  }
+  return out;
 }
 
 function usesOpenAiEmbeddingPolicy(env: AppEnv) {
