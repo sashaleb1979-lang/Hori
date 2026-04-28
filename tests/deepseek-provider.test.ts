@@ -44,6 +44,78 @@ describe("DeepSeekProvider", () => {
     expect(result.content).toBe("ok");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps tool calling enabled while disabling thinking", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+
+      expect(payload).toMatchObject({
+        model: "deepseek-v4-flash",
+        thinking: {
+          type: "disabled"
+        }
+      });
+      expect(payload.tools).toEqual([
+        {
+          type: "function",
+          function: {
+            name: "web_search",
+            description: "search",
+            parameters: { type: "object" }
+          }
+        }
+      ]);
+
+      return new Response(
+        JSON.stringify({
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "tool-1",
+                type: "function",
+                function: {
+                  name: "web_search",
+                  arguments: JSON.stringify({ query: "hori" })
+                }
+              }]
+            },
+            finish_reason: "tool_calls"
+          }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = new DeepSeekProvider("deepseek-key", "https://api.deepseek.com", createLogger());
+    const result = await provider.send({
+      model: "deepseek-v4-flash",
+      messages: [{ role: "user", content: "? что нового" }],
+      tools: [{
+        type: "function",
+        function: {
+          name: "web_search",
+          description: "search",
+          parameters: { type: "object" }
+        }
+      }]
+    });
+
+    expect(result.toolCalls).toEqual([
+      {
+        id: "tool-1",
+        function: {
+          name: "web_search",
+          arguments: { query: "hori" }
+        }
+      }
+    ]);
+  });
 });
 
 function createLogger() {

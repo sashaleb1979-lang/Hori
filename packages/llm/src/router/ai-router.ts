@@ -28,11 +28,25 @@ import { InMemoryAiRouterStateStore, type AiRouterRecentRoute, type AiRouterStat
 import { classifyProviderError, type ProviderErrorInfo } from "./provider-error";
 import { AiRouterQuotaManager } from "./quota-manager";
 
+export type PreferredChatProviderValue = AiRouterProviderName | "auto";
+
+export const PREFERRED_CHAT_PROVIDER_VALUES = ["auto", ...AI_ROUTER_PROVIDER_NAMES] as const;
+
+export function isPreferredChatProviderValue(value: unknown): value is PreferredChatProviderValue {
+  return typeof value === "string" && (PREFERRED_CHAT_PROVIDER_VALUES as readonly string[]).includes(value);
+}
+
 export interface AiRouterClientOptions {
   stateStore?: AiRouterStateStore;
   quotaManager?: AiRouterQuotaManager;
   providers?: Partial<Record<AiRouterProviderName, ChatProvider>>;
   embedClient?: LlmClient;
+  /**
+   * Async getter returning the operator's preferred chat provider for the
+   * primary attempt. Other providers stay in the chain as fallback.
+   * Return "auto" (or undefined) to keep the default order (deepseek first).
+   */
+  getPreferredChatProvider?: () => Promise<PreferredChatProviderValue | undefined> | PreferredChatProviderValue | undefined;
 }
 
 export interface AiRouterStatusSnapshot {
@@ -44,6 +58,7 @@ export interface AiRouterStatusSnapshot {
     missing: string[];
   }>;
   activeOrder: string[];
+  preferredChatProvider: PreferredChatProviderValue;
   cooldowns: Array<{ provider: string; model: string; cooldownUntil: string }>;
   geminiUsage: {
     flash: { used: number; limit?: number };
@@ -71,6 +86,7 @@ export class AiRouterClient implements LlmClient {
   private readonly providers: Partial<Record<AiRouterProviderName, ChatProvider>>;
   private readonly quotaManager: AiRouterQuotaManager;
   private readonly embedClient?: LlmClient;
+  private readonly preferredChatProviderGetter?: AiRouterClientOptions["getPreferredChatProvider"];
 
   constructor(
     private readonly env: AppEnv,
@@ -79,6 +95,7 @@ export class AiRouterClient implements LlmClient {
   ) {
     this.envState = resolveAiRouterEnvState(env);
     this.providers = options.providers ?? buildProviders(env, logger);
+    this.preferredChatProviderGetter = options.getPreferredChatProvider;
     this.quotaManager = options.quotaManager ?? new AiRouterQuotaManager(
       options.stateStore ?? new InMemoryAiRouterStateStore(),
       {
@@ -100,7 +117,8 @@ export class AiRouterClient implements LlmClient {
   async chat(options: LlmChatOptions): Promise<LlmChatResponse> {
     const requestId = options.metadata?.requestId ?? randomUUID();
     const userKey = options.metadata?.userKey ?? "anonymous";
-    const attempts = this.buildAttemptChain(options);
+    const preferred = await this.resolvePreferredChatProvider();
+    const attempts = this.buildAttemptChain(options, preferred);
     const routedFrom: string[] = [];
     const failedFrom: string[] = [];
     const allowPaidFallback = options.metadata?.allowPaidFallback !== false;
@@ -276,6 +294,7 @@ export class AiRouterClient implements LlmClient {
 
   async getStatusSnapshot(): Promise<AiRouterStatusSnapshot> {
     const state = await this.quotaManager.getState();
+    const preferred = (await this.resolvePreferredChatProvider()) ?? "auto";
     const enabledProviders = AI_ROUTER_PROVIDER_NAMES.map((provider) => ({
       provider,
       enabled: this.envState[provider].enabled,
@@ -290,7 +309,8 @@ export class AiRouterClient implements LlmClient {
 
     return {
       enabledProviders,
-      activeOrder: this.describeActiveOrder(),
+      activeOrder: this.describeActiveOrder(preferred),
+      preferredChatProvider: preferred,
       cooldowns,
       geminiUsage: {
         flash: {
@@ -347,7 +367,30 @@ export class AiRouterClient implements LlmClient {
     return provider.send(request);
   }
 
-  private buildAttemptChain(options: LlmChatOptions): RouterAttempt[] {
+  private async resolvePreferredChatProvider(): Promise<PreferredChatProviderValue | undefined> {
+    if (!this.preferredChatProviderGetter) {
+      return undefined;
+    }
+
+    try {
+      const value = await Promise.resolve(this.preferredChatProviderGetter());
+      if (!value || value === "auto") {
+        return "auto";
+      }
+
+      if (isPreferredChatProviderValue(value)) {
+        return value;
+      }
+
+      this.logger.warn({ value }, "ai router: unknown preferredChatProvider value, falling back to auto");
+      return "auto";
+    } catch (error) {
+      this.logger.warn({ message: asErrorMessage(error) }, "ai router: failed to resolve preferredChatProvider");
+      return "auto";
+    }
+  }
+
+  private buildAttemptChain(options: LlmChatOptions, preferred?: PreferredChatProviderValue): RouterAttempt[] {
     const attempts: RouterAttempt[] = [];
     const isComplex = this.shouldUseGeminiPro(options);
 
@@ -394,6 +437,10 @@ export class AiRouterClient implements LlmClient {
       reason: "final_paid_fallback"
     });
 
+    if (preferred && preferred !== "auto") {
+      return reorderAttemptsForPreferredProvider(attempts, preferred);
+    }
+
     return attempts;
   }
 
@@ -438,8 +485,8 @@ export class AiRouterClient implements LlmClient {
     return false;
   }
 
-  private describeActiveOrder() {
-    const order = [
+  private describeActiveOrder(preferred?: PreferredChatProviderValue) {
+    const baseOrder = [
       `deepseek:${this.env.DEEPSEEK_MODEL}`,
       `gemini:${this.env.GEMINI_PRO_MODEL} (complex only)`,
       `gemini:${this.env.GEMINI_FLASH_MODEL}`,
@@ -449,8 +496,19 @@ export class AiRouterClient implements LlmClient {
       `github:${this.env.GITHUB_MODEL_TERTIARY}`,
       `openai:${this.env.OPENAI_MODEL}`
     ];
+    const order = uniqueStrings(baseOrder);
 
-    return uniqueStrings(order);
+    if (!preferred || preferred === "auto") {
+      return order;
+    }
+
+    const promoted = order.filter((entry) => entry.startsWith(`${preferred}:`));
+    if (!promoted.length) {
+      return order;
+    }
+
+    const others = order.filter((entry) => !entry.startsWith(`${preferred}:`));
+    return [...promoted, ...others];
   }
 
   private logTransition(input: {
@@ -575,6 +633,22 @@ function collectCooldowns(state: AiRouterState) {
   }
 
   return cooldowns.sort((left, right) => left.cooldownUntil.localeCompare(right.cooldownUntil));
+}
+
+function reorderAttemptsForPreferredProvider(attempts: RouterAttempt[], preferred: AiRouterProviderName): RouterAttempt[] {
+  const promoted = attempts.filter((attempt) => attempt.providerName === preferred);
+  if (!promoted.length) {
+    return attempts;
+  }
+
+  const others = attempts.filter((attempt) => attempt.providerName !== preferred);
+  return [
+    ...promoted.map((attempt, index) => ({
+      ...attempt,
+      reason: index === 0 ? `panel_preferred:${preferred}` : attempt.reason
+    })),
+    ...others
+  ];
 }
 
 function uniqueStrings(values: string[]) {

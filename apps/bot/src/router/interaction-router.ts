@@ -41,11 +41,14 @@ import {
   isModelRoutingModelId,
   isModelRoutingPresetName,
   isModelRoutingSlot,
+  isPreferredChatProviderValue,
   MODEL_ROUTING_MODEL_IDS,
   MODEL_ROUTING_PRESETS,
   MODEL_ROUTING_SLOTS,
+  PREFERRED_CHAT_PROVIDER_VALUES,
   SUPPORTED_OPENAI_EMBEDDING_DIMENSIONS,
-  type ModelRoutingSlot
+  type ModelRoutingSlot,
+  type PreferredChatProviderValue
 } from "@hori/llm";
 
 import type { BotRuntime } from "../bootstrap";
@@ -1396,6 +1399,21 @@ async function handleLlmPanelSelect(
     return;
   }
 
+  if (action === "chat_provider") {
+    if (!isPreferredChatProviderValue(value)) {
+      await interaction.reply({ content: "Неизвестный chat provider.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    if (value === "auto") {
+      await runtime.runtimeConfig.resetPreferredChatProvider();
+    } else {
+      await runtime.runtimeConfig.setPreferredChatProvider(value, interaction.user.id);
+    }
+    await interaction.update(await buildLlmPanelResponse(runtime, "chat", interaction.guildId));
+    return;
+  }
+
   if (action === "model") {
     if (!(await ensureLlmModelControlsEditable(runtime, interaction))) {
       return;
@@ -2719,10 +2737,11 @@ function buildHoriDetailEmbed(title: string, body: string) {
 }
 
 async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRoutingSlot = "chat", guildId?: string) {
-  const [status, hydeStatus, embedStatus] = await Promise.all([
+  const [status, hydeStatus, embedStatus, chatProviderStatus] = await Promise.all([
     runtime.runtimeConfig.getModelRoutingStatus(),
     runtime.runtimeConfig.getMemoryHydeStatus(),
-    runtime.runtimeConfig.getOpenAIEmbeddingDimensionsStatus()
+    runtime.runtimeConfig.getOpenAIEmbeddingDimensionsStatus(),
+    runtime.runtimeConfig.getPreferredChatProviderStatus()
   ]);
   const activeSlot = MODEL_ROUTING_SLOTS.includes(selectedSlot) ? selectedSlot : "chat";
   const activeModel = status.slots[activeSlot];
@@ -2740,6 +2759,7 @@ async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRou
     : status.provider === "router"
       ? [
           "Routing: **deterministic router**",
+          `Active chat provider: **${chatProviderStatus.value}**`,
           `OpenAI fallback only: chat=\`${status.legacyFallback.chat}\`, smart=\`${status.legacyFallback.smart}\``
         ]
       : [
@@ -2755,6 +2775,7 @@ async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRou
       ? {
           name: "Provider models",
           value: clipFieldText([
+            `deepseek=${runtime.env.DEEPSEEK_MODEL}`,
             `geminiFlash=${runtime.env.GEMINI_FLASH_MODEL}`,
             `geminiPro=${runtime.env.GEMINI_PRO_MODEL}`,
             `cloudflare=${runtime.env.CF_MODEL}`,
@@ -2793,6 +2814,9 @@ async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRou
           ...(status.controlsNote ? [status.controlsNote] : []),
           "",
           `Embeddings: \`${embeddingStatus}\``,
+          status.provider === "router"
+            ? `Active chat provider: **${chatProviderStatus.value}** (${chatProviderStatus.source})`
+            : null,
           `HyDE retrieval: **${hydeStatus.value ? "on" : "off"}** (${hydeStatus.source})`,
           embedStatus.source === "unsupported"
             ? "OpenAI embedding dimensions: n/a for Ollama"
@@ -2825,7 +2849,8 @@ async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRou
       controlsEditable: status.controlsEditable,
       hydeEnabled: hydeStatus.value,
       supportsEmbeddingDimensions: embedStatus.source !== "unsupported",
-      embedDimensions: embedStatus.source === "unsupported" ? undefined : embedStatus.value
+      embedDimensions: embedStatus.source === "unsupported" ? undefined : embedStatus.value,
+      preferredChatProvider: chatProviderStatus.value
     })
   };
 }
@@ -2840,6 +2865,7 @@ function buildLlmPanelRows(
     hydeEnabled: boolean;
     supportsEmbeddingDimensions: boolean;
     embedDimensions?: number;
+    preferredChatProvider: PreferredChatProviderValue;
   }
 ) {
   const runtimeOptions: Array<{ label: string; value: string; description: string; default?: boolean }> = [
@@ -2870,21 +2896,39 @@ function buildLlmPanelRows(
       : [])
   ];
 
+  const presetOrChatProviderRow = runtime.provider === "router"
+    ? new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`${LLM_PANEL_PREFIX}:chat_provider`)
+          .setPlaceholder("Active chat provider (router)")
+          .addOptions(
+            ...PREFERRED_CHAT_PROVIDER_VALUES.map((provider) => ({
+              label: provider === "auto" ? "auto (DeepSeek → Gemini → CF → GitHub → OpenAI)" : provider,
+              value: provider,
+              description: provider === "auto"
+                ? "Default cascade with DeepSeek as primary"
+                : `Force ${provider} as primary chat provider`,
+              default: provider === runtime.preferredChatProvider
+            }))
+          )
+      )
+    : new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`${LLM_PANEL_PREFIX}:preset`)
+          .setPlaceholder(runtime.controlsEditable ? "LLM preset" : "LLM preset (informational-only)")
+          .setDisabled(!runtime.controlsEditable)
+          .addOptions(
+            ...Object.entries(MODEL_ROUTING_PRESETS).map(([value, preset]) => ({
+              label: preset.label,
+              value,
+              description: preset.description.slice(0, 100),
+              default: value === activePreset
+            }))
+          )
+      );
+
   return [
-    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId(`${LLM_PANEL_PREFIX}:preset`)
-        .setPlaceholder(runtime.controlsEditable ? "LLM preset" : "LLM preset (informational-only)")
-        .setDisabled(!runtime.controlsEditable)
-        .addOptions(
-          ...Object.entries(MODEL_ROUTING_PRESETS).map(([value, preset]) => ({
-            label: preset.label,
-            value,
-            description: preset.description.slice(0, 100),
-            default: value === activePreset
-          }))
-        )
-    ),
+    presetOrChatProviderRow,
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId(`${LLM_PANEL_PREFIX}:slot`)

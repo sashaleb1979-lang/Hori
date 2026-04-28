@@ -4,7 +4,11 @@ import { loadEnv } from "@hori/config";
 import { createEmptyAiRouterState } from "@hori/llm";
 import type { AppPrismaClient } from "@hori/shared";
 
-import { AI_ROUTER_STATE_SETTING_KEY, RuntimeConfigService } from "../packages/core/src/services/runtime-config-service";
+import {
+  AI_ROUTER_STATE_SETTING_KEY,
+  PREFERRED_CHAT_PROVIDER_SETTING_KEY,
+  RuntimeConfigService
+} from "../packages/core/src/services/runtime-config-service";
 
 describe("RuntimeConfigService ai router state", () => {
   it("returns empty state when runtime setting is missing or invalid", async () => {
@@ -113,6 +117,32 @@ describe("RuntimeConfigService ai router state", () => {
       })
     }));
   });
+
+  it("stores and resets preferred chat provider", async () => {
+    const prismaState = createPrisma([]);
+    const service = new RuntimeConfigService(prismaState.prisma, createEnv());
+
+    const status = await service.setPreferredChatProvider("openai", "owner-1");
+
+    expect(status).toMatchObject({
+      value: "openai",
+      source: "runtime_setting",
+      updatedBy: "owner-1"
+    });
+    expect(prismaState.runtimeSetting.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { key: PREFERRED_CHAT_PROVIDER_SETTING_KEY },
+      create: expect.objectContaining({
+        key: PREFERRED_CHAT_PROVIDER_SETTING_KEY,
+        value: "openai"
+      })
+    }));
+
+    const reset = await service.resetPreferredChatProvider();
+    expect(reset).toEqual({ value: "auto", source: "default" });
+    expect(prismaState.runtimeSetting.deleteMany).toHaveBeenCalledWith({
+      where: { key: PREFERRED_CHAT_PROVIDER_SETTING_KEY }
+    });
+  });
 });
 
 function createEnv() {
@@ -135,6 +165,38 @@ function createPrisma(initialRows: Array<{ key: string; value: string; updatedBy
       }
 
       return rows.filter((row) => keys.includes(row.key));
+    }),
+    findUnique: vi.fn(async (args: { where: { key: string } }) => rows.find((row) => row.key === args.where.key) ?? null),
+    upsert: vi.fn(async (args: {
+      where: { key: string };
+      update: { value: string; updatedBy: string | null; updatedAt: Date };
+      create: { key: string; value: string; updatedBy: string | null };
+    }) => {
+      const existing = rows.find((row) => row.key === args.where.key);
+      if (existing) {
+        existing.value = args.update.value;
+        existing.updatedBy = args.update.updatedBy;
+        existing.updatedAt = args.update.updatedAt;
+        return existing;
+      }
+
+      const created = {
+        key: args.create.key,
+        value: args.create.value,
+        updatedBy: args.create.updatedBy,
+        updatedAt: new Date()
+      };
+      rows.push(created);
+      return created;
+    }),
+    deleteMany: vi.fn(async (args: { where: { key: string } }) => {
+      const before = rows.length;
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        if (rows[index]?.key === args.where.key) {
+          rows.splice(index, 1);
+        }
+      }
+      return { count: before - rows.length };
     }),
     update: vi.fn(async (args: { where: { key: string }; data: { value: string; updatedBy: string | null; updatedAt: Date } }) => {
       const existing = rows.find((row) => row.key === args.where.key);
@@ -174,6 +236,7 @@ function createPrisma(initialRows: Array<{ key: string; value: string; updatedBy
   return {
     prisma,
     tx,
+    runtimeSetting,
     rows
   };
 }

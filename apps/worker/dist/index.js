@@ -149,7 +149,8 @@ function createConversationAnalysisJob(runtime) {
       runtime.logger.warn({ error, guildId, userId }, "conversation-analysis: LLM parse failed");
       return;
     }
-    if (result.new_notes?.length) {
+    const bioMemoryEnabled = runtimeSettings.memoryMode !== "OFF";
+    if (bioMemoryEnabled && result.new_notes?.length) {
       for (const note of result.new_notes.slice(0, 5)) {
         const key = `bio:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
         await runtime.prisma.userMemoryNote.create({
@@ -164,7 +165,7 @@ function createConversationAnalysisJob(runtime) {
         });
       }
     }
-    if (result.remove_notes?.length) {
+    if (bioMemoryEnabled && result.remove_notes?.length) {
       for (const noteText of result.remove_notes.slice(0, 3)) {
         await runtime.prisma.userMemoryNote.updateMany({
           where: { guildId, userId, value: { contains: noteText.slice(0, 100) }, active: true },
@@ -667,6 +668,33 @@ function parseVerdict(raw) {
   }
   return "B";
 }
+function clipBlock(value, maxLen) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.length > maxLen ? trimmed.slice(0, maxLen).trim() : trimmed;
+}
+function parseEvaluatorOutput(raw) {
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const obj = JSON.parse(jsonMatch[0]);
+      const verdictRaw = typeof obj.verdict === "string" ? obj.verdict.trim().toUpperCase() : "";
+      const verdict = verdictRaw === "A" ? "A" : verdictRaw === "V" ? "V" : "B";
+      return {
+        verdict,
+        characteristic: clipBlock(obj.characteristic, 400),
+        lastChange: clipBlock(obj.lastChange, 240)
+      };
+    } catch {
+    }
+  }
+  return {
+    verdict: parseVerdict(raw),
+    characteristic: null,
+    lastChange: null
+  };
+}
 function createSessionJob(runtime) {
   return async (job) => {
     const runtimeSettings = await runtime.runtimeConfig.getRuntimeSettings();
@@ -717,17 +745,25 @@ function createSessionJob(runtime) {
       return { skipped: true, reason: "session too small" };
     }
     const corePromptTemplates = await runtime.runtimeConfig.getCorePromptTemplates(job.data.guildId);
-    const prompt = corePromptTemplates.relationshipEvaluatorPrompt.replace("{session_messages}", formatSessionTranscript(sessionMessages));
+    const previousVector = await runtime.relationshipService.getVector(job.data.guildId, job.data.userId);
+    const previousCharacteristic = previousVector.characteristic ?? "(\u043D\u0435\u0442 \u0434\u0430\u043D\u043D\u044B\u0445)";
+    const prompt = corePromptTemplates.relationshipEvaluatorPrompt.replace("{session_messages}", formatSessionTranscript(sessionMessages)).replace("{previous_characteristic}", previousCharacteristic);
     let verdict = "B";
+    let characteristic = null;
+    let lastChange = null;
     try {
+      const evaluatorModel = runtimeSettings.modelRouting ? runtime.modelRouter.pickModelForSlot("classifier", runtimeSettings.modelRouting) : runtime.modelRouter.pickModel("summary", runtimeSettings.modelRouting);
       const response = await runtime.llmClient.chat({
-        model: runtime.modelRouter.pickModel("summary", runtimeSettings.modelRouting),
+        model: evaluatorModel,
         messages: [{ role: "system", content: prompt }],
         temperature: 0,
         topP: 0.1,
-        maxTokens: 8
+        maxTokens: 400
       });
-      verdict = parseVerdict(response.message.content);
+      const parsed = parseEvaluatorOutput(response.message.content);
+      verdict = parsed.verdict;
+      characteristic = parsed.characteristic;
+      lastChange = parsed.lastChange;
     } catch (error) {
       runtime.logger.warn(
         {
@@ -765,7 +801,15 @@ function createSessionJob(runtime) {
     const autoApply = runtimeSettings.relationshipGrowthMode === "TRUSTED_AUTO" || runtimeSettings.relationshipGrowthMode === "FULL_AUTO";
     if (autoApply && appliedVerdict !== "B") {
       await runtime.relationshipService.applySessionVerdict(job.data.guildId, job.data.userId, appliedVerdict, {
-        allowStatePromotion: runtimeSettings.relationshipGrowthMode === "FULL_AUTO"
+        allowStatePromotion: runtimeSettings.relationshipGrowthMode === "FULL_AUTO",
+        characteristic,
+        lastChange
+      });
+    } else if (autoApply && (characteristic !== null || lastChange !== null)) {
+      await runtime.relationshipService.applySessionVerdict(job.data.guildId, job.data.userId, "B", {
+        allowStatePromotion: false,
+        characteristic,
+        lastChange
       });
     }
     await runtime.prisma.botEventLog.create({
@@ -783,7 +827,9 @@ function createSessionJob(runtime) {
           growthMode: runtimeSettings.relationshipGrowthMode,
           messageCount: sessionMessages.length,
           sessionStart: sessionStart.toISOString(),
-          sessionEnd: sessionEnd.toISOString()
+          sessionEnd: sessionEnd.toISOString(),
+          characteristic,
+          lastChange
         }
       }
     });
@@ -791,6 +837,8 @@ function createSessionJob(runtime) {
       skipped: false,
       verdict,
       appliedVerdict,
+      characteristic,
+      lastChange,
       growthMode: runtimeSettings.relationshipGrowthMode
     };
   };

@@ -118,7 +118,7 @@ var horiCommandDefinition = new import_discord2.SlashCommandBuilder().setName("h
 ).addSubcommand(
   (subcommand) => subcommand.setName("dossier").setDescription("Owner: \u0441\u043E\u0431\u0440\u0430\u0442\u044C \u0440\u0430\u0437\u0432\u0451\u0440\u043D\u0443\u0442\u043E\u0435 \u0434\u043E\u0441\u044C\u0435 \u043F\u043E \u0447\u0435\u043B\u043E\u0432\u0435\u043A\u0443").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true))
 ).addSubcommand(
-  (subcommand) => subcommand.setName("relationship").setDescription("Owner: \u043F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u0438\u043B\u0438 \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435 \u043A \u0447\u0435\u043B\u043E\u0432\u0435\u043A\u0443").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true)).addStringOption((option) => option.setName("tone-bias").setDescription("neutral, friendly, sharp, playful")).addIntegerOption((option) => option.setName("roast-level").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("praise-bias").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("interrupt-priority").setDescription("0-5").setMinValue(0).setMaxValue(5)).addBooleanOption((option) => option.setName("do-not-mock").setDescription("\u041D\u0435 \u043F\u043E\u0434\u043A\u0430\u043B\u044B\u0432\u0430\u0442\u044C")).addBooleanOption((option) => option.setName("do-not-initiate").setDescription("\u041D\u0435 \u0438\u043D\u0438\u0446\u0438\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u0435")).addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics")).addStringOption((option) => option.setName("relationship-state").setDescription("V5 relationship state").addChoices(...relationshipStateChoices)).addNumberOption((option) => option.setName("closeness").setDescription("\u0411\u043B\u0438\u0437\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("trust").setDescription("\u0414\u043E\u0432\u0435\u0440\u0438\u0435 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("familiarity").setDescription("\u0417\u043D\u0430\u043A\u043E\u043C\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("proactivity").setDescription("\u0416\u0435\u043B\u0430\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u0438\u043D\u0438\u0446\u0438\u0430\u0442\u0438\u0432\u044B 0-1").setMinValue(0).setMaxValue(1))
+  (subcommand) => subcommand.setName("relationship").setDescription("Owner: \u043F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u0438\u043B\u0438 \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435 \u043A \u0447\u0435\u043B\u043E\u0432\u0435\u043A\u0443").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true)).addStringOption((option) => option.setName("tone-bias").setDescription("neutral, friendly, sharp, playful")).addIntegerOption((option) => option.setName("roast-level").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("praise-bias").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("interrupt-priority").setDescription("0-5").setMinValue(0).setMaxValue(5)).addBooleanOption((option) => option.setName("do-not-mock").setDescription("\u041D\u0435 \u043F\u043E\u0434\u043A\u0430\u043B\u044B\u0432\u0430\u0442\u044C")).addBooleanOption((option) => option.setName("do-not-initiate").setDescription("\u041D\u0435 \u0438\u043D\u0438\u0446\u0438\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u0435")).addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics")).addStringOption((option) => option.setName("relationship-state").setDescription("V5 relationship state").addChoices(...relationshipStateChoices)).addNumberOption((option) => option.setName("closeness").setDescription("\u0411\u043B\u0438\u0437\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("trust").setDescription("\u0414\u043E\u0432\u0435\u0440\u0438\u0435 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("familiarity").setDescription("\u0417\u043D\u0430\u043A\u043E\u043C\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("proactivity").setDescription("\u0416\u0435\u043B\u0430\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u0438\u043D\u0438\u0446\u0438\u0430\u0442\u0438\u0432\u044B 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("score").setDescription("relationshipScore (-1.5..3)").setMinValue(-1.5).setMaxValue(3))
 ).addSubcommand(
   (subcommand) => subcommand.setName("runtime").setDescription("Owner: V5 runtime modes \u0438 \u043B\u0438\u043C\u0438\u0442\u044B \u043C\u043E\u0434\u0435\u0440\u0430\u0446\u0438\u0438").addStringOption((option) => option.setName("memory-mode").setDescription("\u0420\u0435\u0436\u0438\u043C \u043F\u0430\u043C\u044F\u0442\u0438").addChoices(...memoryModeChoices)).addStringOption(
     (option) => option.setName("relationship-growth-mode").setDescription("\u0420\u0435\u0436\u0438\u043C \u0440\u043E\u0441\u0442\u0430 \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0439").addChoices(...relationshipGrowthModeChoices)
@@ -243,7 +243,7 @@ var legacySlashCommandBuilders = [
   ).addSubcommand(
     (subcommand) => subcommand.setName("remove").setDescription("\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u043C\u043E\u043C\u0435\u043D\u0442 \u0438\u0437 \u0441\u0432\u043E\u0435\u0433\u043E \u0430\u043B\u044C\u0431\u043E\u043C\u0430").addStringOption((option) => option.setName("id").setDescription("ID \u043C\u043E\u043C\u0435\u043D\u0442\u0430").setRequired(true))
   ),
-  new import_discord2.SlashCommandBuilder().setName("bot-relationship").setDescription("\u041D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435 \u043A \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044E").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true)).addStringOption((option) => option.setName("tone-bias").setDescription("neutral, friendly, sharp, playful")).addIntegerOption((option) => option.setName("roast-level").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("praise-bias").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("interrupt-priority").setDescription("0-5").setMinValue(0).setMaxValue(5)).addBooleanOption((option) => option.setName("do-not-mock").setDescription("\u041D\u0435 \u043F\u043E\u0434\u043A\u0430\u043B\u044B\u0432\u0430\u0442\u044C")).addBooleanOption((option) => option.setName("do-not-initiate").setDescription("\u041D\u0435 \u0438\u043D\u0438\u0446\u0438\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u0435")).addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics")).addNumberOption((option) => option.setName("closeness").setDescription("\u0411\u043B\u0438\u0437\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("trust").setDescription("\u0414\u043E\u0432\u0435\u0440\u0438\u0435 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("familiarity").setDescription("\u0417\u043D\u0430\u043A\u043E\u043C\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("proactivity").setDescription("\u0416\u0435\u043B\u0430\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u0438\u043D\u0438\u0446\u0438\u0430\u0442\u0438\u0432\u044B 0-1").setMinValue(0).setMaxValue(1)),
+  new import_discord2.SlashCommandBuilder().setName("bot-relationship").setDescription("\u041D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435 \u043A \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044E").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true)).addStringOption((option) => option.setName("tone-bias").setDescription("neutral, friendly, sharp, playful")).addIntegerOption((option) => option.setName("roast-level").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("praise-bias").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("interrupt-priority").setDescription("0-5").setMinValue(0).setMaxValue(5)).addBooleanOption((option) => option.setName("do-not-mock").setDescription("\u041D\u0435 \u043F\u043E\u0434\u043A\u0430\u043B\u044B\u0432\u0430\u0442\u044C")).addBooleanOption((option) => option.setName("do-not-initiate").setDescription("\u041D\u0435 \u0438\u043D\u0438\u0446\u0438\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u0435")).addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics")).addNumberOption((option) => option.setName("closeness").setDescription("\u0411\u043B\u0438\u0437\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("trust").setDescription("\u0414\u043E\u0432\u0435\u0440\u0438\u0435 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("familiarity").setDescription("\u0417\u043D\u0430\u043A\u043E\u043C\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("proactivity").setDescription("\u0416\u0435\u043B\u0430\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u0438\u043D\u0438\u0446\u0438\u0430\u0442\u0438\u0432\u044B 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("score").setDescription("relationshipScore (-1.5..3)").setMinValue(-1.5).setMaxValue(3)),
   new import_discord2.SlashCommandBuilder().setName("bot-feature").setDescription("\u041F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0438\u0442\u044C feature flag").addStringOption((option) => option.setName("key").setDescription("\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u0444\u043B\u0430\u0433\u0430").setRequired(true)).addBooleanOption((option) => option.setName("enabled").setDescription("\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C/\u0432\u044B\u043A\u043B\u044E\u0447\u0438\u0442\u044C").setRequired(true)),
   new import_discord2.SlashCommandBuilder().setName("bot-debug").setDescription("\u041F\u043E\u043B\u0443\u0447\u0438\u0442\u044C debug trace \u043F\u043E \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044E").addStringOption((option) => option.setName("message-id").setDescription("ID \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F").setRequired(true)),
   new import_discord2.SlashCommandBuilder().setName("bot-profile").setDescription("\u041F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u043F\u0440\u043E\u0444\u0438\u043B\u044C \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true)),
@@ -323,6 +323,7 @@ var HORI_STATE_PANEL_PREFIX = "hori-state";
 var POWER_PANEL_PREFIX = "power-panel";
 var LLM_PANEL_PREFIX = "llm-panel";
 var CORE_PROMPT_PANEL_PREFIX = "core-prompt-panel";
+var V5_PANEL_PREFIX = "v5-panel";
 var POWER_PROFILES = ["economy", "balanced", "expanded", "max"];
 var HORI_PANEL_TABS = ["main", "persona", "behavior", "memory", "channels", "llm", "system"];
 var TAB_EMOJI = {
@@ -878,7 +879,8 @@ ${status}`
               closeness: interaction.options.getNumber("closeness") ?? void 0,
               trustLevel: interaction.options.getNumber("trust") ?? void 0,
               familiarity: interaction.options.getNumber("familiarity") ?? void 0,
-              proactivityPreference: interaction.options.getNumber("proactivity") ?? void 0
+              proactivityPreference: interaction.options.getNumber("proactivity") ?? void 0,
+              relationshipScore: interaction.options.getNumber("score") ?? void 0
             }
           ),
           flags: import_discord3.MessageFlags.Ephemeral
@@ -1224,7 +1226,7 @@ async function handleHoriCommand(runtime, interaction, isOwner, isModerator) {
       return;
     }
     const targetUserId = interaction.options.getUser("user", true).id;
-    const hasUpdate = interaction.options.getString("tone-bias") !== null || interaction.options.getInteger("roast-level") !== null || interaction.options.getInteger("praise-bias") !== null || interaction.options.getInteger("interrupt-priority") !== null || interaction.options.getBoolean("do-not-mock") !== null || interaction.options.getBoolean("do-not-initiate") !== null || interaction.options.getString("protected-topics") !== null || interaction.options.getString("relationship-state") !== null || interaction.options.getNumber("closeness") !== null || interaction.options.getNumber("trust") !== null || interaction.options.getNumber("familiarity") !== null || interaction.options.getNumber("proactivity") !== null;
+    const hasUpdate = interaction.options.getString("tone-bias") !== null || interaction.options.getInteger("roast-level") !== null || interaction.options.getInteger("praise-bias") !== null || interaction.options.getInteger("interrupt-priority") !== null || interaction.options.getBoolean("do-not-mock") !== null || interaction.options.getBoolean("do-not-initiate") !== null || interaction.options.getString("protected-topics") !== null || interaction.options.getString("relationship-state") !== null || interaction.options.getNumber("closeness") !== null || interaction.options.getNumber("trust") !== null || interaction.options.getNumber("familiarity") !== null || interaction.options.getNumber("proactivity") !== null || interaction.options.getNumber("score") !== null;
     const content = hasUpdate ? [
       await runtime.slashAdmin.updateRelationship(interaction.guildId, targetUserId, interaction.user.id, {
         toneBias: interaction.options.getString("tone-bias") ?? void 0,
@@ -1238,7 +1240,8 @@ async function handleHoriCommand(runtime, interaction, isOwner, isModerator) {
         closeness: interaction.options.getNumber("closeness") ?? void 0,
         trustLevel: interaction.options.getNumber("trust") ?? void 0,
         familiarity: interaction.options.getNumber("familiarity") ?? void 0,
-        proactivityPreference: interaction.options.getNumber("proactivity") ?? void 0
+        proactivityPreference: interaction.options.getNumber("proactivity") ?? void 0,
+        relationshipScore: interaction.options.getNumber("score") ?? void 0
       }),
       "",
       await runtime.slashAdmin.relationshipDetails(interaction.guildId, targetUserId)
@@ -1714,6 +1717,10 @@ async function routeStringSelectInteraction(runtime, interaction, isOwner) {
     await handleCorePromptPanelSelect(runtime, interaction, isOwner);
     return;
   }
+  if (interaction.customId.startsWith(`${V5_PANEL_PREFIX}:`)) {
+    await handleV5PanelSelect(runtime, interaction, isOwner);
+    return;
+  }
   if (interaction.customId.startsWith(`${LLM_PANEL_PREFIX}:`)) {
     await handleLlmPanelSelect(runtime, interaction, isOwner);
     return;
@@ -1766,6 +1773,19 @@ async function handleLlmPanelSelect(runtime, interaction, isOwner) {
   if (action === "slot") {
     const slot = (0, import_llm2.isModelRoutingSlot)(value) ? value : "chat";
     await interaction.update(await buildLlmPanelResponse(runtime, slot, interaction.guildId));
+    return;
+  }
+  if (action === "chat_provider") {
+    if (!(0, import_llm2.isPreferredChatProviderValue)(value)) {
+      await interaction.reply({ content: "\u041D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u044B\u0439 chat provider.", flags: import_discord3.MessageFlags.Ephemeral });
+      return;
+    }
+    if (value === "auto") {
+      await runtime.runtimeConfig.resetPreferredChatProvider();
+    } else {
+      await runtime.runtimeConfig.setPreferredChatProvider(value, interaction.user.id);
+    }
+    await interaction.update(await buildLlmPanelResponse(runtime, "chat", interaction.guildId));
     return;
   }
   if (action === "model") {
@@ -1830,7 +1850,7 @@ async function handleCorePromptPanelSelect(runtime, interaction, isOwner) {
     return;
   }
   const selectedKey = (0, import_core.isCorePromptKey)(interaction.values[0]) ? interaction.values[0] : "common_core_base";
-  await interaction.update(await buildCorePromptPanelResponse(runtime, interaction.guildId, selectedKey));
+  await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, selectedKey);
 }
 async function handleCorePromptPanelButton(runtime, interaction, isOwner) {
   if (!interaction.guildId) {
@@ -1844,14 +1864,27 @@ async function handleCorePromptPanelButton(runtime, interaction, isOwner) {
   const [, action, rawKey] = interaction.customId.split(":");
   const selectedKey = (0, import_core.isCorePromptKey)(rawKey) ? rawKey : "common_core_base";
   if (action === "edit") {
-    await interaction.showModal(
-      buildCorePromptModal(await runtime.runtimeConfig.getCorePromptTemplate(interaction.guildId, selectedKey))
-    );
+    try {
+      await interaction.showModal(
+        buildCorePromptModal(await runtime.runtimeConfig.getCorePromptTemplate(interaction.guildId, selectedKey))
+      );
+    } catch (error) {
+      console.error("[core-prompt-panel] failed to open edit modal", {
+        guildId: interaction.guildId,
+        selectedKey,
+        error: error instanceof Error ? { message: error.message, stack: error.stack } : error
+      });
+      const message = error instanceof Error ? error.message : "unknown error";
+      await interaction.reply({
+        content: `\u041D\u0435 \u0441\u043C\u043E\u0433\u043B\u0430 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440: ${message}`,
+        flags: import_discord3.MessageFlags.Ephemeral
+      });
+    }
     return;
   }
   if (action === "reset") {
     await runtime.runtimeConfig.resetCorePromptTemplate(interaction.guildId, selectedKey);
-    await interaction.update(await buildCorePromptPanelResponse(runtime, interaction.guildId, selectedKey));
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, selectedKey);
     return;
   }
   if (action === "back") {
@@ -2045,7 +2078,7 @@ async function handleHoriModalSubmit(runtime, interaction) {
     return;
   }
   if (modalKind === "relationship") {
-    const [roastLevel, praiseBias, interruptPriority] = readNumberList(interaction.fields.getTextInputValue("levels"));
+    const [roastLevel, praiseBias, interruptPriority, score] = readNumberList(interaction.fields.getTextInputValue("levels"));
     const [closeness, trustLevel, familiarity, proactivityPreference] = readNumberList(interaction.fields.getTextInputValue("signals"));
     const [doNotMock, doNotInitiate, ...topics] = interaction.fields.getTextInputValue("switches").split(",").map((part) => part.trim()).filter(Boolean);
     const userId = interaction.fields.getTextInputValue("userId").trim();
@@ -2056,6 +2089,7 @@ async function handleHoriModalSubmit(runtime, interaction) {
         roastLevel: readIntInRange(roastLevel, 0, 5),
         praiseBias: readIntInRange(praiseBias, 0, 5),
         interruptPriority: readIntInRange(interruptPriority, 0, 5),
+        relationshipScore: readFloatInRange(score, -1.5, 3),
         doNotMock: readOptionalBoolean(doNotMock),
         doNotInitiate: readOptionalBoolean(doNotInitiate),
         protectedTopics: topics.length ? topics : void 0,
@@ -2210,7 +2244,25 @@ async function handleHoriPanelAction(runtime, interaction, isOwner, isModerator)
     return;
   }
   if (action === "core_prompt_panel") {
-    await interaction.update(await buildCorePromptPanelResponse(runtime, interaction.guildId, "common_core_base"));
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, "common_core_base");
+    return;
+  }
+  if (action === "v5_controls") {
+    if (!isOwner) {
+      await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: import_discord3.MessageFlags.Ephemeral });
+      return;
+    }
+    try {
+      await interaction.update(await buildV5ControlsPanelResponse(runtime, interaction.guildId));
+    } catch (error) {
+      console.error("[v5-panel] failed to open", { error });
+      const message = error instanceof Error ? error.message : "unknown error";
+      await interaction.reply({ content: `\u041D\u0435 \u0441\u043C\u043E\u0433\u043B\u0430 \u043E\u0442\u043A\u0440\u044B\u0442\u044C V5 Controls: ${message}`, flags: import_discord3.MessageFlags.Ephemeral });
+    }
+    return;
+  }
+  if (action === "v5_controls_back") {
+    await interaction.update(buildHoriPanelResponse("persona", isOwner, isModerator));
     return;
   }
   if (action.startsWith("state_")) {
@@ -2571,7 +2623,8 @@ function getHoriTabActions(tab, isOwner, isModerator) {
     ],
     persona: [
       { id: "style_edit_modal", label: "\u0422\u0435\u043A\u0441\u0442 \u0447\u0430\u0442\u0430", emoji: "\u270F\uFE0F", modOnly: true, style: import_discord3.ButtonStyle.Primary },
-      { id: "core_prompt_panel", label: "Core prompts", emoji: "\u{1F9E9}", ownerOnly: true, style: import_discord3.ButtonStyle.Primary }
+      { id: "core_prompt_panel", label: "Core prompts", emoji: "\u{1F9E9}", ownerOnly: true, style: import_discord3.ButtonStyle.Primary },
+      { id: "v5_controls", label: "V5 Controls", emoji: "\u{1F39B}\uFE0F", ownerOnly: true, style: import_discord3.ButtonStyle.Primary }
     ],
     behavior: [
       { id: "read_chat_on", label: "\u0427\u0438\u0442\u0430\u0442\u044C \u0447\u0430\u0442", emoji: "\u{1F4D6}", modOnly: true, style: import_discord3.ButtonStyle.Primary },
@@ -2691,7 +2744,7 @@ function inferTabForHoriAction(action) {
   if (action.startsWith("search") || action.startsWith("channel") || action === "read_chat_on" || action === "read_chat_off" || action.startsWith("topic") || action.startsWith("queue") || action === "summary_current") return "channels";
   if (action.startsWith("llm")) return "llm";
   if (action.startsWith("lockdown") || action === "power_panel" || action === "state_panel" || action === "ai_url_modal" || action.startsWith("debug") || action === "feature_status" || action === "stats_week" || action.startsWith("state_")) return "system";
-  if (action === "core_prompt_panel" || action.startsWith("style") || action.startsWith("mood")) return "persona";
+  if (action === "core_prompt_panel" || action === "v5_controls" || action === "v5_controls_back" || action.startsWith("style") || action.startsWith("mood")) return "persona";
   if (action.startsWith("natural") || action === "media_list" || action === "media_sync") return "behavior";
   return "main";
 }
@@ -2797,10 +2850,11 @@ function buildHoriDetailEmbed(title, body) {
   return new import_discord3.EmbedBuilder().setTitle(title).setColor(2829617).setDescription(clipPanelText(body));
 }
 async function buildLlmPanelResponse(runtime, selectedSlot = "chat", guildId) {
-  const [status, hydeStatus, embedStatus] = await Promise.all([
+  const [status, hydeStatus, embedStatus, chatProviderStatus] = await Promise.all([
     runtime.runtimeConfig.getModelRoutingStatus(),
     runtime.runtimeConfig.getMemoryHydeStatus(),
-    runtime.runtimeConfig.getOpenAIEmbeddingDimensionsStatus()
+    runtime.runtimeConfig.getOpenAIEmbeddingDimensionsStatus(),
+    runtime.runtimeConfig.getPreferredChatProviderStatus()
   ]);
   const activeSlot = import_llm2.MODEL_ROUTING_SLOTS.includes(selectedSlot) ? selectedSlot : "chat";
   const activeModel = status.slots[activeSlot];
@@ -2813,6 +2867,7 @@ async function buildLlmPanelResponse(runtime, selectedSlot = "chat", guildId) {
     `Selected slot: **${activeSlot}** -> \`${activeModel}\``
   ] : status.provider === "router" ? [
     "Routing: **deterministic router**",
+    `Active chat provider: **${chatProviderStatus.value}**`,
     `OpenAI fallback only: chat=\`${status.legacyFallback.chat}\`, smart=\`${status.legacyFallback.smart}\``
   ] : [
     "Routing: **ollama env models**",
@@ -2824,6 +2879,7 @@ async function buildLlmPanelResponse(runtime, selectedSlot = "chat", guildId) {
   } : status.provider === "router" ? {
     name: "Provider models",
     value: clipFieldText([
+      `deepseek=${runtime.env.DEEPSEEK_MODEL}`,
       `geminiFlash=${runtime.env.GEMINI_FLASH_MODEL}`,
       `geminiPro=${runtime.env.GEMINI_PRO_MODEL}`,
       `cloudflare=${runtime.env.CF_MODEL}`,
@@ -2858,6 +2914,7 @@ Routing JSON \u0431\u044B\u043B \u043F\u0440\u043E\u0438\u0433\u043D\u043E\u0440
         ...status.controlsNote ? [status.controlsNote] : [],
         "",
         `Embeddings: \`${embeddingStatus}\``,
+        status.provider === "router" ? `Active chat provider: **${chatProviderStatus.value}** (${chatProviderStatus.source})` : null,
         `HyDE retrieval: **${hydeStatus.value ? "on" : "off"}** (${hydeStatus.source})`,
         embedStatus.source === "unsupported" ? "OpenAI embedding dimensions: n/a for Ollama" : `OpenAI embedding dimensions: **${embedStatus.value}** (${embedStatus.source})`,
         "Backfill before a real dim cutover: `pnpm reembed:openai --target-dimensions 512 --apply`.",
@@ -2887,7 +2944,8 @@ embed=${embeddingStatus}`),
       controlsEditable: status.controlsEditable,
       hydeEnabled: hydeStatus.value,
       supportsEmbeddingDimensions: embedStatus.source !== "unsupported",
-      embedDimensions: embedStatus.source === "unsupported" ? void 0 : embedStatus.value
+      embedDimensions: embedStatus.source === "unsupported" ? void 0 : embedStatus.value,
+      preferredChatProvider: chatProviderStatus.value
     })
   };
 }
@@ -2917,17 +2975,27 @@ function buildLlmPanelRows(activePreset, activeSlot, activeModel, runtime) {
       }
     ] : []
   ];
+  const presetOrChatProviderRow = runtime.provider === "router" ? new import_discord3.ActionRowBuilder().addComponents(
+    new import_discord3.StringSelectMenuBuilder().setCustomId(`${LLM_PANEL_PREFIX}:chat_provider`).setPlaceholder("Active chat provider (router)").addOptions(
+      ...import_llm2.PREFERRED_CHAT_PROVIDER_VALUES.map((provider) => ({
+        label: provider === "auto" ? "auto (DeepSeek \u2192 Gemini \u2192 CF \u2192 GitHub \u2192 OpenAI)" : provider,
+        value: provider,
+        description: provider === "auto" ? "Default cascade with DeepSeek as primary" : `Force ${provider} as primary chat provider`,
+        default: provider === runtime.preferredChatProvider
+      }))
+    )
+  ) : new import_discord3.ActionRowBuilder().addComponents(
+    new import_discord3.StringSelectMenuBuilder().setCustomId(`${LLM_PANEL_PREFIX}:preset`).setPlaceholder(runtime.controlsEditable ? "LLM preset" : "LLM preset (informational-only)").setDisabled(!runtime.controlsEditable).addOptions(
+      ...Object.entries(import_llm2.MODEL_ROUTING_PRESETS).map(([value, preset]) => ({
+        label: preset.label,
+        value,
+        description: preset.description.slice(0, 100),
+        default: value === activePreset
+      }))
+    )
+  );
   return [
-    new import_discord3.ActionRowBuilder().addComponents(
-      new import_discord3.StringSelectMenuBuilder().setCustomId(`${LLM_PANEL_PREFIX}:preset`).setPlaceholder(runtime.controlsEditable ? "LLM preset" : "LLM preset (informational-only)").setDisabled(!runtime.controlsEditable).addOptions(
-        ...Object.entries(import_llm2.MODEL_ROUTING_PRESETS).map(([value, preset]) => ({
-          label: preset.label,
-          value,
-          description: preset.description.slice(0, 100),
-          default: value === activePreset
-        }))
-      )
-    ),
+    presetOrChatProviderRow,
     new import_discord3.ActionRowBuilder().addComponents(
       new import_discord3.StringSelectMenuBuilder().setCustomId(`${LLM_PANEL_PREFIX}:slot`).setPlaceholder(runtime.controlsEditable ? "LLM slot" : "Inspect slot (read-only)").setDisabled(!runtime.controlsEditable).addOptions(
         ...import_llm2.MODEL_ROUTING_SLOTS.map((slot) => ({
@@ -3006,6 +3074,24 @@ async function buildLlmTelemetry(runtime, guildId) {
 }
 async function buildCorePromptPanelResponse(runtime, guildId, selectedKey) {
   const templates = await runtime.runtimeConfig.listCorePromptTemplates(guildId);
+  if (!templates.length) {
+    return {
+      content: "",
+      embeds: [
+        new import_discord3.EmbedBuilder().setTitle("\u{1F9E9} Hori Core Prompts").setColor(15548997).setDescription(
+          [
+            "\u0421\u043F\u0438\u0441\u043E\u043A core prompts \u043F\u0443\u0441\u0442\u043E\u0439. \u0412\u043E\u0437\u043C\u043E\u0436\u043D\u043E \u043D\u0435 \u043D\u0430\u043A\u0430\u0442\u0438\u043B\u0438\u0441\u044C \u043C\u0438\u0433\u0440\u0430\u0446\u0438\u0438 \u0411\u0414 \u0438\u043B\u0438 \u0441\u0431\u043E\u0440\u043A\u0430 \u0443\u0441\u0442\u0430\u0440\u0435\u043B\u0430.",
+            `Guild: \`${guildId}\``
+          ].join("\n")
+        )
+      ],
+      components: [
+        new import_discord3.ActionRowBuilder().addComponents(
+          new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:panel_home`).setLabel("Panel").setEmoji("\u{1F3E0}").setStyle(import_discord3.ButtonStyle.Secondary)
+        )
+      ]
+    };
+  }
   const selected = templates.find((entry) => entry.key === selectedKey) ?? templates[0];
   const overriddenCount = templates.filter((entry) => entry.source === "runtime_setting").length;
   const lines = templates.map((entry) => {
@@ -3013,6 +3099,7 @@ async function buildCorePromptPanelResponse(runtime, guildId, selectedKey) {
     const source = entry.source === "runtime_setting" ? "override" : "default";
     return `${marker} ${entry.label} \xB7 ${source}`;
   });
+  const updatedAtIso = selected.updatedAt instanceof Date ? selected.updatedAt.toISOString() : selected.updatedAt ? new Date(selected.updatedAt).toISOString() : null;
   return {
     content: "",
     embeds: [
@@ -3030,7 +3117,7 @@ async function buildCorePromptPanelResponse(runtime, guildId, selectedKey) {
           value: clipFieldText([
             selected.description,
             "",
-            selected.updatedAt ? `updated=${selected.updatedAt.toISOString()}${selected.updatedBy ? ` by ${selected.updatedBy}` : ""}` : "using built-in default",
+            updatedAtIso ? `updated=${updatedAtIso}${selected.updatedBy ? ` by ${selected.updatedBy}` : ""}` : "using built-in default",
             "",
             selected.content
           ].join("\n"), 1024)
@@ -3039,6 +3126,29 @@ async function buildCorePromptPanelResponse(runtime, guildId, selectedKey) {
     ],
     components: buildCorePromptPanelRows(selected)
   };
+}
+async function safeCorePromptPanelUpdate(runtime, interaction, guildId, selectedKey) {
+  try {
+    await interaction.update(await buildCorePromptPanelResponse(runtime, guildId, selectedKey));
+  } catch (error) {
+    console.error("[core-prompt-panel] failed to render", {
+      guildId,
+      selectedKey,
+      error: error instanceof Error ? { message: error.message, stack: error.stack } : error
+    });
+    const message = error instanceof Error ? error.message : "unknown error";
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({
+        content: `\u041D\u0435 \u0441\u043C\u043E\u0433\u043B\u0430 \u043E\u0442\u043A\u0440\u044B\u0442\u044C Core prompts: ${message}`,
+        flags: import_discord3.MessageFlags.Ephemeral
+      });
+    } else {
+      await interaction.reply({
+        content: `\u041D\u0435 \u0441\u043C\u043E\u0433\u043B\u0430 \u043E\u0442\u043A\u0440\u044B\u0442\u044C Core prompts: ${message}`,
+        flags: import_discord3.MessageFlags.Ephemeral
+      });
+    }
+  }
 }
 function buildCorePromptPanelRows(selected) {
   return [
@@ -3059,6 +3169,128 @@ function buildCorePromptPanelRows(selected) {
       new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:panel_home`).setLabel("Panel").setEmoji("\u{1F3E0}").setStyle(import_discord3.ButtonStyle.Secondary)
     )
   ];
+}
+var MEMORY_MODE_OPTIONS = [
+  { value: "OFF", label: "OFF", description: "\u041F\u0430\u043C\u044F\u0442\u044C \u043D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u044F\u0435\u0442\u0441\u044F" },
+  { value: "TRUSTED_ONLY", label: "TRUSTED_ONLY", description: "\u0422\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u0435\u0439" },
+  { value: "ACTIVE_OPT_IN", label: "ACTIVE_OPT_IN", description: "\u0410\u043A\u0442\u0438\u0432\u043D\u0430; \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C \u043E\u0442\u043A\u043B\u044E\u0447\u0430\u0435\u0442 \u0441\u0430\u043C" },
+  { value: "ADMIN_SELECTED", label: "ADMIN_SELECTED", description: "\u0422\u043E\u043B\u044C\u043A\u043E \u043F\u043E \u044F\u0432\u043D\u043E\u043C\u0443 \u0432\u044B\u0431\u043E\u0440\u0443 /\u0437\u0430\u043F\u043E\u043C\u043D\u0438" }
+];
+var GROWTH_MODE_OPTIONS = [
+  { value: "OFF", label: "OFF", description: "\u041E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u044F \u043D\u0435 \u043C\u0435\u043D\u044F\u044E\u0442\u0441\u044F \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438" },
+  { value: "MANUAL_REVIEW", label: "MANUAL_REVIEW", description: "\u041E\u0446\u0435\u043D\u043A\u0430 \u0441\u043E\u0445\u0440\u0430\u043D\u044F\u0435\u0442\u0441\u044F, \u043E\u0436\u0438\u0434\u0430\u0435\u0442 \u0440\u0435\u0432\u044C\u044E" },
+  { value: "TRUSTED_AUTO", label: "TRUSTED_AUTO", description: "\u0410\u0432\u0442\u043E-\u0440\u043E\u0441\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445" },
+  { value: "FULL_AUTO", label: "FULL_AUTO", description: "\u041F\u043E\u043B\u043D\u043E\u0441\u0442\u044C\u044E \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438 (A/B/V evaluator)" }
+];
+var TIMEOUT_MINUTES_OPTIONS = [1, 5, 10, 15];
+async function buildV5ControlsPanelResponse(runtime, guildId) {
+  const settings = await runtime.runtimeConfig.getRuntimeSettings();
+  const memMode = settings.memoryMode ?? "OFF";
+  const growthMode = settings.relationshipGrowthMode ?? "OFF";
+  const timeoutMin = settings.maxTimeoutMinutes ?? 15;
+  const memDesc = MEMORY_MODE_OPTIONS.find((o) => o.value === memMode)?.description ?? memMode;
+  const growthDesc = GROWTH_MODE_OPTIONS.find((o) => o.value === growthMode)?.description ?? growthMode;
+  return {
+    content: "",
+    embeds: [
+      new import_discord3.EmbedBuilder().setTitle("\u{1F39B}\uFE0F V5 Controls").setColor(15418782).setDescription([
+        "\u0423\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435 \u0442\u0440\u0435\u043C\u044F V5-\u0440\u0435\u0436\u0438\u043C\u0430\u043C\u0438: \u043F\u0430\u043C\u044F\u0442\u044C, \u0440\u043E\u0441\u0442 \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0439, \u0442\u0430\u0439\u043C\u0430\u0443\u0442 \u0437\u0430 \u0430\u0433\u0440\u0435\u0441\u0441\u0438\u044E.",
+        `Guild: \`${guildId}\``
+      ].join("\n")).addFields(
+        { name: "Memory mode", value: `\`${memMode}\` \u2014 ${memDesc}`, inline: false },
+        { name: "Relationship growth", value: `\`${growthMode}\` \u2014 ${growthDesc}`, inline: false },
+        { name: "Max timeout", value: `${timeoutMin} \u043C\u0438\u043D \xB7 Stage 4 aggression Discord timeout`, inline: false }
+      )
+    ],
+    components: [
+      new import_discord3.ActionRowBuilder().addComponents(
+        new import_discord3.StringSelectMenuBuilder().setCustomId(`${V5_PANEL_PREFIX}:memory_mode`).setPlaceholder("Memory mode").addOptions(
+          MEMORY_MODE_OPTIONS.map((o) => ({
+            label: o.label,
+            value: o.value,
+            description: o.description,
+            default: o.value === memMode
+          }))
+        )
+      ),
+      new import_discord3.ActionRowBuilder().addComponents(
+        new import_discord3.StringSelectMenuBuilder().setCustomId(`${V5_PANEL_PREFIX}:growth_mode`).setPlaceholder("Relationship growth mode").addOptions(
+          GROWTH_MODE_OPTIONS.map((o) => ({
+            label: o.label,
+            value: o.value,
+            description: o.description,
+            default: o.value === growthMode
+          }))
+        )
+      ),
+      new import_discord3.ActionRowBuilder().addComponents(
+        new import_discord3.StringSelectMenuBuilder().setCustomId(`${V5_PANEL_PREFIX}:timeout_minutes`).setPlaceholder("Max timeout minutes (Stage 4)").addOptions(
+          TIMEOUT_MINUTES_OPTIONS.map((min) => ({
+            label: `${min} \u043C\u0438\u043D`,
+            value: String(min),
+            default: min === timeoutMin
+          }))
+        )
+      ),
+      new import_discord3.ActionRowBuilder().addComponents(
+        new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:v5_controls_back`).setLabel("Persona").setEmoji("\u{1F3AD}").setStyle(import_discord3.ButtonStyle.Secondary),
+        new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:panel_home`).setLabel("Panel").setEmoji("\u{1F3E0}").setStyle(import_discord3.ButtonStyle.Secondary)
+      )
+    ]
+  };
+}
+async function handleV5PanelSelect(runtime, interaction, isOwner) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043D\u0443\u0442\u0440\u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  if (!isOwner) {
+    await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: import_discord3.MessageFlags.Ephemeral });
+    return;
+  }
+  const [, field] = interaction.customId.split(":");
+  const value = interaction.values[0];
+  try {
+    if (field === "memory_mode") {
+      const mode = MEMORY_MODE_OPTIONS.find((o) => o.value === value);
+      if (!mode) {
+        await interaction.reply({ content: "\u041D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u044B\u0439 memory mode.", flags: import_discord3.MessageFlags.Ephemeral });
+        return;
+      }
+      await runtime.slashAdmin.setMemoryMode(mode.value, interaction.user.id);
+    } else if (field === "growth_mode") {
+      const mode = GROWTH_MODE_OPTIONS.find((o) => o.value === value);
+      if (!mode) {
+        await interaction.reply({ content: "\u041D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u044B\u0439 relationship growth mode.", flags: import_discord3.MessageFlags.Ephemeral });
+        return;
+      }
+      await runtime.slashAdmin.setRelationshipGrowthMode(mode.value, interaction.user.id);
+    } else if (field === "timeout_minutes") {
+      const minutes = parseInt(value, 10);
+      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 15) {
+        await interaction.reply({ content: "\u041D\u0435\u0432\u0435\u0440\u043D\u043E\u0435 \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u0442\u0430\u0439\u043C\u0430\u0443\u0442\u0430.", flags: import_discord3.MessageFlags.Ephemeral });
+        return;
+      }
+      await runtime.slashAdmin.setMaxTimeoutMinutes(minutes, interaction.user.id);
+    } else {
+      await interaction.reply({ content: "\u041D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u044B\u0439 V5 control.", flags: import_discord3.MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.update(await buildV5ControlsPanelResponse(runtime, interaction.guildId));
+  } catch (error) {
+    console.error("[v5-panel] failed to apply setting", {
+      guildId: interaction.guildId,
+      field,
+      value,
+      error: error instanceof Error ? { message: error.message, stack: error.stack } : error
+    });
+    const message = error instanceof Error ? error.message : "unknown error";
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({ content: `\u041D\u0435 \u0441\u043C\u043E\u0433\u043B\u0430 \u043F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0443: ${message}`, flags: import_discord3.MessageFlags.Ephemeral });
+    } else {
+      await interaction.reply({ content: `\u041D\u0435 \u0441\u043C\u043E\u0433\u043B\u0430 \u043F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0443: ${message}`, flags: import_discord3.MessageFlags.Ephemeral });
+    }
+  }
 }
 function extractTraceLlmCalls(debugTrace) {
   if (!debugTrace || typeof debugTrace !== "object") {
@@ -3290,9 +3522,10 @@ function buildSearchModal() {
 }
 function buildCorePromptModal(current) {
   const modal = new import_discord3.ModalBuilder().setCustomId(`${HORI_MODAL_PREFIX}:core-prompt:${current.key}`).setTitle(current.label.slice(0, 45));
+  const safeContent = (current.content ?? "").slice(0, 4e3);
   modal.addComponents(
     new import_discord3.ActionRowBuilder().addComponents(
-      new import_discord3.TextInputBuilder().setCustomId("content").setLabel("\u0422\u0435\u043A\u0441\u0442 prompt").setPlaceholder((0, import_core.getCorePromptDefaultContent)(current.key).slice(0, 100)).setRequired(true).setValue(current.content).setMaxLength(4e3).setStyle(import_discord3.TextInputStyle.Paragraph)
+      new import_discord3.TextInputBuilder().setCustomId("content").setLabel("\u0422\u0435\u043A\u0441\u0442 prompt").setPlaceholder((0, import_core.getCorePromptDefaultContent)(current.key).slice(0, 100)).setRequired(true).setValue(safeContent).setMaxLength(4e3).setStyle(import_discord3.TextInputStyle.Paragraph)
     )
   );
   return modal;
@@ -3307,7 +3540,7 @@ function buildRelationshipModal() {
       new import_discord3.TextInputBuilder().setCustomId("toneBias").setLabel("toneBias").setPlaceholder("neutral / friendly / sharp / playful").setRequired(false).setMaxLength(40).setStyle(import_discord3.TextInputStyle.Short)
     ),
     new import_discord3.ActionRowBuilder().addComponents(
-      new import_discord3.TextInputBuilder().setCustomId("levels").setLabel("roast,praise,interrupt").setPlaceholder("2,1,0").setRequired(false).setMaxLength(30).setStyle(import_discord3.TextInputStyle.Short)
+      new import_discord3.TextInputBuilder().setCustomId("levels").setLabel("roast,praise,interrupt,score").setPlaceholder("2,1,0,1.5  (score: -1.5..3)").setRequired(false).setMaxLength(40).setStyle(import_discord3.TextInputStyle.Short)
     ),
     new import_discord3.ActionRowBuilder().addComponents(
       new import_discord3.TextInputBuilder().setCustomId("signals").setLabel("closeness,trust,familiarity,proactivity").setPlaceholder("0.6,0.5,0.7,0.5").setRequired(false).setMaxLength(60).setStyle(import_discord3.TextInputStyle.Short)
@@ -3389,6 +3622,12 @@ function readNumberList(value) {
 }
 function readIntInRange(value, min, max) {
   if (value === void 0 || !Number.isInteger(value)) {
+    return void 0;
+  }
+  return Math.max(min, Math.min(max, value));
+}
+function readFloatInRange(value, min, max) {
+  if (value === void 0 || !Number.isFinite(value)) {
     return void 0;
   }
   return Math.max(min, Math.min(max, value));
@@ -3718,6 +3957,49 @@ async function shouldAutoInterject(runtime, message, routingConfig) {
   }
   return true;
 }
+async function tryHandleKnowledgeQuery(runtime, message, envelope) {
+  const trimmed = message.content.trimStart();
+  if (!trimmed) return false;
+  const firstChar = Array.from(trimmed)[0];
+  if (!firstChar || /[\p{L}\p{N}_\s]/u.test(firstChar)) return false;
+  let match = null;
+  try {
+    match = await runtime.knowledge.matchTrigger(envelope.guildId, message.content);
+  } catch (error) {
+    runtime.logger.warn(
+      { guildId: envelope.guildId, error: error.message },
+      "knowledge trigger lookup failed"
+    );
+    return false;
+  }
+  if (!match) return false;
+  if (!match.question) {
+    await sendReply(message, `\u0421\u043F\u0440\u043E\u0441\u0438 \u0447\u0442\u043E-\u043D\u0438\u0431\u0443\u0434\u044C \u043F\u043E \xAB${match.cluster.title}\xBB \u043F\u043E\u0441\u043B\u0435 \xAB${match.cluster.trigger}\xBB.`);
+    return true;
+  }
+  try {
+    const result = await runtime.knowledge.answer(match.cluster, match.question);
+    const replyText = result.answer.trim() || "\u043D\u0435\u0442 \u0442\u0430\u043A\u043E\u0439 \u0438\u043D\u0444\u044B";
+    await sendReply(message, replyText);
+    runtime.logger.info(
+      {
+        guildId: envelope.guildId,
+        clusterCode: match.cluster.code,
+        chunks: result.retrievedChunkCount,
+        fallback: result.fallback,
+        model: result.model
+      },
+      "knowledge query answered"
+    );
+  } catch (error) {
+    runtime.logger.error(
+      { guildId: envelope.guildId, code: match.cluster.code, error },
+      "knowledge answer failed"
+    );
+    await sendReply(message, "\u0421\u0435\u043A, \u044F \u0441\u043F\u043E\u0442\u043A\u043D\u0443\u043B\u0430\u0441\u044C \u043E \u0432\u0438\u043A\u0438. \u041F\u043E\u0432\u0442\u043E\u0440\u0438 \u0432\u043E\u043F\u0440\u043E\u0441.");
+  }
+  return true;
+}
 async function routeMessage(runtime, message) {
   if (!message.inGuild() || message.author.bot || !runtime.client.user) {
     return;
@@ -3765,6 +4047,9 @@ async function routeMessage(runtime, message) {
   void enqueueBackgroundJobs(runtime, envelope).catch((error) => {
     runtime.logger.warn({ messageId: envelope.messageId, error }, "background job scheduling crashed");
   });
+  if (!routingConfig.channelPolicy.isMuted && routingConfig.channelPolicy.allowBotReplies && await tryHandleKnowledgeQuery(runtime, message, envelope)) {
+    return;
+  }
   if (!explicitInvocation && !autoInterject) {
     return;
   }
@@ -3856,7 +4141,15 @@ async function processInvocation(runtime, message, routingConfig, triggerSource,
       return;
     }
     if (queueTrace.action === "busy_ack") {
-      await sendReply(message, "\u0429\u0430, \u044F \u0435\u0449\u0451 \u043F\u0440\u043E\u0448\u043B\u043E\u0435 \u0434\u043E\u0436\u0451\u0432\u044B\u0432\u0430\u044E. \u041F\u043E\u0434\u043E\u0436\u0434\u0438 \u0447\u0443\u0442\u044C.");
+      const relationship = await runtime.relationshipService.getRelationship(envelope.guildId, envelope.userId).catch(() => null);
+      const stage = queueTrace.reason === "already_queued" ? "followup" : "initial";
+      const phrase = runtime.queuePhrasePool.pickPhrase({
+        guildId: envelope.guildId,
+        userId: envelope.userId,
+        score: relationship?.relationshipScore ?? 0,
+        stage
+      });
+      await sendReply(message, phrase);
       return;
     }
     queueItemId = queueTrace.itemId ?? null;
@@ -4114,7 +4407,11 @@ async function bootstrapBot() {
   const moodService = new import_core3.MoodService(prisma);
   const mediaReactionService = new import_core3.MediaReactionService(prisma);
   const replyQueueService = new import_core3.ReplyQueueService(prisma, env.REPLY_QUEUE_BUSY_TTL_SEC);
-  const contextService = new import_memory2.ContextService(prisma, summaryService, profileService, relationshipService, retrievalService, activeMemoryService, redisReady ? redis : void 0);
+  const queuePhrasePoolService = new import_core3.QueuePhrasePoolService();
+  const flashTrollingService = new import_core3.FlashTrollingService();
+  const promptSlotService = new import_memory2.PromptSlotService(prisma);
+  const sessionBufferService = redisReady ? new import_memory2.SessionBufferService(prisma, redis) : new import_memory2.SessionBufferService(prisma);
+  const contextService = new import_memory2.ContextService(prisma, summaryService, profileService, relationshipService, retrievalService, activeMemoryService, redisReady ? redis : void 0, sessionBufferService);
   const { client: llmClient } = (0, import_core3.createRuntimeLlmClient)(env, logger, runtimeConfig, "bot");
   const modelRouter = new import_llm3.ModelRouter(env);
   const embeddingAdapter = new import_llm3.EmbeddingAdapter(llmClient, modelRouter);
@@ -4122,6 +4419,25 @@ async function bootstrapBot() {
   const searchClient = new import_search.BraveSearchClient(env, logger, searchCache);
   const toolOrchestrator = new import_llm3.ToolOrchestrator(llmClient, logger);
   const ingestService = new import_analytics2.MessageIngestService(prisma, logger);
+  const knowledgeService = new import_core3.KnowledgeService({
+    prisma,
+    logger,
+    defaultAnswerModel: env.OPENAI_MODEL,
+    embed: async (text) => {
+      const embeddingMeta = modelRouter.pickEmbeddingModel({});
+      const vector = await embeddingAdapter.embedOne(text, { dimensions: embeddingMeta.dimensions });
+      return { vector, model: embeddingMeta.model, dimensions: embeddingMeta.dimensions ?? vector.length };
+    },
+    chat: async ({ model, messages, maxTokens }) => {
+      const response = await llmClient.chat({
+        model,
+        messages,
+        maxTokens,
+        metadata: { purpose: "knowledge_qa" }
+      });
+      return { content: response.message?.content ?? "", model: response.routing?.model ?? model };
+    }
+  });
   const slashAdmin = new import_core3.SlashAdminService(
     prisma,
     analytics,
@@ -4153,7 +4469,9 @@ async function bootstrapBot() {
     affinity: affinityService,
     mood: moodService,
     media: mediaReactionService,
-    reflection: reflectionService
+    reflection: reflectionService,
+    sessionBuffer: sessionBufferService,
+    promptSlots: promptSlotService
   });
   const runtime = {
     env,
@@ -4170,7 +4488,12 @@ async function bootstrapBot() {
     reflection: reflectionService,
     runtimeConfig,
     orchestrator,
-    replyQueue: replyQueueService
+    replyQueue: replyQueueService,
+    queuePhrasePool: queuePhrasePoolService,
+    flashTrolling: flashTrollingService,
+    relationshipService,
+    promptSlots: promptSlotService,
+    knowledge: knowledgeService
   };
   registerEvents(runtime);
   await client.login(env.DISCORD_TOKEN);

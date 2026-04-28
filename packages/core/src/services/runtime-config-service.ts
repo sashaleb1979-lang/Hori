@@ -5,6 +5,7 @@ import {
   isModelRoutingModelId,
   isModelRoutingPresetName,
   isModelRoutingSlot,
+  isPreferredChatProviderValue,
   MODEL_ROUTING_SETTING_KEY,
   parseStoredModelRouting,
   resolveModelRouting,
@@ -15,6 +16,7 @@ import {
   type ModelRoutingModelId,
   type ModelRoutingPresetName,
   type ModelRoutingSlot,
+  type PreferredChatProviderValue,
   type ResolvedModelRouting
 } from "@hori/llm";
 import type { AppPrismaClient, FeatureFlags, MemoryMode, PersonaSettings, RelationshipGrowthMode, StylePresetMode } from "@hori/shared";
@@ -63,6 +65,7 @@ export const POWER_PROFILE_SETTING_KEY = "power.profile";
 export const OPENAI_EMBED_DIMENSIONS_SETTING_KEY = "llm.openai_embed_dimensions";
 export const MEMORY_HYDE_SETTING_KEY = "memory.hyde_enabled";
 export const AI_ROUTER_STATE_SETTING_KEY = "llm.ai_router_state";
+export const PREFERRED_CHAT_PROVIDER_SETTING_KEY = "llm.active_chat_provider";
 const CORE_PROMPT_SETTING_PREFIX = "prompt.core";
 
 const RUNTIME_OVERRIDE_DEFINITIONS: Record<string, { field: keyof Omit<EffectiveRuntimeSettings, "powerProfile" | "modelRouting">; parse: (value: string) => string | number | boolean | undefined }> = {
@@ -494,6 +497,60 @@ export class RuntimeConfigService {
 
       return next;
     });
+  }
+
+  async getPreferredChatProvider(): Promise<PreferredChatProviderValue> {
+    const row = await this.getRuntimeSettingRow(PREFERRED_CHAT_PROVIDER_SETTING_KEY);
+    if (!row?.value) {
+      return "auto";
+    }
+
+    return isPreferredChatProviderValue(row.value) ? row.value : "auto";
+  }
+
+  async getPreferredChatProviderStatus(): Promise<RuntimeOverrideStatus<PreferredChatProviderValue>> {
+    const row = await this.getRuntimeSettingRow(PREFERRED_CHAT_PROVIDER_SETTING_KEY);
+    if (!row?.value || !isPreferredChatProviderValue(row.value)) {
+      return { value: "auto", source: "default" };
+    }
+
+    return {
+      value: row.value,
+      source: "runtime_setting",
+      updatedBy: row.updatedBy,
+      updatedAt: row.updatedAt
+    };
+  }
+
+  async setPreferredChatProvider(value: PreferredChatProviderValue, updatedBy?: string) {
+    if (!isPreferredChatProviderValue(value)) {
+      throw new Error(`Invalid preferred chat provider: ${value}`);
+    }
+
+    await this.prisma.runtimeSetting.upsert({
+      where: { key: PREFERRED_CHAT_PROVIDER_SETTING_KEY },
+      update: {
+        value,
+        updatedBy: updatedBy ?? null,
+        updatedAt: new Date()
+      },
+      create: {
+        key: PREFERRED_CHAT_PROVIDER_SETTING_KEY,
+        value,
+        updatedBy: updatedBy ?? null
+      }
+    });
+
+    this.invalidate();
+    return this.getPreferredChatProviderStatus();
+  }
+
+  async resetPreferredChatProvider() {
+    await this.prisma.runtimeSetting.deleteMany({
+      where: { key: PREFERRED_CHAT_PROVIDER_SETTING_KEY }
+    });
+    this.invalidate();
+    return this.getPreferredChatProviderStatus();
   }
 
   async getGuildSettings(guildId: string): Promise<PersonaSettings> {

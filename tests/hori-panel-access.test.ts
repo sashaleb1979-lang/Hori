@@ -125,6 +125,33 @@ function createLlmPanelRuntimeSelectInteraction(userId: string, value: string) {
   };
 }
 
+function createLlmPanelChatProviderSelectInteraction(userId: string, value: string) {
+  const update = vi.fn();
+  const reply = vi.fn();
+
+  return {
+    guildId: "guild-1",
+    channelId: "channel-1",
+    customId: "llm-panel:chat_provider",
+    values: [value],
+    user: {
+      id: userId,
+      username: "tester",
+      globalName: "Tester"
+    },
+    memberPermissions: {
+      has: vi.fn().mockReturnValue(false)
+    },
+    update,
+    reply,
+    isButton: () => false,
+    isStringSelectMenu: () => true,
+    isModalSubmit: () => false,
+    isChatInputCommand: () => false,
+    isMessageContextMenuCommand: () => false
+  };
+}
+
 function createLlmPanelResetButtonInteraction(userId: string) {
   const update = vi.fn();
   const reply = vi.fn();
@@ -184,10 +211,13 @@ function createLlmPanelRuntime(
       getModelRoutingStatus: vi.fn().mockResolvedValue(resolvedModelRouting),
       getMemoryHydeStatus: vi.fn().mockResolvedValue(overrides?.hydeStatus ?? { value: true, source: "default" }),
       getOpenAIEmbeddingDimensionsStatus: vi.fn().mockResolvedValue(overrides?.embedStatus ?? { value: 768, source: "default" }),
+      getPreferredChatProviderStatus: vi.fn().mockResolvedValue({ value: "auto", source: "default" }),
       setModelPreset: vi.fn().mockResolvedValue(resolvedModelRouting),
       setModelSlot: vi.fn().mockResolvedValue(resolvedModelRouting),
       resetModelSlot: vi.fn().mockResolvedValue(resolvedModelRouting),
       resetModelRouting: vi.fn().mockResolvedValue(resolvedModelRouting),
+      setPreferredChatProvider: vi.fn().mockResolvedValue({ value: "openai", source: "runtime_setting" }),
+      resetPreferredChatProvider: vi.fn().mockResolvedValue({ value: "auto", source: "default" }),
       setMemoryHydeEnabled: vi.fn().mockResolvedValue({ value: false, source: "runtime_setting" }),
       setOpenAIEmbeddingDimensions: vi.fn().mockResolvedValue({ value: 512, source: "runtime_setting" }),
       resetMemoryHydeEnabled: vi.fn().mockResolvedValue({ value: true, source: "default" }),
@@ -447,6 +477,21 @@ describe("/hori panel access", () => {
     );
   });
 
+  it("lets the owner switch active router chat provider from the panel", async () => {
+    const interaction = createLlmPanelChatProviderSelectInteraction("owner-1", "openai");
+    const runtime = createLlmPanelRuntime(["owner-1"], undefined, { provider: "router" });
+
+    await routeInteraction(runtime, interaction as never);
+
+    expect(runtime.runtimeConfig.setPreferredChatProvider).toHaveBeenCalledWith("openai", "owner-1");
+    expect(interaction.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        embeds: expect.any(Array),
+        components: expect.any(Array)
+      })
+    );
+  });
+
   it("shows router-mode model controls as informational-only while keeping embedding runtime controls", async () => {
     const interaction = createLlmPanelButtonInteraction("owner-1");
     const runtime = createLlmPanelRuntime(
@@ -465,10 +510,12 @@ describe("/hori panel access", () => {
     const description = payload.embeds[0].data.description as string;
 
     expect(description).toContain("Routing: **deterministic router**");
+  expect(description).toContain("Active chat provider: **auto**");
     expect(description).toContain("Model controls: **informational-only**");
     expect(description).toContain("Ignored stored preset: `quality_openai`");
     expect(description).not.toContain("Preset: **legacy_env**");
-    expect(rows[0].components[0].disabled).toBe(true);
+  expect(rows[0].components[0].disabled).not.toBe(true);
+  expect(rows[0].components[0].options?.some((option: { value: string }) => option.value === "openai")).toBe(true);
     expect(rows[1].components[0].disabled).toBe(true);
     expect(rows[2].components[0].disabled).toBe(true);
     expect(rows[3].components[0].options?.some((option: { value: string }) => option.value === "embed:512")).toBe(true);

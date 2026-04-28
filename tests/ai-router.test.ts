@@ -295,6 +295,149 @@ describe("AiRouterClient", () => {
     expect(snapshot.fallbackCounts.cloudflare).toBe(1);
     expect(snapshot.enabledProviders.find((entry) => entry.provider === "gemini")?.enabled).toBe(true);
   });
+
+  it("respects panel-selected preferred chat provider over default DeepSeek", async () => {
+    const deepseek = createMockProvider("deepseek", async (request) => successResponse("deepseek", request.model, "ds"));
+    const gemini = createMockProvider("gemini", async (request) => successResponse("gemini", request.model, "flash"));
+    const cloudflare = createMockProvider("cloudflare", async (request) => successResponse("cloudflare", request.model, "cf"));
+    const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh"));
+    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa"));
+
+    const env = loadEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      AI_PROVIDER: "router",
+      DEEPSEEK_API_KEY: "deepseek-key",
+      GOOGLE_API_KEY: "google-key",
+      CF_ACCOUNT_ID: "cf-account",
+      CF_API_TOKEN: "cf-token",
+      GITHUB_TOKEN: "gh-token",
+      OPENAI_API_KEY: "openai-key"
+    });
+
+    const client = new AiRouterClient(env, createLogger(), {
+      stateStore: new InMemoryAiRouterStateStore(),
+      providers: { deepseek, gemini, cloudflare, github, openai } as never,
+      embedClient: { embed: vi.fn(), chat: vi.fn() } as never,
+      getPreferredChatProvider: async () => "openai" as const
+    });
+
+    const response = await client.chat({
+      model: "ignored",
+      messages: [{ role: "user", content: "коротко" }],
+      tools: [{
+        type: "function",
+        function: {
+          name: "web_search",
+          description: "search",
+          parameters: { type: "object" }
+        }
+      }],
+      metadata: { requestId: "req-pref-1", userKey: "u:p", complexityHint: "simple" }
+    });
+
+    expect(response.routing?.provider).toBe("openai");
+    expect(openai.send).toHaveBeenCalledWith(expect.objectContaining({
+      tools: [{
+        type: "function",
+        function: {
+          name: "web_search",
+          description: "search",
+          parameters: { type: "object" }
+        }
+      }]
+    }));
+    expect(deepseek.send).not.toHaveBeenCalled();
+    expect(gemini.send).not.toHaveBeenCalled();
+
+    const snapshot = await client.getStatusSnapshot();
+    expect(snapshot.preferredChatProvider).toBe("openai");
+    expect(snapshot.activeOrder[0]).toContain("openai:");
+  });
+
+  it("falls back to next provider when preferred chat provider fails", async () => {
+    const deepseek = createMockProvider("deepseek", async (request) => successResponse("deepseek", request.model, "ds"));
+    const gemini = createMockProvider("gemini", async () => {
+      throw new ProviderRequestError({ status: 500, message: "boom", provider: "gemini" });
+    });
+    const cloudflare = createMockProvider("cloudflare", async (request) => successResponse("cloudflare", request.model, "cf"));
+    const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh"));
+    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa"));
+
+    const env = loadEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      AI_PROVIDER: "router",
+      DEEPSEEK_API_KEY: "deepseek-key",
+      GOOGLE_API_KEY: "google-key",
+      CF_ACCOUNT_ID: "cf-account",
+      CF_API_TOKEN: "cf-token",
+      GITHUB_TOKEN: "gh-token",
+      OPENAI_API_KEY: "openai-key"
+    });
+
+    const client = new AiRouterClient(env, createLogger(), {
+      stateStore: new InMemoryAiRouterStateStore(),
+      providers: { deepseek, gemini, cloudflare, github, openai } as never,
+      embedClient: { embed: vi.fn(), chat: vi.fn() } as never,
+      getPreferredChatProvider: async () => "gemini" as const
+    });
+
+    const response = await client.chat({
+      model: "ignored",
+      messages: [{ role: "user", content: "коротко" }],
+      metadata: { requestId: "req-pref-2", userKey: "u:p2", complexityHint: "simple" }
+    });
+
+    expect(response.routing?.provider).toBe("deepseek");
+    expect(gemini.send).toHaveBeenCalled();
+  });
+
+  it("passes tool definitions to the selected primary chat provider", async () => {
+    const deepseek = createMockProvider("deepseek", async (request) => {
+      expect(request.tools).toEqual([
+        {
+          type: "function",
+          function: {
+            name: "web_search",
+            description: "search",
+            parameters: { type: "object" }
+          }
+        }
+      ]);
+      return successResponse("deepseek", request.model, "tool-ready");
+    });
+    const gemini = createMockProvider("gemini", async (request) => successResponse("gemini", request.model, "flash"));
+    const cloudflare = createMockProvider("cloudflare", async (request) => successResponse("cloudflare", request.model, "cf"));
+    const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh"));
+    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa"));
+
+    const client = createRouterWithEnv({
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
+      REDIS_URL: "redis://localhost:6379",
+      AI_PROVIDER: "router",
+      DEEPSEEK_API_KEY: "deepseek-key",
+      GOOGLE_API_KEY: "google-key",
+      OPENAI_API_KEY: "openai-key"
+    }, { deepseek, gemini, cloudflare, github, openai });
+
+    const response = await client.chat({
+      model: "ignored",
+      messages: [{ role: "user", content: "? что нового по Hori" }],
+      tools: [{
+        type: "function",
+        function: {
+          name: "web_search",
+          description: "search",
+          parameters: { type: "object" }
+        }
+      }],
+      metadata: { requestId: "req-tools-1", userKey: "u:t", complexityHint: "complex" }
+    });
+
+    expect(response.routing?.provider).toBe("deepseek");
+    expect(deepseek.send).toHaveBeenCalledTimes(1);
+  });
 });
 
 function createRouter(providers: Record<string, ChatProvider>) {

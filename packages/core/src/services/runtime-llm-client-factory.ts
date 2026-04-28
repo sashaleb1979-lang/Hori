@@ -41,7 +41,8 @@ export function createRuntimeLlmClient(
           await runtimeConfig.setAiRouterState(state);
         },
         updateState: (updater) => runtimeConfig.updateAiRouterState(updater)
-      }
+      },
+      getPreferredChatProvider: () => runtimeConfig.getPreferredChatProvider()
     }),
     mode: "router"
   };

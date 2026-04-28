@@ -54,7 +54,8 @@ function createRuntimeConfigStub() {
   return {
     getAiRouterState: vi.fn(),
     setAiRouterState: vi.fn(),
-    updateAiRouterState: vi.fn()
+    updateAiRouterState: vi.fn(),
+    getPreferredChatProvider: vi.fn().mockResolvedValue("auto")
   } as never;
 }
 

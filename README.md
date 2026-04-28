@@ -67,6 +67,7 @@ Deterministic fallback order:
 Health and quota status:
 - Use `/hori ai-status` for enabled providers, active order, cooldowns, DeepSeek availability, Gemini daily counters, recent routes and fallback counts.
 - In router mode, bot and worker now use the same AI router policy. There is no worker-only direct OpenAI bypass anymore.
+- In `/hori panel -> LLM`, router mode now has an `Active chat provider` selector. `auto` keeps the default DeepSeek-first cascade; choosing `openai`, `gemini`, `cloudflare`, `github` or `deepseek` promotes that provider to the front while preserving fallback order.
 - Router-mode embeddings still use OpenAI embeddings. If `OAI_KEY` / `OPENAI_API_KEY` is missing, startup warns and `/hori ai-status` shows embeddings as unavailable.
 - `/hori state tab:brain` now shows router mode and points to `/hori ai-status` for detailed diagnostics.
 
@@ -163,7 +164,7 @@ Notes:
 
 ## Slash Commands
 - Main command surface now lives under `/hori`. Detailed panel guides: [docs/hori-panel-guide.md](./docs/hori-panel-guide.md) and [docs/hori-panel-step-by-step-ru.md](./docs/hori-panel-step-by-step-ru.md)
-- Owner LLM runtime controls now live in `/hori panel` -> `LLM`: model preset/slot, live HyDE toggle and OpenAI embedding dimensions.
+- Owner LLM runtime controls now live in `/hori panel` -> `LLM`: model preset/slot, router-mode active chat provider, live HyDE toggle and OpenAI embedding dimensions.
 - Owner AI router health is available in `/hori ai-status`.
 - `/bot-help`
 - `/bot-style`
