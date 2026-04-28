@@ -1,4 +1,26 @@
 "use strict";
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 
 // src/bootstrap.ts
 var import_analytics2 = require("@hori/analytics");
@@ -325,7 +347,21 @@ var LLM_PANEL_PREFIX = "llm-panel";
 var CORE_PROMPT_PANEL_PREFIX = "core-prompt-panel";
 var V5_PANEL_PREFIX = "v5-panel";
 var POWER_PROFILES = ["economy", "balanced", "expanded", "max"];
-var HORI_PANEL_TABS = ["main", "persona", "behavior", "memory", "channels", "llm", "system"];
+var HORI_PANEL_TABS = [
+  "main",
+  "persona",
+  "behavior",
+  "memory",
+  "channels",
+  "llm",
+  "system",
+  "relationship",
+  "recall",
+  "sigils",
+  "queue",
+  "flash",
+  "audit"
+];
 var TAB_EMOJI = {
   main: "\u{1F3E0}",
   persona: "\u{1F3AD}",
@@ -333,7 +369,13 @@ var TAB_EMOJI = {
   memory: "\u{1F9E0}",
   channels: "\u{1F4E1}",
   llm: "\u{1F916}",
-  system: "\u2699\uFE0F"
+  system: "\u2699\uFE0F",
+  relationship: "\u{1F49E}",
+  recall: "\u{1F52E}",
+  sigils: "\u{1F523}",
+  queue: "\u{1F4EC}",
+  flash: "\u{1F3AF}",
+  audit: "\u{1F4DC}"
 };
 var TAB_COLOR = {
   main: 5793266,
@@ -342,7 +384,13 @@ var TAB_COLOR = {
   memory: 5763719,
   channels: 5793266,
   llm: 5763719,
-  system: 15418782
+  system: 15418782,
+  relationship: 15548997,
+  recall: 10181046,
+  sigils: 15965202,
+  queue: 3447003,
+  flash: 15158332,
+  audit: 9807270
 };
 var PANEL_FEATURE_LABELS = {
   web_search: "Web search",
@@ -2506,6 +2554,32 @@ async function resolveHoriActionContent(runtime, interaction, action, isOwner, i
       return buildChannelPolicyStatus(runtime, guildId, interaction.channelId);
     case "debug_latest":
       return buildLatestDebugTrace(runtime, guildId);
+    case "v6_relationship_status":
+      return buildV6RelationshipStatus(runtime, guildId, interaction.user.id);
+    case "v6_relationship_deltas":
+      return buildV6RelationshipDeltas(runtime);
+    case "v6_recall_status":
+      return buildV6RecallStatus(runtime, guildId, interaction.channelId);
+    case "v6_sigils_status":
+      return buildV6SigilsStatus(runtime);
+    case "v6_sigils_question_on":
+      if (!isOwner) return "Sigils \u0438\u0437\u043C\u0435\u043D\u044F\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446.";
+      return setV6SigilState(runtime, "?", true, interaction.user.id);
+    case "v6_sigils_question_off":
+      if (!isOwner) return "Sigils \u0438\u0437\u043C\u0435\u043D\u044F\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446.";
+      return setV6SigilState(runtime, "?", false, interaction.user.id);
+    case "v6_queue_status":
+      return buildV6QueueStatus(runtime);
+    case "v6_queue_reset":
+      if (!isOwner) return "\u0421\u0431\u0440\u043E\u0441 phrase pools \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430.";
+      return resetV6QueuePools(runtime);
+    case "v6_flash_status":
+      return buildV6FlashStatus(runtime);
+    case "v6_flash_memes":
+      return buildV6FlashMemes(runtime);
+    case "v6_audit_log":
+      if (!isOwner) return "Audit log \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430.";
+      return buildV6AuditLog(runtime, guildId);
     default:
       return "\u041D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u0430\u044F \u043A\u043D\u043E\u043F\u043A\u0430 \u043F\u0430\u043D\u0435\u043B\u0438.";
   }
@@ -2533,7 +2607,13 @@ function buildHoriPanelEmbed(tab, isOwner, isModerator) {
     memory: "\u0412\u0441\u0451 \u043F\u0440\u043E \u043F\u0430\u043C\u044F\u0442\u044C: Active Memory, hybrid recall, memory-build, topic engine, album, reflection, \u043F\u0440\u043E\u0444\u0438\u043B\u0438 \u043B\u044E\u0434\u0435\u0439 \u0438 \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u044F.",
     channels: "\u041A\u0430\u043D\u0430\u043B\u044B: policy, mute, reply length override, topic tags, \u043F\u043E\u0438\u0441\u043A, summary. Web search \u0438 link understanding \u0442\u043E\u0436\u0435 \u0442\u0443\u0442.",
     llm: "LLM routing: preset, \u043C\u043E\u0434\u0435\u043B\u0438 \u043F\u043E \u0444\u0443\u043D\u043A\u0446\u0438\u044F\u043C, legacy fallback \u0438 \u0434\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0430 \u0442\u043E\u043A\u0435\u043D\u043E\u0432 \u0431\u0435\u0437 \u0440\u043E\u0441\u0441\u044B\u043F\u0438 env.",
-    system: "\u0421\u0438\u0441\u0442\u0435\u043C\u0430: State panel, Power profile, lockdown, AI URL, debug trace, feature flags, context/safety diagnostics \u0438 \u044D\u043A\u0441\u043F\u0435\u0440\u0438\u043C\u0435\u043D\u0442\u044B."
+    system: "\u0421\u0438\u0441\u0442\u0435\u043C\u0430: State panel, Power profile, lockdown, AI URL, debug trace, feature flags, context/safety diagnostics \u0438 \u044D\u043A\u0441\u043F\u0435\u0440\u0438\u043C\u0435\u043D\u0442\u044B.",
+    relationship: "V6 Relationship: \u0434\u0435\u043B\u044C\u0442\u044B \u043F\u0440\u0438\u0432\u044F\u0437\u0430\u043D\u043D\u043E\u0441\u0442\u0438, escalation decay, \u0443\u0440\u043E\u0432\u043D\u0438 0\u20135 \u0438 core-prompt \u043F\u0440\u0438\u0432\u044F\u0437\u043A\u0430 \u0447\u0435\u0440\u0435\u0437 corePromptKeyForLevel.",
+    recall: "V6 Recall: PromptSlot \u0430\u043A\u0442\u0438\u0432\u0430\u0446\u0438\u0438 (10 \u043C\u0438\u043D active / 6 \u0447 cooldown), \u0443\u0440\u043E\u0432\u043D\u0435\u0432\u0430\u044F \u043F\u0440\u0435\u0435\u043C\u043F\u0442\u0430\u0446\u0438\u044F, channel-vs-global \u043F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442.",
+    sigils: "V6 Sigils: \u0440\u0435\u0435\u0441\u0442\u0440 \u0442\u0440\u0438\u0433\u0433\u0435\u0440\u043E\u0432 (?, !, *, >, ^), \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435/\u043E\u0442\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 \u0447\u0435\u0440\u0435\u0437 \u043F\u0430\u043D\u0435\u043B\u044C.",
+    queue: "V6 Queue: \u043F\u0430\u043D\u0435\u043B\u044C-\u043D\u0430\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0435\u043C\u044B\u0435 phrase pools (initial/followup \xD7 warm/neutral/cold).",
+    flash: "V6 Flash trolling: weighted 4:1:4 (retort:question:meme), MemeIndexer \u043A\u0430\u043A single source of truth \u043F\u043E assets/memes/catalog.json.",
+    audit: "V6 Audit: \u0438\u0441\u0442\u043E\u0440\u0438\u044F \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439 core prompt \u0438 \u0434\u0440\u0443\u0433\u0438\u0445 runtime-\u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A (\u043A\u0442\u043E/\u043A\u043E\u0433\u0434\u0430/\u0447\u0442\u043E)."
   };
   const actions = getHoriTabActions(tab, isOwner, isModerator).map((a) => a.label).join(" \xB7 ") || "\u2014";
   return new import_discord3.EmbedBuilder().setTitle(`${TAB_EMOJI[tab]} Hori Panel \u2014 ${horiTabLabel(tab)}`).setColor(TAB_COLOR[tab]).setDescription(tabText[tab]).addFields(
@@ -2712,6 +2792,35 @@ function getHoriTabActions(tab, isOwner, isModerator) {
       { id: "state_trace", label: "Trace", emoji: "\u{1F4DC}", ownerOnly: true },
       { id: "state_tokens", label: "Tokens", emoji: "\u{1FA99}", ownerOnly: true },
       { id: "state_search", label: "Search state", emoji: "\u{1F50E}", ownerOnly: true }
+    ],
+    relationship: [
+      { id: "v6_relationship_status", label: "Status", emoji: "\u{1F4CA}", style: import_discord3.ButtonStyle.Primary },
+      { id: "v6_relationship_deltas", label: "Deltas", emoji: "\u{1F522}", ownerOnly: true },
+      { id: "relationship_self", label: "\u041C\u043E\u0451 \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435", emoji: "\u{1F49E}" },
+      { id: "relationship_edit_modal", label: "Edit relation", emoji: "\u270F\uFE0F", ownerOnly: true }
+    ],
+    recall: [
+      { id: "v6_recall_status", label: "Active slots", emoji: "\u{1F52E}", style: import_discord3.ButtonStyle.Primary },
+      { id: "memory_status", label: "Memory", emoji: "\u{1F9E0}" },
+      { id: "summary_current", label: "Summary", emoji: "\u{1F4DD}" }
+    ],
+    sigils: [
+      { id: "v6_sigils_status", label: "Sigils", emoji: "\u{1F523}", style: import_discord3.ButtonStyle.Primary },
+      { id: "v6_sigils_question_on", label: "? ON", emoji: "\u2705", ownerOnly: true },
+      { id: "v6_sigils_question_off", label: "? OFF", emoji: "\u274C", ownerOnly: true }
+    ],
+    queue: [
+      { id: "v6_queue_status", label: "Pools", emoji: "\u{1F4EC}", style: import_discord3.ButtonStyle.Primary },
+      { id: "queue_status", label: "\u0422\u0435\u043A\u0443\u0449\u0430\u044F", emoji: "\u{1F4CB}" },
+      { id: "queue_clear", label: "Clear", emoji: "\u{1F9F9}", modOnly: true },
+      { id: "v6_queue_reset", label: "Reset packs", emoji: "\u267B\uFE0F", ownerOnly: true }
+    ],
+    flash: [
+      { id: "v6_flash_status", label: "Flash cfg", emoji: "\u{1F3AF}", style: import_discord3.ButtonStyle.Primary },
+      { id: "v6_flash_memes", label: "Memes", emoji: "\u{1F5BC}\uFE0F" }
+    ],
+    audit: [
+      { id: "v6_audit_log", label: "Last 25", emoji: "\u{1F4DC}", style: import_discord3.ButtonStyle.Primary, ownerOnly: true }
     ]
   };
   return byTab[tab].filter((action) => {
@@ -2731,7 +2840,13 @@ function horiTabLabel(tab) {
     memory: "\u{1F9E0} \u041F\u0430\u043C\u044F\u0442\u044C \u0438 \u043B\u044E\u0434\u0438",
     channels: "\u{1F4E1} \u041A\u0430\u043D\u0430\u043B\u044B \u0438 \u043F\u043E\u0438\u0441\u043A",
     llm: "\u{1F916} LLM",
-    system: "\u2699\uFE0F \u0421\u0438\u0441\u0442\u0435\u043C\u0430"
+    system: "\u2699\uFE0F \u0421\u0438\u0441\u0442\u0435\u043C\u0430",
+    relationship: "\u{1F49E} Relationship",
+    recall: "\u{1F52E} Recall",
+    sigils: "\u{1F523} Sigils",
+    queue: "\u{1F4EC} Queue",
+    flash: "\u{1F3AF} Flash",
+    audit: "\u{1F4DC} Audit"
   };
   return labels[tab];
 }
@@ -2740,6 +2855,12 @@ function inferTabForHoriAction(action) {
   if (featureToggle) {
     return inferPanelTabForFeatureKey(featureToggle.key);
   }
+  if (action.startsWith("v6_relationship") || action === "relationship_self" || action === "relationship_edit_modal") return "relationship";
+  if (action.startsWith("v6_recall")) return "recall";
+  if (action.startsWith("v6_sigils")) return "sigils";
+  if (action.startsWith("v6_queue")) return "queue";
+  if (action.startsWith("v6_flash")) return "flash";
+  if (action.startsWith("v6_audit")) return "audit";
   if (action.startsWith("memory") || action.startsWith("reflection") || action.startsWith("profile") || action.startsWith("relationship") || action === "dossier_modal") return "memory";
   if (action.startsWith("search") || action.startsWith("channel") || action === "read_chat_on" || action === "read_chat_off" || action.startsWith("topic") || action.startsWith("queue") || action === "summary_current") return "channels";
   if (action.startsWith("llm")) return "llm";
@@ -3663,6 +3784,137 @@ function parseReplyLengthSelection(value) {
 }
 function booleanToFieldValue(value) {
   return value === void 0 ? "" : value ? "true" : "false";
+}
+async function buildV6RelationshipStatus(runtime, guildId, userId) {
+  try {
+    const level = await runtime.relationshipService.getLevel(guildId, userId);
+    const vector = await runtime.relationshipService.getVector(guildId, userId);
+    const lines = [
+      `**V6 Relationship \u2014 \u0442\u0432\u043E\u0451**`,
+      `level: \`${level}\``,
+      `state: \`${vector.relationshipState}\``,
+      `closeness: \`${vector.closeness?.toFixed?.(2) ?? "\u2014"}\``,
+      `trust: \`${vector.trust?.toFixed?.(2) ?? "\u2014"}\``,
+      `escalationStage: \`${vector.escalationStage ?? 0}\``
+    ];
+    return lines.join("\n");
+  } catch (error) {
+    return `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C relationship: ${(0, import_shared3.asErrorMessage)(error)}`;
+  }
+}
+async function buildV6RelationshipDeltas(runtime) {
+  try {
+    const status = await runtime.runtimeConfig.getRelationshipDeltasStatus();
+    const lines = [
+      `**Relationship deltas** (source: ${status.source})`,
+      "```json",
+      JSON.stringify(status.value, null, 2),
+      "```"
+    ];
+    if (status.updatedBy) lines.push(`updatedBy: ${status.updatedBy}`);
+    return lines.join("\n");
+  } catch (error) {
+    return `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C deltas: ${(0, import_shared3.asErrorMessage)(error)}`;
+  }
+}
+async function buildV6RecallStatus(runtime, guildId, channelId) {
+  try {
+    const active = await runtime.promptSlots.getActiveSlot(guildId, channelId);
+    if (!active) return "**V6 Recall** \u2014 \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0445 PromptSlot \u043D\u0435\u0442 (10 \u043C\u0438\u043D active / 6 \u0447 cooldown).";
+    return [
+      `**V6 Recall \u2014 \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0439 slot**`,
+      `kind: \`${active.kind ?? "\u2014"}\``,
+      `priority: \`${active.priority ?? "\u2014"}\``,
+      `activatedAt: \`${active.activatedAt?.toISOString?.() ?? "\u2014"}\``,
+      `expiresAt: \`${active.expiresAt?.toISOString?.() ?? "\u2014"}\``
+    ].join("\n");
+  } catch (error) {
+    return `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C recall: ${(0, import_shared3.asErrorMessage)(error)}`;
+  }
+}
+async function buildV6SigilsStatus(runtime) {
+  try {
+    const enabled = await runtime.runtimeConfig.getEnabledSigils();
+    return [
+      `**V6 Sigils**`,
+      `enabled: ${enabled ? `\`${enabled.join(" ")}\`` : "\u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E (`?`)"}`,
+      `\u0423\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435: \u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446, \u0447\u0435\u0440\u0435\u0437 \u043A\u043D\u043E\u043F\u043A\u0438 \u0438\u043B\u0438 \`/hori\`.`
+    ].join("\n");
+  } catch (error) {
+    return `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C sigils: ${(0, import_shared3.asErrorMessage)(error)}`;
+  }
+}
+async function setV6SigilState(runtime, sigil, enabled, updatedBy) {
+  try {
+    const current = await runtime.runtimeConfig.getEnabledSigils() ?? ["?"];
+    const set = new Set(current);
+    if (enabled) set.add(sigil);
+    else set.delete(sigil);
+    await runtime.runtimeConfig.setEnabledSigils(Array.from(set), updatedBy);
+    return `Sigil \`${sigil}\` ${enabled ? "\u0432\u043A\u043B\u044E\u0447\u0435\u043D" : "\u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D"}.`;
+  } catch (error) {
+    return `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C sigils: ${(0, import_shared3.asErrorMessage)(error)}`;
+  }
+}
+async function buildV6QueueStatus(runtime) {
+  try {
+    const pools = runtime.queuePhrasePool.getPools();
+    const counts = Object.entries(pools).map(([stage, buckets]) => {
+      const parts = Object.entries(buckets).map(([b, list]) => `${b}: ${list.length}`).join(", ");
+      return `\`${stage}\` \u2192 ${parts}`;
+    }).join("\n");
+    const override = await runtime.runtimeConfig.getQueuePhrasePoolsOverride();
+    return [`**V6 Queue phrase pools**`, counts, override ? "_(custom override \u0430\u043A\u0442\u0438\u0432\u0435\u043D)_" : "_(default pools)_"].join("\n");
+  } catch (error) {
+    return `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C queue: ${(0, import_shared3.asErrorMessage)(error)}`;
+  }
+}
+async function resetV6QueuePools(runtime) {
+  try {
+    await runtime.runtimeConfig.resetQueuePhrasePoolsOverride();
+    return "Phrase pools \u0441\u0431\u0440\u043E\u0448\u0435\u043D\u044B \u043A default.";
+  } catch (error) {
+    return `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u0431\u0440\u043E\u0441\u0438\u0442\u044C: ${(0, import_shared3.asErrorMessage)(error)}`;
+  }
+}
+function buildV6FlashStatus(runtime) {
+  try {
+    const cfg = runtime.flashTrolling.getConfig();
+    const w = cfg.weights;
+    return [
+      `**V6 Flash trolling**`,
+      `weights: retort=\`${w.retort}\` question=\`${w.question}\` meme=\`${w.meme}\``,
+      `cooldownMs: \`${cfg.cooldownMs ?? "\u2014"}\``
+    ].join("\n");
+  } catch (error) {
+    return `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C flash cfg: ${(0, import_shared3.asErrorMessage)(error)}`;
+  }
+}
+async function buildV6FlashMemes(_runtime) {
+  try {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const catalogPath = path.resolve(process.cwd(), "assets/memes/catalog.json");
+    const raw = await fs.readFile(catalogPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    const items = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.items) ? parsed.items : [];
+    return `**V6 MemeIndexer** \u2014 \u0437\u0430\u043F\u0438\u0441\u0435\u0439 \u0432 catalog.json: \`${items.length}\``;
+  } catch (error) {
+    return `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C catalog.json: ${(0, import_shared3.asErrorMessage)(error)}`;
+  }
+}
+async function buildV6AuditLog(runtime, guildId) {
+  try {
+    const entries = await runtime.runtimeConfig.listCorePromptAuditTrail(guildId, 10);
+    if (!entries.length) return "**V6 Audit** \u2014 \u043D\u0435\u0442 \u0437\u0430\u043F\u0438\u0441\u0435\u0439 \u043F\u043E core prompts \u0434\u043B\u044F \u044D\u0442\u043E\u0439 \u0433\u0438\u043B\u044C\u0434\u0438\u0438.";
+    const lines = entries.map((entry) => {
+      const ts = entry.createdAt instanceof Date ? entry.createdAt.toISOString() : String(entry.createdAt);
+      return `\`${ts}\` \xB7 **${entry.action}** \xB7 key=\`${entry.key ?? "?"}\` \xB7 by=\`${entry.updatedBy ?? "\u2014"}\``;
+    });
+    return [`**V6 Audit \u2014 \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 ${entries.length}**`, ...lines].join("\n");
+  } catch (error) {
+    return `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C audit: ${(0, import_shared3.asErrorMessage)(error)}`;
+  }
 }
 
 // src/router/message-router.ts
