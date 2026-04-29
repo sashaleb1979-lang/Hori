@@ -166,7 +166,7 @@ export class OpenAICompatibleProvider implements ChatProvider {
     });
 
     const latencyMs = Date.now() - startedAt;
-    const content = choice.message.content ?? "";
+    const content = stripReasoningArtifacts(choice.message.content ?? "");
 
     if (this.logTraffic) {
       const preview = content.length > this.logMaxChars ? `${content.slice(0, this.logMaxChars)}...` : content;
@@ -305,4 +305,22 @@ function parseRetryAfterMs(value: string | null) {
   }
 
   return parsed * 1000;
+}
+/**
+ * Defensive stripping of reasoning artifacts emitted by some self-hosted /
+ * third-party OpenAI-compatible models (DeepSeek-R1, Qwen QwQ, glm-thinking,
+ * yandex-flash 4B reasoning) even when thinking-mode is disabled. We never
+ * want raw chain-of-thought to leak into Discord messages.
+ */
+function stripReasoningArtifacts(content: string): string {
+  if (!content) return content;
+  let out = content;
+  // <think>...</think>, <thinking>...</thinking>, <reasoning>...</reasoning>
+  out = out.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, "");
+  out = out.replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "");
+  // Unclosed leading tag: <think>...\n\n
+  out = out.replace(/^\s*<think(?:ing)?>[\s\S]*?(?:\n\n|<\/think(?:ing)?>)/i, "");
+  // Markdown thought scaffolding sometimes seen in mini-reasoners
+  out = out.replace(/^\s*\[(?:thought|reasoning|thinking)\][\s\S]*?\[\/(?:thought|reasoning|thinking)\]\s*/i, "");
+  return out.trimStart();
 }

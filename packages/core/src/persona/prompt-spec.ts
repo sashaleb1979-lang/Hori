@@ -351,6 +351,21 @@ export const CORE_PROMPT_DEFINITIONS = {
     label: "RELATIONSHIP_EVALUATOR_PROMPT",
     description: "Session evaluator для growth verdict A/B/V.",
     defaultContent: RELATIONSHIP_EVALUATOR_PROMPT
+  },
+  sigil_question: {
+    label: "SIGIL_QUESTION (?)",
+    description: "V6 Item 12: добавочный блок к base, когда сообщение начинается с `?` — хори обязана искать в сети и развёрнуто отвечать.",
+    defaultContent: "Сообщение начинается со знака `?`. Это явный запрос: ОБЯЗАТЕЛЬНО задействуй web-search и сделай развёрнутый ответ с фактами и источниками. Не отделывайся короткой репликой. Если не уверена — лучше прямо скажи, что не нашла, чем выдумай."
+  },
+  sigil_force_rewrite: {
+    label: "SIGIL_FORCE_REWRITE (!)",
+    description: "V6 Item 12 (reserved): пересобрать ответ другим тоном/стилем по запросу.",
+    defaultContent: "Сообщение начинается со знака `!`. Это форс-перезапрос: предыдущий ответ не зашёл собеседнику. Сделай новый ответ другим тоном — короче, прямее, без воды. Не повторяй ту же формулировку."
+  },
+  sigil_summary: {
+    label: "SIGIL_SUMMARY (*)",
+    description: "V6 Item 12 (reserved): краткий пересказ обсуждаемого.",
+    defaultContent: "Сообщение начинается со знака `*`. Это запрос на сжатую сводку: сделай 3-5 предложений, без украшений, по делу."
   }
 } as const;
 
@@ -638,4 +653,37 @@ export function buildRestoredContextBlock(card: MemoryCardPromptPayload) {
   }
 
   return lines.join("\n");
+}
+
+/**
+ * V6 Item 12: маппинг sigil-символа на ключ core prompt в CORE_PROMPT_DEFINITIONS.
+ * Возвращает null если sigil не имеет своего prompt-блока.
+ */
+export const SIGIL_CORE_PROMPT_KEY: Record<string, CorePromptKey | undefined> = {
+  '?': 'sigil_question',
+  '!': 'sigil_force_rewrite',
+  '*': 'sigil_summary'
+};
+
+export function corePromptKeyForSigil(sigil: string): CorePromptKey | null {
+  return SIGIL_CORE_PROMPT_KEY[sigil] ?? null;
+}
+
+/**
+ * V6 Item 12: рендер дополнительного блока поверх base, если сообщение начинается с одного из активных sigil-символов.
+ * Вставляется после base, перед relationship tail.
+ */
+export function buildSigilOverlayBlock(
+  templates: CorePromptTemplates,
+  sigil: string | null | undefined,
+  overrides: Partial<Record<CorePromptKey, string>> = {}
+): string {
+  if (!sigil) return '';
+  const key = corePromptKeyForSigil(sigil);
+  if (!key) return '';
+  const override = overrides[key];
+  if (typeof override === 'string' && override.trim()) return override.trim();
+  const fallback = CORE_PROMPT_DEFINITIONS[key]?.defaultContent ?? '';
+  void templates; // templates сейчас не содержат sigil-полей; задел на будущее
+  return fallback.trim();
 }
