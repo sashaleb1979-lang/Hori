@@ -206,7 +206,8 @@ export class IntentRouter {
         confidence: 0.95,
         reason: sigil.reason,
         cleanedContent: stripped,
-        requiresSearch: sigil.requiresSearch
+        requiresSearch: sigil.requiresSearch,
+        sigil: sigil.char
       };
     }
 

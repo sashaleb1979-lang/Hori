@@ -249,6 +249,16 @@ export interface ComposeBehaviorPromptInput {
    * Вставляется в system prompt сразу после core+micro-blocks.
    */
   activePromptSlot?: { title?: string | null; content: string } | null;
+  /**
+   * V6 Item 12: sigil-символ (`?`/`!`/`*`), если сообщение начиналось с него.
+   * Заставляет compose вставить дополнительный sigil-overlay блок.
+   */
+  sigil?: string | null;
+  /**
+   * V6 Item 12: панельные override-ы текста sigil-промптов (sigil_question и т.п.).
+   * Если ключ присутствует — заменяет defaultContent из CORE_PROMPT_DEFINITIONS.
+   */
+  sigilPromptOverrides?: Partial<Record<string, string>>;
   requestedDepth?: RequestedDepth;
   activeMode?: PersonaMode;
   channelKind?: ChannelKind;

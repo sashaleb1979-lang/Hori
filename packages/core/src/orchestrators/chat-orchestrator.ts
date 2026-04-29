@@ -327,6 +327,12 @@ export class ChatOrchestrator {
     }
 
     const corePromptTemplates = await this.deps.runtimeConfig.getCorePromptTemplates(message.guildId);
+    // V6 Item 12: подгружаем sigil-overrides (отдельный набор поверх defaults).
+    const sigilPromptOverrides = typeof this.deps.runtimeConfig.getSigilPromptOverrides === "function"
+      ? await this.deps.runtimeConfig
+          .getSigilPromptOverrides(message.guildId)
+          .catch(() => ({} as Partial<Record<string, string>>))
+      : ({} as Partial<Record<string, string>>);
     // V5.1 Phase B: получаем активный prompt-слот для канала, если есть.
     const activePromptSlot = this.deps.promptSlots
       ? await this.deps.promptSlots
@@ -358,7 +364,9 @@ export class ChatOrchestrator {
       isReplyToBot: message.triggerSource === "reply",
       isSelfInitiated: message.triggerSource === "auto_interject",
       contour: contour.contour,
-      corePromptTemplates
+      corePromptTemplates,
+      sigil: intent.sigil ?? null,
+      sigilPromptOverrides
     });
     const restoredContext = intent.intent === "chat" ? await this.getActiveRestoredContext(message) : null;
     const systemPrompt = [

@@ -8,7 +8,7 @@ import { buildIdeologicalBlock, detectIdeologicalTopic, resolveIdeologicalFlavou
 import { buildMessageKindBlock, detectMessageKind } from "./messageKinds";
 import { buildToneBlock, fallbackDisabledMode, modeFromRequestedDepth } from "./modes";
 import { buildStylePresetBlock, resolveStylePreset, stylePresets } from "./presets";
-import { DEFAULT_CORE_PROMPT_TEMPLATES, resolveRelationshipState, resolveRelationshipTail, buildRelationshipMicroBlocks, buildActivePromptSlotBlock, buildServerDescriptionBlock } from "./prompt-spec";
+import { DEFAULT_CORE_PROMPT_TEMPLATES, resolveRelationshipState, resolveRelationshipTail, buildRelationshipMicroBlocks, buildActivePromptSlotBlock, buildServerDescriptionBlock, buildSigilOverlayBlock } from "./prompt-spec";
 import { buildReplyModeBlock, resolveReplyMode } from "./replyMode";
 import { buildSelfInterjectionBlock } from "./selfInterjection";
 import { buildSlangBlock, resolveSlangProfile } from "./slang";
@@ -1094,11 +1094,17 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   const corePromptTemplates = input.corePromptTemplates ?? DEFAULT_CORE_PROMPT_TEMPLATES;
   const relationshipMicroBlocks = buildRelationshipMicroBlocks(input.relationship);
   const activePromptSlotBlock = buildActivePromptSlotBlock(input.activePromptSlot);
+  const sigilOverlayBlock = buildSigilOverlayBlock(
+    corePromptTemplates,
+    input.sigil ?? null,
+    (input.sigilPromptOverrides ?? {}) as Partial<Record<import("./prompt-spec").CorePromptKey, string>>
+  );
   const serverDescriptionBlock = buildServerDescriptionBlock(input.guildDescription);
   const assembly = {
     commonCore: corePromptTemplates.commonCore,
     relationshipMicroBlocks,
     activePromptSlotBlock,
+    sigilOverlayBlock,
     serverDescriptionBlock,
     relationshipTail: resolveRelationshipTail(relationshipState, corePromptTemplates),
     turnInstruction: buildTurnInstruction({
@@ -1133,6 +1139,7 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
       assembly.serverDescriptionBlock,
       assembly.relationshipMicroBlocks,
       assembly.activePromptSlotBlock,
+      assembly.sigilOverlayBlock,
       assembly.relationshipTail,
       `Turn instruction:\n${assembly.turnInstruction}`,
       "Сейчас идёт лента сообщений из Discord-чата. Ответь на последнее сообщение пользователя."
@@ -1144,6 +1151,7 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
       ...(assembly.serverDescriptionBlock ? ["SERVER_DESCRIPTION"] : []),
       ...(assembly.relationshipMicroBlocks ? ["RELATIONSHIP_MICRO_BLOCKS"] : []),
       ...(assembly.activePromptSlotBlock ? ["ACTIVE_PROMPT_SLOT"] : []),
+      ...(assembly.sigilOverlayBlock ? ["SIGIL_OVERLAY"] : []),
       relationshipState === "cold_lowest" ? "COLD_TAIL" : `${relationshipState.toUpperCase()}_TAIL`,
       "TURN_INSTRUCTION"
     ];

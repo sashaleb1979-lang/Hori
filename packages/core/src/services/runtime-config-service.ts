@@ -914,6 +914,22 @@ export class RuntimeConfigService {
     return buildCorePromptTemplates(overrides);
   }
 
+  /**
+   * V6 Item 12: возвращает только sigil-overrides, чтобы compose мог
+   * вставить sigil-overlay блок поверх дефолтного содержимого.
+   * Ключи из CORE_PROMPT_DEFINITIONS, начинающиеся на `sigil_`.
+   */
+  async getSigilPromptOverrides(guildId: string): Promise<Partial<Record<CorePromptKey, string>>> {
+    const templates = await this.listCorePromptTemplates(guildId);
+    const overrides: Partial<Record<CorePromptKey, string>> = {};
+    for (const entry of templates) {
+      if (entry.source === "runtime_setting" && entry.key.startsWith("sigil_")) {
+        overrides[entry.key] = entry.content;
+      }
+    }
+    return overrides;
+  }
+
   async setCorePromptTemplate(guildId: string, key: CorePromptKey, content: string, updatedBy?: string) {
     const normalized = content.replace(/\r\n/g, "\n");
     if (!normalized.trim()) {

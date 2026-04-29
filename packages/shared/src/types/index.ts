@@ -235,6 +235,12 @@ export interface IntentResult {
   reason: string;
   cleanedContent: string;
   requiresSearch: boolean;
+  /**
+   * V6 Item 12: символ-sigil из начала сообщения (`?`/`!`/`*`/`>`/`^`),
+   * если он сработал. Используется compose-pipeline-ом для вставки
+   * sigil-overlay блока в system prompt.
+   */
+  sigil?: string;
 }
 
 export interface LlmChatMessage {
