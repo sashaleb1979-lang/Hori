@@ -155,6 +155,8 @@ const horiCommandDefinition = new SlashCommandBuilder()
       .addNumberOption((option) => option.setName("familiarity").setDescription("Знакомость 0-1").setMinValue(0).setMaxValue(1))
       .addNumberOption((option) => option.setName("proactivity").setDescription("Желательность инициативы 0-1").setMinValue(0).setMaxValue(1))
       .addNumberOption((option) => option.setName("score").setDescription("relationshipScore (-1.5..3)").setMinValue(-1.5).setMaxValue(3))
+      .addStringOption((option) => option.setName("characteristic").setDescription("V6: характеристика (постоянная заметка). 'clear' = очистить.").setMaxLength(400))
+      .addStringOption((option) => option.setName("last-change").setDescription("V6: последнее изменение / настроение. 'clear' = очистить.").setMaxLength(400))
   )
   .addSubcommand((subcommand) =>
     subcommand

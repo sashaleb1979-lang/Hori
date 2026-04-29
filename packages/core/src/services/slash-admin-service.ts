@@ -257,12 +257,23 @@ export class SlashAdminService {
       trustLevel?: number;
       familiarity?: number;
       proactivityPreference?: number;
+      /** V6 Item 20: ручная установка постоянной характеристики. `null` = очистить. */
+      characteristic?: string | null;
+      /** V6 Item 20: ручная установка last-change. `null` = очистить. */
+      lastChange?: string | null;
     }
   ) {
     const existing = await this.prisma.relationshipProfile.findUnique({
       where: { guildId_userId: { guildId, userId } }
     });
     const current = existing ? await this.relationships.getVector(guildId, userId) : null;
+    const nextCharacteristic = input.characteristic === undefined
+      ? current?.characteristic ?? null
+      : (input.characteristic && input.characteristic.trim().length > 0 ? input.characteristic.trim() : null);
+    const nextLastChange = input.lastChange === undefined
+      ? current?.lastChange ?? null
+      : (input.lastChange && input.lastChange.trim().length > 0 ? input.lastChange.trim() : null);
+    const characteristicChanged = nextCharacteristic !== (current?.characteristic ?? null);
 
     await this.relationships.upsertRelationship({
       guildId,
@@ -287,7 +298,10 @@ export class SlashAdminService {
       familiarity: input.familiarity ?? current?.familiarity ?? 0.5,
       interactionCount: current?.interactionCount ?? 0,
       proactivityPreference: input.proactivityPreference ?? current?.proactivityPreference ?? 0.5,
-      topicBoundaries: current?.topicBoundaries ?? {}
+      topicBoundaries: current?.topicBoundaries ?? {},
+      characteristic: nextCharacteristic,
+      lastChange: nextLastChange,
+      characteristicUpdatedAt: characteristicChanged ? new Date() : current?.characteristicUpdatedAt ?? null
     });
 
     return `Relationship для ${userId} обновлён.`;
@@ -674,7 +688,9 @@ export class SlashAdminService {
       `doNotMock=${vector.doNotMock}, doNotInitiate=${vector.doNotInitiate}`,
       `closeness=${formatSignal(vector.closeness)}, trust=${formatSignal(vector.trustLevel)}, familiarity=${formatSignal(vector.familiarity)}, proactivity=${formatSignal(vector.proactivityPreference)}`,
       `interactionCount=${vector.interactionCount}`,
-      vector.protectedTopics.length ? `protectedTopics: ${vector.protectedTopics.join(", ")}` : "protectedTopics: none"
+      vector.protectedTopics.length ? `protectedTopics: ${vector.protectedTopics.join(", ")}` : "protectedTopics: none",
+      `characteristic: ${vector.characteristic ? vector.characteristic : "—"}`,
+      `lastChange: ${vector.lastChange ? vector.lastChange : "—"}`
     ].join("\n");
   }
 

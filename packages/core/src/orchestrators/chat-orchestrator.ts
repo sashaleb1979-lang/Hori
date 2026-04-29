@@ -1642,6 +1642,17 @@ export class ChatOrchestrator {
     };
   }
 
+  private memoryCardLimitForLevel(level: number): number {
+    // V6 GAP-A: capacity по уровню отношений.
+    // -1 (cold/banned) → 0; 0 (neutral) → 3; 1 (warm) → 5; 2 (close) → 8; 3 (teasing) → 12; 4+ (sweet/legend) → 20.
+    if (level <= -1) return 0;
+    if (level === 0) return 3;
+    if (level === 1) return 5;
+    if (level === 2) return 8;
+    if (level === 3) return 12;
+    return 20;
+  }
+
   private async handleMemoryWrite(message: MessageEnvelope, _cleanedContent: string) {
     const session = await this.getLatestSession(message);
 
@@ -1649,9 +1660,41 @@ export class ChatOrchestrator {
       return "тут нечего сохранять";
     }
 
+    let userLevel = 0;
+    try {
+      if (this.deps.relationships) {
+        userLevel = await this.deps.relationships.getLevel(message.guildId, message.userId);
+      }
+    } catch {
+      userLevel = 0;
+    }
+    const limit = this.memoryCardLimitForLevel(userLevel);
+    if (limit <= 0) {
+      return "сейчас нечего держать в голове.";
+    }
+
+    const existingCount = await this.deps.prisma.horiUserMemoryCard.count({
+      where: { guildId: message.guildId, userId: message.userId, active: true }
+    });
+
     const summary = await this.summarizeMemorySession(message.guildId, session.messages);
     if (!summary.save || !summary.summary.length) {
       return "тут нечего сохранять";
+    }
+
+    // Если лимит исчерпан — гасим самую старую активную карточку (rotate).
+    if (existingCount >= limit) {
+      const oldest = await this.deps.prisma.horiUserMemoryCard.findFirst({
+        where: { guildId: message.guildId, userId: message.userId, active: true },
+        orderBy: { createdAt: "asc" },
+        select: { id: true }
+      });
+      if (oldest) {
+        await this.deps.prisma.horiUserMemoryCard.update({
+          where: { id: oldest.id },
+          data: { active: false }
+        });
+      }
     }
 
     const card = await this.deps.prisma.horiUserMemoryCard.create({

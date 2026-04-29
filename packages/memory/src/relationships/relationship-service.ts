@@ -445,6 +445,57 @@ export class RelationshipService {
     return this.setRelationshipState(guildId, userId, state, updatedBy);
   }
 
+  /**
+   * V6 Item 20 (panel): ручная правка характеристики и/или последнего изменения у пары guild+user.
+   * Любое из полей можно опустить (`undefined` → не трогать). `null` — очистить.
+   */
+  async setCharacteristic(
+    guildId: string,
+    userId: string,
+    options: {
+      characteristic?: string | null | undefined;
+      lastChange?: string | null | undefined;
+      updatedBy?: string | null;
+    }
+  ) {
+    const vector = await this.getVector(guildId, userId);
+    const nextCharacteristic = options.characteristic === undefined
+      ? vector.characteristic ?? null
+      : (options.characteristic && options.characteristic.trim().length > 0 ? options.characteristic.trim() : null);
+    const nextLastChange = options.lastChange === undefined
+      ? vector.lastChange ?? null
+      : (options.lastChange && options.lastChange.trim().length > 0 ? options.lastChange.trim() : null);
+    const characteristicChanged = nextCharacteristic !== (vector.characteristic ?? null);
+    return this.upsertRelationship({
+      guildId,
+      userId,
+      updatedBy: options.updatedBy ?? null,
+      toneBias: vector.toneBias,
+      roastLevel: vector.roastLevel,
+      praiseBias: vector.praiseBias,
+      interruptPriority: vector.interruptPriority,
+      doNotMock: vector.doNotMock,
+      doNotInitiate: vector.doNotInitiate,
+      protectedTopics: vector.protectedTopics,
+      relationshipState: vector.relationshipState ?? "base",
+      relationshipScore: vector.relationshipScore ?? 0,
+      positiveMarks: vector.positiveMarks ?? 0,
+      escalationStage: vector.escalationStage ?? 0,
+      escalationUpdatedAt: vector.escalationUpdatedAt ?? null,
+      coldUntil: vector.coldUntil ?? null,
+      coldPermanent: vector.coldPermanent ?? false,
+      closeness: vector.closeness ?? null,
+      trustLevel: vector.trustLevel ?? null,
+      familiarity: vector.familiarity ?? null,
+      interactionCount: vector.interactionCount ?? 0,
+      proactivityPreference: vector.proactivityPreference ?? null,
+      topicBoundaries: vector.topicBoundaries ?? null,
+      characteristic: nextCharacteristic,
+      lastChange: nextLastChange,
+      characteristicUpdatedAt: characteristicChanged ? new Date() : vector.characteristicUpdatedAt ?? null
+    });
+  }
+
   async applySessionVerdict(
     guildId: string,
     userId: string,

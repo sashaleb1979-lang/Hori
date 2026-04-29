@@ -140,7 +140,7 @@ var horiCommandDefinition = new import_discord2.SlashCommandBuilder().setName("h
 ).addSubcommand(
   (subcommand) => subcommand.setName("dossier").setDescription("Owner: \u0441\u043E\u0431\u0440\u0430\u0442\u044C \u0440\u0430\u0437\u0432\u0451\u0440\u043D\u0443\u0442\u043E\u0435 \u0434\u043E\u0441\u044C\u0435 \u043F\u043E \u0447\u0435\u043B\u043E\u0432\u0435\u043A\u0443").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true))
 ).addSubcommand(
-  (subcommand) => subcommand.setName("relationship").setDescription("Owner: \u043F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u0438\u043B\u0438 \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435 \u043A \u0447\u0435\u043B\u043E\u0432\u0435\u043A\u0443").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true)).addStringOption((option) => option.setName("tone-bias").setDescription("neutral, friendly, sharp, playful")).addIntegerOption((option) => option.setName("roast-level").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("praise-bias").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("interrupt-priority").setDescription("0-5").setMinValue(0).setMaxValue(5)).addBooleanOption((option) => option.setName("do-not-mock").setDescription("\u041D\u0435 \u043F\u043E\u0434\u043A\u0430\u043B\u044B\u0432\u0430\u0442\u044C")).addBooleanOption((option) => option.setName("do-not-initiate").setDescription("\u041D\u0435 \u0438\u043D\u0438\u0446\u0438\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u0435")).addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics")).addStringOption((option) => option.setName("relationship-state").setDescription("V5 relationship state").addChoices(...relationshipStateChoices)).addNumberOption((option) => option.setName("closeness").setDescription("\u0411\u043B\u0438\u0437\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("trust").setDescription("\u0414\u043E\u0432\u0435\u0440\u0438\u0435 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("familiarity").setDescription("\u0417\u043D\u0430\u043A\u043E\u043C\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("proactivity").setDescription("\u0416\u0435\u043B\u0430\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u0438\u043D\u0438\u0446\u0438\u0430\u0442\u0438\u0432\u044B 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("score").setDescription("relationshipScore (-1.5..3)").setMinValue(-1.5).setMaxValue(3))
+  (subcommand) => subcommand.setName("relationship").setDescription("Owner: \u043F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u0438\u043B\u0438 \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0435 \u043A \u0447\u0435\u043B\u043E\u0432\u0435\u043A\u0443").addUserOption((option) => option.setName("user").setDescription("\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C").setRequired(true)).addStringOption((option) => option.setName("tone-bias").setDescription("neutral, friendly, sharp, playful")).addIntegerOption((option) => option.setName("roast-level").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("praise-bias").setDescription("0-5").setMinValue(0).setMaxValue(5)).addIntegerOption((option) => option.setName("interrupt-priority").setDescription("0-5").setMinValue(0).setMaxValue(5)).addBooleanOption((option) => option.setName("do-not-mock").setDescription("\u041D\u0435 \u043F\u043E\u0434\u043A\u0430\u043B\u044B\u0432\u0430\u0442\u044C")).addBooleanOption((option) => option.setName("do-not-initiate").setDescription("\u041D\u0435 \u0438\u043D\u0438\u0446\u0438\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u0435")).addStringOption((option) => option.setName("protected-topics").setDescription("CSV protected topics")).addStringOption((option) => option.setName("relationship-state").setDescription("V5 relationship state").addChoices(...relationshipStateChoices)).addNumberOption((option) => option.setName("closeness").setDescription("\u0411\u043B\u0438\u0437\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("trust").setDescription("\u0414\u043E\u0432\u0435\u0440\u0438\u0435 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("familiarity").setDescription("\u0417\u043D\u0430\u043A\u043E\u043C\u043E\u0441\u0442\u044C 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("proactivity").setDescription("\u0416\u0435\u043B\u0430\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u0438\u043D\u0438\u0446\u0438\u0430\u0442\u0438\u0432\u044B 0-1").setMinValue(0).setMaxValue(1)).addNumberOption((option) => option.setName("score").setDescription("relationshipScore (-1.5..3)").setMinValue(-1.5).setMaxValue(3)).addStringOption((option) => option.setName("characteristic").setDescription("V6: \u0445\u0430\u0440\u0430\u043A\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043A\u0430 (\u043F\u043E\u0441\u0442\u043E\u044F\u043D\u043D\u0430\u044F \u0437\u0430\u043C\u0435\u0442\u043A\u0430). 'clear' = \u043E\u0447\u0438\u0441\u0442\u0438\u0442\u044C.").setMaxLength(400)).addStringOption((option) => option.setName("last-change").setDescription("V6: \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0435\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435 / \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D\u0438\u0435. 'clear' = \u043E\u0447\u0438\u0441\u0442\u0438\u0442\u044C.").setMaxLength(400))
 ).addSubcommand(
   (subcommand) => subcommand.setName("runtime").setDescription("Owner: V5 runtime modes \u0438 \u043B\u0438\u043C\u0438\u0442\u044B \u043C\u043E\u0434\u0435\u0440\u0430\u0446\u0438\u0438").addStringOption((option) => option.setName("memory-mode").setDescription("\u0420\u0435\u0436\u0438\u043C \u043F\u0430\u043C\u044F\u0442\u0438").addChoices(...memoryModeChoices)).addStringOption(
     (option) => option.setName("relationship-growth-mode").setDescription("\u0420\u0435\u0436\u0438\u043C \u0440\u043E\u0441\u0442\u0430 \u043E\u0442\u043D\u043E\u0448\u0435\u043D\u0438\u0439").addChoices(...relationshipGrowthModeChoices)
@@ -1274,7 +1274,9 @@ async function handleHoriCommand(runtime, interaction, isOwner, isModerator) {
       return;
     }
     const targetUserId = interaction.options.getUser("user", true).id;
-    const hasUpdate = interaction.options.getString("tone-bias") !== null || interaction.options.getInteger("roast-level") !== null || interaction.options.getInteger("praise-bias") !== null || interaction.options.getInteger("interrupt-priority") !== null || interaction.options.getBoolean("do-not-mock") !== null || interaction.options.getBoolean("do-not-initiate") !== null || interaction.options.getString("protected-topics") !== null || interaction.options.getString("relationship-state") !== null || interaction.options.getNumber("closeness") !== null || interaction.options.getNumber("trust") !== null || interaction.options.getNumber("familiarity") !== null || interaction.options.getNumber("proactivity") !== null || interaction.options.getNumber("score") !== null;
+    const characteristicRaw = interaction.options.getString("characteristic");
+    const lastChangeRaw = interaction.options.getString("last-change");
+    const hasUpdate = interaction.options.getString("tone-bias") !== null || interaction.options.getInteger("roast-level") !== null || interaction.options.getInteger("praise-bias") !== null || interaction.options.getInteger("interrupt-priority") !== null || interaction.options.getBoolean("do-not-mock") !== null || interaction.options.getBoolean("do-not-initiate") !== null || interaction.options.getString("protected-topics") !== null || interaction.options.getString("relationship-state") !== null || interaction.options.getNumber("closeness") !== null || interaction.options.getNumber("trust") !== null || interaction.options.getNumber("familiarity") !== null || interaction.options.getNumber("proactivity") !== null || interaction.options.getNumber("score") !== null || characteristicRaw !== null || lastChangeRaw !== null;
     const content = hasUpdate ? [
       await runtime.slashAdmin.updateRelationship(interaction.guildId, targetUserId, interaction.user.id, {
         toneBias: interaction.options.getString("tone-bias") ?? void 0,
@@ -1289,7 +1291,9 @@ async function handleHoriCommand(runtime, interaction, isOwner, isModerator) {
         trustLevel: interaction.options.getNumber("trust") ?? void 0,
         familiarity: interaction.options.getNumber("familiarity") ?? void 0,
         proactivityPreference: interaction.options.getNumber("proactivity") ?? void 0,
-        relationshipScore: interaction.options.getNumber("score") ?? void 0
+        relationshipScore: interaction.options.getNumber("score") ?? void 0,
+        characteristic: characteristicRaw === null ? void 0 : characteristicRaw.trim().toLowerCase() === "clear" ? null : characteristicRaw,
+        lastChange: lastChangeRaw === null ? void 0 : lastChangeRaw.trim().toLowerCase() === "clear" ? null : lastChangeRaw
       }),
       "",
       await runtime.slashAdmin.relationshipDetails(interaction.guildId, targetUserId)
@@ -2568,6 +2572,11 @@ async function resolveHoriActionContent(runtime, interaction, action, isOwner, i
     case "v6_sigils_question_off":
       if (!isOwner) return "Sigils \u0438\u0437\u043C\u0435\u043D\u044F\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446.";
       return setV6SigilState(runtime, "?", false, interaction.user.id);
+    case "v6_sigils_prompts_status":
+      return buildV6SigilPromptsStatus(runtime, guildId);
+    case "v6_sigils_prompts_reset":
+      if (!isOwner) return "\u0421\u0431\u0440\u043E\u0441 sigil-\u043F\u0440\u043E\u043C\u043F\u0442\u043E\u0432 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430.";
+      return resetV6SigilPrompts(runtime, guildId, interaction.user.id);
     case "v6_queue_status":
       return buildV6QueueStatus(runtime);
     case "v6_queue_reset":
@@ -2807,7 +2816,9 @@ function getHoriTabActions(tab, isOwner, isModerator) {
     sigils: [
       { id: "v6_sigils_status", label: "Sigils", emoji: "\u{1F523}", style: import_discord3.ButtonStyle.Primary },
       { id: "v6_sigils_question_on", label: "? ON", emoji: "\u2705", ownerOnly: true },
-      { id: "v6_sigils_question_off", label: "? OFF", emoji: "\u274C", ownerOnly: true }
+      { id: "v6_sigils_question_off", label: "? OFF", emoji: "\u274C", ownerOnly: true },
+      { id: "v6_sigils_prompts_status", label: "Prompts", emoji: "\u{1F4DC}" },
+      { id: "v6_sigils_prompts_reset", label: "Reset prompts", emoji: "\u267B\uFE0F", ownerOnly: true }
     ],
     queue: [
       { id: "v6_queue_status", label: "Pools", emoji: "\u{1F4EC}", style: import_discord3.ButtonStyle.Primary },
@@ -3914,6 +3925,50 @@ async function buildV6AuditLog(runtime, guildId) {
     return [`**V6 Audit \u2014 \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 ${entries.length}**`, ...lines].join("\n");
   } catch (error) {
     return `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C audit: ${(0, import_shared3.asErrorMessage)(error)}`;
+  }
+}
+async function buildV6SigilPromptsStatus(runtime, guildId) {
+  try {
+    const templates = await runtime.runtimeConfig.listCorePromptTemplates(guildId);
+    const sigilEntries = templates.filter((entry) => entry.key.startsWith("sigil_"));
+    if (sigilEntries.length === 0) {
+      return "**V6 Sigil prompts**\n(\u043D\u0435\u0442 sigil-\u043F\u0440\u043E\u043C\u043F\u0442\u043E\u0432 \u0432 \u0440\u0435\u0435\u0441\u0442\u0440\u0435)";
+    }
+    const lines = sigilEntries.map((entry) => {
+      const overridden = entry.source === "runtime_setting";
+      const preview = entry.content.length > 80 ? entry.content.slice(0, 80) + "\u2026" : entry.content;
+      return "`" + entry.key + "` \xB7 " + (overridden ? "**override**" : "default") + "\n  " + preview;
+    });
+    return [
+      "**V6 Sigil prompts** (Item 12)",
+      "\u0422\u0435\u043A\u0441\u0442 \u0432\u0441\u0442\u0430\u0432\u043B\u044F\u0435\u0442\u0441\u044F \u043A\u0430\u043A overlay \u0432 system prompt, \u043A\u043E\u0433\u0434\u0430 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u043D\u0430\u0447\u0438\u043D\u0430\u0435\u0442\u0441\u044F \u0441 \u0441\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0443\u044E\u0449\u0435\u0433\u043E \u0437\u043D\u0430\u043A\u0430.",
+      ...lines,
+      '_\u0420\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u2014 \u0447\u0435\u0440\u0435\u0437 \u0441\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u043E\u0435 \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 "Edit core prompt" (\u0432\u044B\u0431\u0440\u0430\u0442\u044C \u043A\u043B\u044E\u0447 `sigil_*`)._'
+    ].join("\n");
+  } catch (error) {
+    return "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C sigil-\u043F\u0440\u043E\u043C\u043F\u0442\u044B: " + (0, import_shared3.asErrorMessage)(error);
+  }
+}
+async function resetV6SigilPrompts(runtime, guildId, updatedBy) {
+  try {
+    const templates = await runtime.runtimeConfig.listCorePromptTemplates(guildId);
+    const sigilOverrides = templates.filter(
+      (entry) => entry.key.startsWith("sigil_") && entry.source === "runtime_setting"
+    );
+    if (sigilOverrides.length === 0) {
+      return "Sigil-\u043F\u0440\u043E\u043C\u043F\u0442\u044B \u0443\u0436\u0435 \u043D\u0430 default \u2014 \u0441\u0431\u0440\u0430\u0441\u044B\u0432\u0430\u0442\u044C \u043D\u0435\u0447\u0435\u0433\u043E.";
+    }
+    let reset = 0;
+    for (const entry of sigilOverrides) {
+      try {
+        await runtime.runtimeConfig.resetCorePromptTemplate(guildId, entry.key, updatedBy);
+        reset += 1;
+      } catch {
+      }
+    }
+    return "\u0421\u0431\u0440\u043E\u0448\u0435\u043D\u043E sigil-\u043F\u0440\u043E\u043C\u043F\u0442\u043E\u0432: `" + reset + "` \u0438\u0437 `" + sigilOverrides.length + "`.";
+  } catch (error) {
+    return "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u0431\u0440\u043E\u0441\u0438\u0442\u044C sigil-\u043F\u0440\u043E\u043C\u043F\u0442\u044B: " + (0, import_shared3.asErrorMessage)(error);
   }
 }
 

@@ -671,6 +671,8 @@ async function handleHoriCommand(
     }
 
     const targetUserId = interaction.options.getUser("user", true).id;
+    const characteristicRaw = interaction.options.getString("characteristic");
+    const lastChangeRaw = interaction.options.getString("last-change");
     const hasUpdate =
       interaction.options.getString("tone-bias") !== null ||
       interaction.options.getInteger("roast-level") !== null ||
@@ -684,7 +686,9 @@ async function handleHoriCommand(
       interaction.options.getNumber("trust") !== null ||
       interaction.options.getNumber("familiarity") !== null ||
       interaction.options.getNumber("proactivity") !== null ||
-      interaction.options.getNumber("score") !== null;
+      interaction.options.getNumber("score") !== null ||
+      characteristicRaw !== null ||
+      lastChangeRaw !== null;
 
     const content = hasUpdate
       ? [
@@ -703,7 +707,13 @@ async function handleHoriCommand(
             trustLevel: interaction.options.getNumber("trust") ?? undefined,
             familiarity: interaction.options.getNumber("familiarity") ?? undefined,
             proactivityPreference: interaction.options.getNumber("proactivity") ?? undefined,
-            relationshipScore: interaction.options.getNumber("score") ?? undefined
+            relationshipScore: interaction.options.getNumber("score") ?? undefined,
+            characteristic: characteristicRaw === null
+              ? undefined
+              : (characteristicRaw.trim().toLowerCase() === "clear" ? null : characteristicRaw),
+            lastChange: lastChangeRaw === null
+              ? undefined
+              : (lastChangeRaw.trim().toLowerCase() === "clear" ? null : lastChangeRaw)
           }),
           "",
           await runtime.slashAdmin.relationshipDetails(interaction.guildId, targetUserId)
@@ -4205,3 +4215,52 @@ async function buildV6AuditLog(runtime: BotRuntime, guildId: string) {
   }
 }
 
+
+// V6 Item 12: status + reset для sigil core-prompt overrides.
+// Используем listCorePromptTemplates / setCorePromptTemplate / resetCorePromptTemplate из RuntimeConfigService.
+async function buildV6SigilPromptsStatus(runtime: BotRuntime, guildId: string) {
+  try {
+    const templates = await runtime.runtimeConfig.listCorePromptTemplates(guildId);
+    const sigilEntries = templates.filter((entry: { key: string }) => entry.key.startsWith("sigil_"));
+    if (sigilEntries.length === 0) {
+      return "**V6 Sigil prompts**\n(нет sigil-промптов в реестре)";
+    }
+    const lines = sigilEntries.map((entry: { key: string; label?: string; source: string; content: string }) => {
+      const overridden = entry.source === "runtime_setting";
+      const preview = entry.content.length > 80 ? entry.content.slice(0, 80) + "…" : entry.content;
+      return "`" + entry.key + "` · " + (overridden ? "**override**" : "default") + "\n  " + preview;
+    });
+    return [
+      "**V6 Sigil prompts** (Item 12)",
+      "Текст вставляется как overlay в system prompt, когда сообщение начинается с соответствующего знака.",
+      ...lines,
+      "_Редактирование — через стандартное модальное \"Edit core prompt\" (выбрать ключ `sigil_*`)._"
+    ].join("\n");
+  } catch (error) {
+    return "Не удалось получить sigil-промпты: " + asErrorMessage(error);
+  }
+}
+
+async function resetV6SigilPrompts(runtime: BotRuntime, guildId: string, updatedBy: string) {
+  try {
+    const templates = await runtime.runtimeConfig.listCorePromptTemplates(guildId);
+    const sigilOverrides = templates.filter(
+      (entry: { key: string; source: string }) => entry.key.startsWith("sigil_") && entry.source === "runtime_setting"
+    );
+    if (sigilOverrides.length === 0) {
+      return "Sigil-промпты уже на default — сбрасывать нечего.";
+    }
+    let reset = 0;
+    for (const entry of sigilOverrides) {
+      try {
+        await runtime.runtimeConfig.resetCorePromptTemplate(guildId, entry.key as never, updatedBy);
+        reset += 1;
+      } catch {
+        // best-effort, продолжаем
+      }
+    }
+    return "Сброшено sigil-промптов: `" + reset + "` из `" + sigilOverrides.length + "`.";
+  } catch (error) {
+    return "Не удалось сбросить sigil-промпты: " + asErrorMessage(error);
+  }
+}
