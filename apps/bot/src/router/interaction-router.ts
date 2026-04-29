@@ -3279,7 +3279,7 @@ function buildCorePromptPanelRows(selected: {
       new ButtonBuilder()
         .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:reset:${selected.key}`)
         .setLabel("Reset")
-        .setEmoji("↺")
+        .setEmoji("🔄")
         .setDisabled(selected.source !== "runtime_setting")
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()

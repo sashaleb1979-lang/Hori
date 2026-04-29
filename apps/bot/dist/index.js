@@ -3296,7 +3296,7 @@ function buildCorePromptPanelRows(selected) {
     ),
     new import_discord3.ActionRowBuilder().addComponents(
       new import_discord3.ButtonBuilder().setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:edit:${selected.key}`).setLabel("Edit").setEmoji("\u270F\uFE0F").setStyle(import_discord3.ButtonStyle.Primary),
-      new import_discord3.ButtonBuilder().setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:reset:${selected.key}`).setLabel("Reset").setEmoji("\u21BA").setDisabled(selected.source !== "runtime_setting").setStyle(import_discord3.ButtonStyle.Secondary),
+      new import_discord3.ButtonBuilder().setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:reset:${selected.key}`).setLabel("Reset").setEmoji("\u{1F504}").setDisabled(selected.source !== "runtime_setting").setStyle(import_discord3.ButtonStyle.Secondary),
       new import_discord3.ButtonBuilder().setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:back:${selected.key}`).setLabel("Persona").setEmoji("\u{1F3AD}").setStyle(import_discord3.ButtonStyle.Secondary),
       new import_discord3.ButtonBuilder().setCustomId(`${HORI_ACTION_PREFIX}:panel_home`).setLabel("Panel").setEmoji("\u{1F3E0}").setStyle(import_discord3.ButtonStyle.Secondary)
     )

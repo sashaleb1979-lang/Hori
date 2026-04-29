@@ -4,13 +4,11 @@
     "builder": "DOCKERFILE",
     "dockerfilePath": "/Dockerfile",
     "watchPatterns": [
-      "/apps/bot/**",
+      "/apps/api/**",
       "/packages/analytics/**",
       "/packages/config/**",
       "/packages/core/**",
-      "/packages/llm/**",
       "/packages/memory/**",
-      "/packages/search/**",
       "/packages/shared/**",
       "/prisma/**",
       "/scripts/**",
@@ -24,6 +22,7 @@
     ]
   },
   "deploy": {
+    "healthcheckPath": "/health/ready",
     "restartPolicyType": "on_failure",
     "restartPolicyMaxRetries": 10,
     "startCommand": "node scripts/start.mjs"
