@@ -229,18 +229,7 @@ export class ChatOrchestrator {
       : /\?/.test(intent.cleanedContent)
         ? "info_question"
         : "casual_address";
-    const contour = intent.intent === "chat"
-      ? resolveContour({
-          messageKind,
-          currentHour: getHourInTimeZone(message.createdAt),
-          quietHoursEnabled: this.deps.env.QUIET_HOURS_ENABLED,
-          isAutoInterject: message.triggerSource === "auto_interject",
-          triggerSource: message.triggerSource,
-          explicitInvocation: message.explicitInvocation,
-          mentionedBot: message.mentionedBot,
-          mentionsBotByName: message.mentionsBotByName
-        })
-      : { contour: "C" as const, reason: `intent:${intent.intent}` };
+    const contour = { contour: "C" as const, reason: "v7_static" };
     const affinityRelationship = this.relationshipsHardDisabled()
       ? null
       : runtimeConfig.featureFlags.affinitySignalsEnabled
@@ -381,7 +370,7 @@ export class ChatOrchestrator {
       explicitInvocation: message.explicitInvocation,
       intent: intent.intent,
       routeReason: intent.reason,
-      modelKind: intent.intent === "chat" && contour.contour === "A" ? undefined : this.deps.modelRouter.pickKind(intent.intent),
+      modelKind: this.deps.modelRouter.pickKind(intent.intent),
       usedSearch: false,
       toolNames: [],
       contextMessages: contextBundle.recentMessages.length,
@@ -451,10 +440,7 @@ export class ChatOrchestrator {
           break;
         case "chat":
         default:
-          if (contour.contour === "A") {
-            reply = pickContourAResponse();
-          } else {
-            reply = await this.handleChat({
+          reply = await this.handleChat({
               message,
               content: intent.cleanedContent,
               behavior,
@@ -466,9 +452,8 @@ export class ChatOrchestrator {
               restoredContext: restoredContext ? buildRestoredContextBlock(restoredContext) : null
             });
 
-            if (restoredContext) {
-              await this.consumeRestoredContext(restoredContext.id);
-            }
+          if (restoredContext) {
+            await this.consumeRestoredContext(restoredContext.id);
           }
           break;
       }
