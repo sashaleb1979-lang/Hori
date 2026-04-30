@@ -8,10 +8,8 @@ import type { LlmChatResponse, LlmClient, LlmRequestMetadata, ModelRoutingSlot }
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
 import { ContextService, type PromptSlotService, ReflectionService, RelationshipService, RetrievalService, SessionBufferService } from "@hori/memory";
 import { BraveSearchClient, buildSourceDigest, extractLinksFromMessage, fetchWebPage } from "@hori/search";
-import { chooseConflictStrategy, detectConflict, type ConflictDetection } from "../brain/conflict-detector";
-import { EmotionLabel, type EmotionalState } from "../brain/emotion-state";
-import { createEngineState, generateEmotionalState } from "../brain/emotion-engine";
-import { getHourInTimeZone, pickContourAResponse, resolveContour, type Contour } from "../brain/response-budget";
+// V7: brain pipeline (conflict-detector / emotion-engine / response-budget) удалён. Contour — локальный alias.
+type Contour = "A" | "B" | "C";
 import { IntentRouter } from "../intents/intent-router";
 import { detectMessageKind } from "../persona/prompt-spec-stubs";
 import { PersonaService } from "../persona/persona-service";
@@ -107,7 +105,6 @@ export class ChatOrchestrator {
   private readonly emotionMediaDecision = new EmotionMediaDecisionService();
   private readonly embeddingCache = new Map<string, { expiresAt: number; value: number[] }>();
   private readonly memoryHydeCache = new Map<string, { expiresAt: number; value: string }>();
-  private readonly emotionStateByScope = new Map<string, ReturnType<typeof createEngineState>>();
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
@@ -235,17 +232,8 @@ export class ChatOrchestrator {
       : runtimeConfig.featureFlags.affinitySignalsEnabled
         ? await this.deps.affinity?.applyRecentOverlay(message.guildId, message.userId, contextBundle.relationship)
         : contextBundle.relationship;
-    const conflict = detectConflict(
-      contextBundle.recentMessages.map((entry) => ({ userId: entry.userId ?? "unknown", content: entry.content }))
-    );
-    const emotionalState = this.buildEmotionalState({
-      message,
-      messageKind,
-      relationship: affinityRelationship,
-      conflict,
-      cleanedContent: intent.cleanedContent,
-    });
-    const conflictStrategy = chooseConflictStrategy(emotionalState.subjectiveFeeling, conflict.score);
+    // V7: emotion+conflict pipeline удалён. Все параметры — фиксированные.
+
     const contextScores = runtimeConfig.featureFlags.contextConfidenceEnabled
       ? this.contextScoring.score({
           bundle: contextBundle,
@@ -278,8 +266,8 @@ export class ChatOrchestrator {
     const effectiveRoast = runtimeConfig.featureFlags.roast
       ? this.roastPolicy.resolveRoastLevel(guildSettings.roastLevel, affinityRelationship)
       : 0;
-    const activeMood = runtimeConfig.featureFlags.moodEngineEnabled ? await this.deps.mood?.getActiveMode(message.guildId) : null;
-    const effectiveMode = activeMood ?? this.mapEmotionToMode(emotionalState.subjectiveFeeling, conflictStrategy);
+    // V7: mood-engine отключён, mapEmotionToMode удалён → mode фиксирован.
+    const effectiveMode = "normal" as const;
 
     if (
       runtimeConfig.featureFlags.contextConfidenceEnabled &&
@@ -356,14 +344,8 @@ export class ChatOrchestrator {
       sigilPromptOverrides
     });
     const restoredContext = intent.intent === "chat" ? await this.getActiveRestoredContext(message) : null;
-    const systemPrompt = [
-      behavior.prompt,
-      this.buildEmotionGuidance(emotionalState),
-      this.buildConflictGuidance(conflict, conflictStrategy),
-      this.buildContourGuidance(contour.contour),
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+    // V7: ACTIVE_CORE — единственный системный prompt. Никаких dynamic guidance блоков.
+    const systemPrompt = behavior.prompt;
 
     const trace: BotTrace = {
       triggerSource: message.triggerSource,
@@ -378,16 +360,6 @@ export class ChatOrchestrator {
       relationshipApplied: false,
       responded: true,
       responseBudget: contour,
-      conflict,
-      emotion: {
-        label: emotionalState.subjectiveFeeling,
-        mode: effectiveMode,
-        style: {
-          warmth: emotionalState.warmth,
-          energy: emotionalState.energy,
-          directness: emotionalState.directness,
-        }
-      },
       behavior: behavior.trace,
       queue: queueTrace,
       linkUnderstanding: linkContext.trace,
@@ -512,7 +484,7 @@ export class ChatOrchestrator {
       content: intent.cleanedContent,
       targetedToBot: message.triggerSource === "reply" || message.mentionedBot || message.mentionsBotByName
     });
-    await this.recordRelationshipInteraction(message, messageKind, conflict);
+    await this.recordRelationshipInteraction(message, messageKind);
     const reflectionTrace = await this.recordSelfReflectionLesson(
       runtimeConfig.featureFlags.selfReflectionLessonsEnabled,
       message,
@@ -526,60 +498,7 @@ export class ChatOrchestrator {
 
     let replyPayload: string | BotReplyPayload = reply;
 
-    if (runtimeConfig.featureFlags.mediaReactionsEnabled && this.deps.media && behavior.trace.mediaReactionEligible) {
-      const mediaDecision = this.emotionMediaDecision.decide({
-        enabled: true,
-        eligible: behavior.trace.mediaReactionEligible,
-        triggerSource: message.triggerSource,
-        emotionalState,
-        messageKind,
-        channelKind: behavior.trace.channelKind,
-        activeMode: behavior.trace.activeMode,
-        contextConfidence: contextScores?.contextConfidence,
-        conflictScore: conflict.score,
-        relationship: {
-          toneBias: affinityRelationship?.toneBias,
-          closeness: (affinityRelationship as { closeness?: number } | null | undefined)?.closeness,
-          trustLevel: (affinityRelationship as { trustLevel?: number } | null | undefined)?.trustLevel
-        },
-        runtimeSettings
-      });
-
-      if (mediaDecision.allowAutoMedia) {
-        const mediaResult = await this.deps.media.maybeAttachMedia({
-          enabled: true,
-          replyText: reply,
-          guildId: message.guildId,
-          channelId: message.channelId,
-          messageId: message.messageId,
-          channelKind: behavior.trace.channelKind,
-          mode: behavior.trace.activeMode,
-          stylePreset: behavior.trace.stylePreset,
-          triggerTags: [
-            ...mediaDecision.triggerTags,
-            ...(behavior.trace.staleTakeDetected ? ["stale_take"] : [])
-          ],
-          emotionTags: mediaDecision.emotionTags,
-          messageKind,
-          confidence: contextScores?.contextConfidence,
-          intensity: emotionalState.intensity,
-          autoTriggered: true,
-          reasonKey: mediaDecision.reasonKey,
-          globalCooldownSec: runtimeSettings.mediaAutoGlobalCooldownSec
-        });
-
-        replyPayload = mediaResult.payload;
-        trace.media = mediaResult.trace;
-      } else {
-        trace.media = {
-          enabled: true,
-          selected: false,
-          reason: mediaDecision.reason,
-          autoTriggered: true,
-          reasonKey: mediaDecision.reasonKey ?? null
-        };
-      }
-    }
+    // V7: media-reaction pipeline удалён. До фазы 5 (mem-trigger выбор мемов) — никаких auto-media.
 
     botRepliesCounter.inc({ intent: intent.intent });
 
@@ -1955,153 +1874,9 @@ export class ChatOrchestrator {
     }
   }
 
-  private buildEmotionalState(input: {
-    message: MessageEnvelope;
-    messageKind: ReturnType<typeof detectMessageKind>;
-    relationship?: { toneBias: string; roastLevel: number; praiseBias: number } | null;
-    conflict: ConflictDetection;
-    cleanedContent: string;
-  }) {
-    const scopeKey = `${input.message.guildId}:${input.message.channelId}`;
-    const engine = this.emotionStateByScope.get(scopeKey) ?? createEngineState();
-    this.emotionStateByScope.set(scopeKey, engine);
-
-    const crisisIndicators = /(суицид|самоубийств|убью себя|self-harm|kill myself)/i.test(input.cleanedContent);
-    const negativeConflict = input.conflict.isConflict ? Math.min(0.65, input.conflict.score + 0.2) : 0;
-    const baseValenceByKind: Record<ReturnType<typeof detectMessageKind>, number> = {
-      direct_mention: 0.1,
-      reply_to_bot: 0.18,
-      meta_feedback: -0.2,
-      casual_address: 0.08,
-      smalltalk_hangout: 0.24,
-      info_question: 0.05,
-      opinion_question: 0,
-      request_for_explanation: 0.16,
-      meme_bait: 0.22,
-      provocation: -0.42,
-      repeated_question: -0.28,
-      low_signal_noise: -0.08,
-      command_like_request: 0.04,
-    };
-
-    const sentimentValence = clamp(
-      baseValenceByKind[input.messageKind] - negativeConflict + ((input.relationship?.praiseBias ?? 0) * 0.03) - ((input.relationship?.roastLevel ?? 0) * 0.02),
-      -1,
-      1,
-    );
-
-    const appraisal = {
-      relevance: clamp(
-        0.35 + (input.message.explicitInvocation ? 0.18 : 0) + (input.conflict.isConflict ? input.conflict.score * 0.4 : 0) + (input.messageKind === "request_for_explanation" ? 0.12 : 0),
-        0,
-        1,
-      ),
-      goalImpact: crisisIndicators
-        ? "supportive_opportunity"
-        : input.conflict.isConflict
-          ? "resolution_opportunity"
-          : input.messageKind === "request_for_explanation" || input.messageKind === "info_question"
-            ? "engaging_opportunity"
-            : input.messageKind === "provocation"
-              ? "challenging"
-              : "neutral",
-      copingCapability: input.conflict.isConflict ? "moderate" : "high_capability",
-      socialAppropriateness: crisisIndicators
-        ? "crisis_protocol"
-        : input.conflict.isConflict
-          ? "calm_resolution"
-          : input.messageKind === "smalltalk_hangout" || input.messageKind === "meme_bait"
-            ? "warm_engagement"
-            : input.messageKind === "request_for_explanation" || input.messageKind === "info_question"
-              ? "empathetic_response"
-              : "neutral_response",
-      userEmotionDetected: input.conflict.isConflict ? "conflict" : undefined,
-      crisisIndicators,
-    };
-
-    return generateEmotionalState(
-      appraisal,
-      {
-        valence: sentimentValence,
-        confidence: clamp(0.45 + input.conflict.score * 0.35 + (input.message.explicitInvocation ? 0.1 : 0), 0, 1),
-      },
-      engine,
-    );
-  }
-
-  private mapEmotionToMode(label: EmotionLabel, conflictStrategy: ReturnType<typeof chooseConflictStrategy>) {
-    if (conflictStrategy === "peacemake") {
-      return "focused" as const;
-    }
-
-    if (conflictStrategy === "confront") {
-      return "irritated" as const;
-    }
-
-    if (label === EmotionLabel.PLAYFUL || label === EmotionLabel.CURIOUS || label === EmotionLabel.OVERPLAYFUL) {
-      return "playful" as const;
-    }
-
-    if (label === EmotionLabel.PROTECTIVE || label === EmotionLabel.WARM_CONCERN || label === EmotionLabel.REASSURING || label === EmotionLabel.FOCUSED) {
-      return "focused" as const;
-    }
-
-    if (label === EmotionLabel.REFLECTIVE || label === EmotionLabel.COLD_IGNORE || label === EmotionLabel.TIRED) {
-      return "dry" as const;
-    }
-
-    if (label === EmotionLabel.SUPER_AGGRESSIVE || label === EmotionLabel.SUPER_IRONIC) {
-      return "irritated" as const;
-    }
-
-    return "normal" as const;
-  }
-
-  private buildEmotionGuidance(state: ReturnType<ChatOrchestrator["buildEmotionalState"]>) {
-    return [
-      "[EMOTIONAL STATE]",
-      `Primary label: ${state.subjectiveFeeling}.`,
-      `Latent style: warmth=${state.warmth.toFixed(2)}, energy=${state.energy.toFixed(2)}, directness=${state.directness.toFixed(2)}, engagement=${state.engagement.toFixed(2)}.`,
-      "Use this only as hidden tone control. Never narrate or explain the emotional state to the user.",
-    ].join("\n");
-  }
-
-  private buildConflictGuidance(conflict: ConflictDetection, strategy: ReturnType<typeof chooseConflictStrategy>) {
-    if (!conflict.isConflict) {
-      return null;
-    }
-
-    if (strategy === "peacemake") {
-      return "[CONFLICT SIGNAL]\nRecent messages look conflict-heavy. De-escalate, separate the claims, and avoid adding heat.";
-    }
-
-    if (strategy === "joke") {
-      return "[CONFLICT SIGNAL]\nThere is tension. If you lighten it, do it briefly and without humiliating either side or escalating the fight.";
-    }
-
-    if (strategy === "confront") {
-      return "[CONFLICT SIGNAL]\nЧеловек ведёт себя токсично. Отвечай прямо, коротко, без юмора и сарказма. Не пытайся быть остроумной. Просто скажи что думаешь. Будь грубой если надо, но не язвительной.";
-    }
-
-    return "[CONFLICT SIGNAL]\nRecent messages look conflict-heavy. Do not escalate. Keep the answer dry, bounded and non-inflammatory.";
-  }
-
-  private buildContourGuidance(contour: Contour) {
-    if (contour === "B") {
-      return "[RESPONSE BUDGET]\nKeep the answer compact and tactical. Prefer one short reply over a full essay.";
-    }
-
-    if (contour === "C") {
-      return "[RESPONSE BUDGET]\nThis turn can spend a fuller reasoning budget if needed, but stay concise by Discord standards.";
-    }
-
-    return null;
-  }
-
   private async recordRelationshipInteraction(
     message: MessageEnvelope,
     messageKind: ReturnType<typeof detectMessageKind>,
-    conflict: ConflictDetection,
   ) {
     if (this.relationshipsHardDisabled() || !this.deps.relationships) {
       return;
