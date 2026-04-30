@@ -13,9 +13,9 @@ import { EmotionLabel, type EmotionalState } from "../brain/emotion-state";
 import { createEngineState, generateEmotionalState } from "../brain/emotion-engine";
 import { getHourInTimeZone, pickContourAResponse, resolveContour, type Contour } from "../brain/response-budget";
 import { IntentRouter } from "../intents/intent-router";
-import { detectMessageKind } from "../persona/messageKinds";
+import { detectMessageKind } from "../persona/prompt-spec-stubs";
 import { PersonaService } from "../persona/persona-service";
-import { buildRestoredContextBlock, type CorePromptTemplates } from "../persona/prompt-spec";
+import { buildRestoredContextBlock, type CorePromptTemplates } from "../persona/prompt-spec-stubs";
 import { HELP_TEXT } from "../prompts/system-prompts";
 import { ResponseGuard } from "../safety/response-guard";
 import { RoastPolicy } from "../safety/roast-policy";
@@ -24,7 +24,6 @@ import { ContextScoringService } from "../services/context-scoring-service";
 import { EmotionMediaDecisionService } from "../services/emotion-media-decision-service";
 import type { AffinityService } from "../services/affinity-service";
 import type { MediaReactionService } from "../services/media-reaction-service";
-import { MicroReactionService, type MicroReactionResult } from "../services/micro-reaction-service";
 import type { MoodService } from "../services/mood-service";
 import type { EffectiveRoutingConfig, EffectiveRuntimeSettings } from "../services/runtime-config-service";
 import { RuntimeConfigService } from "../services/runtime-config-service";
@@ -106,7 +105,6 @@ export class ChatOrchestrator {
   private readonly contextBuilder = new ContextBuilderService();
   private readonly contextScoring = new ContextScoringService();
   private readonly emotionMediaDecision = new EmotionMediaDecisionService();
-  private readonly microReactions = new MicroReactionService();
   private readonly embeddingCache = new Map<string, { expiresAt: number; value: number[] }>();
   private readonly memoryHydeCache = new Map<string, { expiresAt: number; value: string }>();
   private readonly emotionStateByScope = new Map<string, ReturnType<typeof createEngineState>>();
@@ -231,18 +229,7 @@ export class ChatOrchestrator {
       : /\?/.test(intent.cleanedContent)
         ? "info_question"
         : "casual_address";
-    const contour = intent.intent === "chat"
-      ? resolveContour({
-          messageKind,
-          currentHour: getHourInTimeZone(message.createdAt),
-          quietHoursEnabled: this.deps.env.QUIET_HOURS_ENABLED,
-          isAutoInterject: message.triggerSource === "auto_interject",
-          triggerSource: message.triggerSource,
-          explicitInvocation: message.explicitInvocation,
-          mentionedBot: message.mentionedBot,
-          mentionsBotByName: message.mentionsBotByName
-        })
-      : { contour: "C" as const, reason: `intent:${intent.intent}` };
+    const contour = { contour: "C" as const, reason: "v7_static" };
     const affinityRelationship = this.relationshipsHardDisabled()
       ? null
       : runtimeConfig.featureFlags.affinitySignalsEnabled
@@ -383,7 +370,7 @@ export class ChatOrchestrator {
       explicitInvocation: message.explicitInvocation,
       intent: intent.intent,
       routeReason: intent.reason,
-      modelKind: intent.intent === "chat" && contour.contour === "A" ? undefined : this.deps.modelRouter.pickKind(intent.intent),
+      modelKind: this.deps.modelRouter.pickKind(intent.intent),
       usedSearch: false,
       toolNames: [],
       contextMessages: contextBundle.recentMessages.length,
@@ -429,36 +416,9 @@ export class ChatOrchestrator {
 
     let reply = "";
     let moderationAction: AggressionPipelineResult["moderationAction"] = null;
-    const microReaction =
-      intent.intent === "chat"
-        ? this.microReactions.detect({
-            content: intent.cleanedContent,
-            message,
-            messageKind
-          })
-        : null;
 
     try {
-      if (microReaction) {
-        reply = microReaction.reply;
-        trace.microReaction = {
-          kind: microReaction.kind,
-          rule: microReaction.rule,
-          confidence: microReaction.confidence,
-          ...(microReaction.splitChunks ? { splitChunks: microReaction.splitChunks } : {})
-        };
-        trace.routeReason = `${trace.routeReason}; micro_reaction:${microReaction.rule}`;
-        trace.modelKind = undefined;
-      } else switch (intent.intent) {
-        case "help":
-          reply = HELP_TEXT;
-          break;
-        case "analytics":
-          reply = await this.handleAnalytics(message, message.guildId, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens, llmCalls);
-          break;
-        case "summary":
-          reply = await this.handleSummary(message, intent.cleanedContent, systemPrompt, promptContextText, runtimeSettings, behavior.limits.maxTokens, llmCalls);
-          break;
+      switch (intent.intent) {
         case "search": {
           const result = runtimeConfig.featureFlags.webSearch
             ? await this.handleSearch(message, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens, llmCalls)
@@ -478,21 +438,9 @@ export class ChatOrchestrator {
         case "memory_forget":
           reply = await this.handleMemoryForget(message, intent.cleanedContent);
           break;
-        case "rewrite":
-          reply = await this.handleRewrite(message, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens, llmCalls);
-          break;
-        case "profile":
-          reply = runtimeConfig.featureFlags.userProfiles ? await this.handleProfile(message) : "Профили сейчас выключены.";
-          break;
-        case "moderation_style_request":
-          reply = message.isModerator ? "Для такого лучше slash-команду. Так чище." : "Это только для модеров.";
-          break;
         case "chat":
         default:
-          if (contour.contour === "A") {
-            reply = pickContourAResponse();
-          } else {
-            reply = await this.handleChat({
+          reply = await this.handleChat({
               message,
               content: intent.cleanedContent,
               behavior,
@@ -504,9 +452,8 @@ export class ChatOrchestrator {
               restoredContext: restoredContext ? buildRestoredContextBlock(restoredContext) : null
             });
 
-            if (restoredContext) {
-              await this.consumeRestoredContext(restoredContext.id);
-            }
+          if (restoredContext) {
+            await this.consumeRestoredContext(restoredContext.id);
           }
           break;
       }
@@ -516,7 +463,7 @@ export class ChatOrchestrator {
       trace.routeReason = "llm_unavailable";
     }
 
-    if (intent.intent === "chat" && !microReaction) {
+    if (intent.intent === "chat") {
       const aggressionResult = await this.applyAggressionPipeline({
         message,
         reply,
@@ -566,7 +513,6 @@ export class ChatOrchestrator {
       targetedToBot: message.triggerSource === "reply" || message.mentionedBot || message.mentionsBotByName
     });
     await this.recordRelationshipInteraction(message, messageKind, conflict);
-    await this.recordMicroReactionRelationshipSignal(microReaction, message);
     const reflectionTrace = await this.recordSelfReflectionLesson(
       runtimeConfig.featureFlags.selfReflectionLessonsEnabled,
       message,
@@ -1031,66 +977,6 @@ export class ChatOrchestrator {
       },
       moderationAction: null
     };
-  }
-
-  private async handleSummary(
-    message: MessageEnvelope,
-    content: string,
-    systemPrompt: string,
-    contextText: string,
-    runtimeSettings: EffectiveRuntimeSettings,
-    maxTokens?: number,
-    llmCalls?: LlmCallTrace[]
-  ) {
-    const llm = this.getLlmSettings("summary", runtimeSettings, maxTokens);
-    const messages = buildSummaryPrompt(contextText || "Контекста почти нет.", content);
-    messages.unshift({ role: "system", content: systemPrompt });
-
-    const response = await this.deps.llmClient.chat({
-      model: llm.model,
-      messages,
-      temperature: llm.temperature,
-      topP: llm.topP,
-      maxTokens: llm.maxTokens,
-      keepAlive: llm.keepAlive,
-      numCtx: llm.numCtx,
-      numBatch: llm.numBatch,
-      metadata: this.createLlmMetadata(message, "summary", "summary", "summary", "complex")
-    });
-    this.recordLlmCall(llmCalls, "summary", llm.model, messages, response);
-
-    return response.message.content;
-  }
-
-  private async handleAnalytics(
-    message: MessageEnvelope,
-    guildId: string,
-    request: string,
-    systemPrompt: string,
-    runtimeSettings: EffectiveRuntimeSettings,
-    maxTokens?: number,
-    llmCalls?: LlmCallTrace[]
-  ) {
-    const llm = this.getLlmSettings("analytics", runtimeSettings, maxTokens);
-    const window = /за день|сегодня/i.test(request) ? "day" : /за месяц|месяц/i.test(request) ? "month" : "week";
-    const overview = await this.deps.analytics.getOverview(guildId, window);
-    const analyticsText = formatAnalyticsOverview(overview);
-
-    const messages: LlmChatMessage[] = [{ role: "system", content: systemPrompt }, ...buildAnalyticsNarrationPrompt(analyticsText, request)];
-    const response = await this.deps.llmClient.chat({
-      model: llm.model,
-      messages,
-      temperature: llm.temperature,
-      topP: llm.topP,
-      maxTokens: llm.maxTokens,
-      keepAlive: llm.keepAlive,
-      numCtx: llm.numCtx,
-      numBatch: llm.numBatch,
-      metadata: this.createLlmMetadata(message, "analytics", "analytics", "analytics", "complex")
-    });
-    this.recordLlmCall(llmCalls, "analytics", llm.model, messages, response);
-
-    return response.message.content || analyticsText;
   }
 
   private async handleSearch(
@@ -1851,58 +1737,6 @@ export class ChatOrchestrator {
     return `забыла: ${selected.title}`;
   }
 
-  private async handleRewrite(
-    message: MessageEnvelope,
-    cleanedContent: string,
-    systemPrompt: string,
-    runtimeSettings: EffectiveRuntimeSettings,
-    maxTokens?: number,
-    llmCalls?: LlmCallTrace[]
-  ) {
-    const llm = this.getLlmSettings("rewrite", runtimeSettings, maxTokens);
-    const source = message.replyToMessageId ? await this.deps.prisma.message.findUnique({ where: { id: message.replyToMessageId } }) : null;
-
-    if (!source) {
-      return "Если хочешь переписать текст, ответь реплаем на него.";
-    }
-
-    const prompt = buildRewritePrompt(source.content, cleanedContent);
-    prompt.unshift({ role: "system", content: systemPrompt });
-
-    const response = await this.deps.llmClient.chat({
-      model: llm.model,
-      messages: prompt,
-      temperature: llm.temperature,
-      topP: llm.topP,
-      maxTokens: llm.maxTokens,
-      keepAlive: llm.keepAlive,
-      numCtx: llm.numCtx,
-      numBatch: llm.numBatch,
-      metadata: this.createLlmMetadata(message, "rewrite", "rewrite", "rewrite", "complex")
-    });
-    this.recordLlmCall(llmCalls, "rewrite", llm.model, prompt, response);
-
-    return response.message.content;
-  }
-
-  private async handleProfile(message: MessageEnvelope) {
-    const targetUserId = message.mentionedUserIds[0] ?? message.userId;
-    const profile = await this.deps.prisma.userProfile.findUnique({
-      where: {
-        guildId_userId: {
-          guildId: message.guildId,
-          userId: targetUserId
-        }
-      }
-    });
-
-    if (!profile || !profile.isEligible || profile.confidenceScore < 0.45) {
-      return "Нормального профиля нет. Либо данных мало, либо он слишком слабый.";
-    }
-
-    return `${profile.summaryShort}\nТеги: ${profile.styleTags.join(", ")} | ${profile.topicTags.join(", ")}`;
-  }
-
   private async buildLinkUnderstandingContext(content: string) {
     const urls = extractLinksFromMessage(content, { maxLinks: 1 });
 
@@ -2298,25 +2132,8 @@ export class ChatOrchestrator {
     }
   }
 
-  private async recordMicroReactionRelationshipSignal(
-    microReaction: MicroReactionResult | null,
-    message: MessageEnvelope
-  ) {
-    if (this.relationshipsHardDisabled() || !microReaction || !this.deps.relationships) {
-      return;
-    }
-
-    try {
-      switch (microReaction.kind) {
-        case "praise":
-          await this.deps.relationships.recordInteraction(message.guildId, message.userId, 0.22);
-          return;
-        case "meta_feedback":
-          return;
-      }
-    } catch (error) {
-      this.deps.logger.warn({ error }, "failed to record micro reaction relationship signal");
-    }
+  private async recordMicroReactionRelationshipSignal(): Promise<void> {
+    return;
   }
 
   private recordLlmCall(

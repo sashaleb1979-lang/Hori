@@ -23,12 +23,12 @@ import type { AppPrismaClient, FeatureFlags, MemoryMode, PersonaSettings, Relati
 import {
   CORE_PROMPT_DEFINITIONS,
   CORE_PROMPT_KEYS,
-  buildCorePromptTemplates,
   getCorePromptDefaultContent,
   isCorePromptKey,
   type CorePromptKey,
-  type CorePromptTemplates
-} from "../persona/prompt-spec";
+  type CorePromptTemplates,
+  DEFAULT_CORE_PROMPT_TEMPLATES
+} from "../persona/prompt-spec-stubs";
 
 export const FEATURE_KEY_MAP = {
   web_search: "webSearch",
@@ -911,7 +911,7 @@ export class RuntimeConfigService {
         .map((entry) => [entry.key, entry.content])
     ) as Partial<Record<CorePromptKey, string>>;
 
-    return buildCorePromptTemplates(overrides);
+    return { ...DEFAULT_CORE_PROMPT_TEMPLATES, ...overrides };
   }
 
   /**

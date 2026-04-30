@@ -224,7 +224,7 @@ export interface PersonaDebugOverrides {
   isSelfInitiated?: boolean;
 }
 
-import type { CorePromptTemplates } from "./prompt-spec";
+import type { CorePromptTemplates } from "./prompt-spec-stubs";
 
 export interface ComposeBehaviorPromptInput {
   personaConfig?: Partial<PersonaConfig>;

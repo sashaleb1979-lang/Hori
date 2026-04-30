@@ -13,7 +13,6 @@ export * from "./services/context-scoring-service";
 export * from "./services/emotion-media-decision-service";
 export * from "./services/affinity-service";
 export * from "./services/media-reaction-service";
-export * from "./services/micro-reaction-service";
 export * from "./services/mood-service";
 export * from "./services/reply-queue-service";
 export * from "./services/queue-phrase-pool-service";
@@ -33,7 +32,6 @@ export * from "./brain/response-budget";
 export * from "./brain/conflict-detector";
 
 // --- Phase 2: Relationships + Busy Engine ---
-export * from "./persona/personality-traits";
 export * from "./services/priority-queue";
 export * from "./services/busy-engine";
 export * from "./policies/debounce-policy";

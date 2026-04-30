@@ -1,12 +1,29 @@
 import type { BotIntent, IntentResult, MessageEnvelope } from "@hori/shared";
 
 /**
- * V6 Phase D: Sigil registry — каждый знак имеет постоянный entry, panel может
- * включать/выключать через RuntimeConfigService key `intents.sigils.enabled`.
+ * V7 IntentRouter.
  *
- * `?` включён по умолчанию (search). Остальные — reserved-slots: shape известен,
- * но они отключены пока не реализована соответствующая обработка.
+ * Только два режима:
+ *  1. **chat** — всё остальное.
+ *  2. **сигил/русское кодовое слово** — отдельные intent-ветки.
+ *
+ * Активны сейчас:
+ *  - `?` (sigil) → search
+ *  - `хори запомни X` → memory_write
+ *  - `хори вспомни X` → memory_recall
+ *  - `хори забудь X` → memory_forget
+ *
+ * Зарезервированы (panel может включить позже):
+ *  - `*` (sigil) → отложен (knowledge-base поиск по тегам)
+ *  - `!` (sigil) → reserved
+ *
+ * Все V6 intents (analytics/summary/profile/rewrite/help/moderation_style_request)
+ * больше не маршрутизируются — они сначала становятся chat, а соответствующее
+ * поведение реализуется напрямую в chat handler через core/память (если вообще
+ * нужно). Тип `BotIntent` в shared сохраняет старые значения для совместимости
+ * до Phase 1C.
  */
+
 export interface SigilDefinition {
   char: string;
   intent: Exclude<BotIntent, "chat" | "ignore">;
@@ -31,6 +48,16 @@ export const SIGIL_REGISTRY: ReadonlyArray<SigilDefinition> = [
     reason: "sigil:?"
   },
   {
+    char: "*",
+    intent: "search",
+    requiresSearch: false,
+    enabledByDefault: false,
+    reserved: true,
+    label: "Knowledge tag search",
+    description: "(reserved) Поиск по тегам в knowledge base. По умолчанию выключен.",
+    reason: "sigil:*"
+  },
+  {
     char: "!",
     intent: "rewrite",
     requiresSearch: false,
@@ -39,36 +66,6 @@ export const SIGIL_REGISTRY: ReadonlyArray<SigilDefinition> = [
     label: "Force rewrite",
     description: "(reserved) Перезапросить с другим стилем. По умолчанию выключен.",
     reason: "sigil:!"
-  },
-  {
-    char: "*",
-    intent: "summary",
-    requiresSearch: false,
-    enabledByDefault: false,
-    reserved: true,
-    label: "Summary marker",
-    description: "(reserved) Кратко пересказать. По умолчанию выключен.",
-    reason: "sigil:*"
-  },
-  {
-    char: ">",
-    intent: "profile",
-    requiresSearch: false,
-    enabledByDefault: false,
-    reserved: true,
-    label: "Profile inspect",
-    description: "(reserved) Посмотреть профиль автора цитаты. По умолчанию выключен.",
-    reason: "sigil:>"
-  },
-  {
-    char: "^",
-    intent: "analytics",
-    requiresSearch: false,
-    enabledByDefault: false,
-    reserved: true,
-    label: "Activity stats",
-    description: "(reserved) Быстрая активность канала. По умолчанию выключен.",
-    reason: "sigil:^"
   }
 ];
 
@@ -85,59 +82,26 @@ function buildActiveSigils(options: IntentRouterOptions | undefined): SigilDefin
   return SIGIL_REGISTRY.filter((entry) => allowed.has(entry.char));
 }
 
-
 const PATTERNS: Array<{
   intent: Exclude<BotIntent, "chat" | "ignore">;
   requiresSearch?: boolean;
   regex: RegExp;
   reason: string;
 }> = [
-  { intent: "help", regex: /^(help|помощь|что умеешь)$/i, reason: "help keyword" },
-  {
-    intent: "summary",
-    regex: /(кратко|что было|пока меня не было|о чем спорили|что решили|перескажи)/i,
-    reason: "summary pattern"
-  },
-  {
-    intent: "analytics",
-    regex: /(кто больше всех писал|топ за|кто активнее|какие каналы самые активные|пики активности|статистика)/i,
-    reason: "analytics pattern"
-  },
-  {
-    intent: "search",
-    regex: /(найди|свежую инфу|проверь это|посмотри что там|сравни .*источник)/i,
-    reason: "search pattern",
-    requiresSearch: true
-  },
   {
     intent: "memory_write",
     regex: /^запомни\b/i,
-    reason: "memory write pattern"
+    reason: "memory write: хори запомни …"
   },
   {
     intent: "memory_recall",
     regex: /^вспомни\b/i,
-    reason: "memory recall pattern"
+    reason: "memory recall: хори вспомни …"
   },
   {
     intent: "memory_forget",
     regex: /^забудь\b/i,
-    reason: "memory forget pattern"
-  },
-  {
-    intent: "rewrite",
-    regex: /(скажи короче|скажи жёстче|скажи жестче|скажи проще|без воды|перепиши нормально)/i,
-    reason: "rewrite pattern"
-  },
-  {
-    intent: "profile",
-    regex: /(что он имел в виду|что она имела в виду|что за человек|профиль|какой у него стиль)/i,
-    reason: "profile pattern"
-  },
-  {
-    intent: "moderation_style_request",
-    regex: /(будь мягче|будь жестче|не трогай его|не трогай её|подкалывай)/i,
-    reason: "moderation style request pattern"
+    reason: "memory forget: хори забудь …"
   }
 ];
 
@@ -178,25 +142,24 @@ export class IntentRouter {
 
     if (!cleanedContent.length) {
       return {
-        intent: "help",
-        confidence: 0.98,
-        reason: "empty invocation defaults to help",
+        intent: "chat",
+        confidence: 0.95,
+        reason: "empty invocation → chat",
         cleanedContent,
         requiresSearch: false
       };
     }
 
-    // V6 Phase D: sigil-роутинг — проверяем первый не-пробельный символ.
+    // Sigil-роутинг — проверяем первый не-пробельный символ.
     const firstChar = cleanedContent[0];
     const sigil = this.activeSigils.find((entry) => entry.char === firstChar);
     if (sigil) {
       const stripped = cleanedContent.slice(1).trim();
-      // Голый знак без текста → fallback на help/chat (не запускаем search впустую).
       if (stripped.length === 0) {
         return {
-          intent: "help",
-          confidence: 0.95,
-          reason: `sigil ${sigil.char} without payload → help`,
+          intent: "chat",
+          confidence: 0.9,
+          reason: `sigil ${sigil.char} without payload → chat`,
           cleanedContent,
           requiresSearch: false
         };
@@ -211,11 +174,12 @@ export class IntentRouter {
       };
     }
 
+    // Русские кодовые слова после имени бота.
     for (const entry of PATTERNS) {
       if (entry.regex.test(cleanedContent)) {
         return {
           intent: entry.intent,
-          confidence: 0.85,
+          confidence: 0.95,
           reason: entry.reason,
           cleanedContent,
           requiresSearch: entry.requiresSearch ?? false
@@ -223,13 +187,13 @@ export class IntentRouter {
       }
     }
 
+    // Фолбэк — chat.
     return {
       intent: "chat",
-      confidence: 0.65,
-      reason: "default chat fallback",
+      confidence: 0.7,
+      reason: "fallback → chat",
       cleanedContent,
       requiresSearch: false
     };
   }
 }
-
