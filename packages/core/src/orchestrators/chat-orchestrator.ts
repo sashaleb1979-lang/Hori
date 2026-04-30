@@ -24,7 +24,6 @@ import { ContextScoringService } from "../services/context-scoring-service";
 import { EmotionMediaDecisionService } from "../services/emotion-media-decision-service";
 import type { AffinityService } from "../services/affinity-service";
 import type { MediaReactionService } from "../services/media-reaction-service";
-import { MicroReactionService, type MicroReactionResult } from "../services/micro-reaction-service";
 import type { MoodService } from "../services/mood-service";
 import type { EffectiveRoutingConfig, EffectiveRuntimeSettings } from "../services/runtime-config-service";
 import { RuntimeConfigService } from "../services/runtime-config-service";
@@ -106,7 +105,6 @@ export class ChatOrchestrator {
   private readonly contextBuilder = new ContextBuilderService();
   private readonly contextScoring = new ContextScoringService();
   private readonly emotionMediaDecision = new EmotionMediaDecisionService();
-  private readonly microReactions = new MicroReactionService();
   private readonly embeddingCache = new Map<string, { expiresAt: number; value: number[] }>();
   private readonly memoryHydeCache = new Map<string, { expiresAt: number; value: string }>();
   private readonly emotionStateByScope = new Map<string, ReturnType<typeof createEngineState>>();
@@ -429,27 +427,9 @@ export class ChatOrchestrator {
 
     let reply = "";
     let moderationAction: AggressionPipelineResult["moderationAction"] = null;
-    const microReaction =
-      intent.intent === "chat"
-        ? this.microReactions.detect({
-            content: intent.cleanedContent,
-            message,
-            messageKind
-          })
-        : null;
 
     try {
-      if (microReaction) {
-        reply = microReaction.reply;
-        trace.microReaction = {
-          kind: microReaction.kind,
-          rule: microReaction.rule,
-          confidence: microReaction.confidence,
-          ...(microReaction.splitChunks ? { splitChunks: microReaction.splitChunks } : {})
-        };
-        trace.routeReason = `${trace.routeReason}; micro_reaction:${microReaction.rule}`;
-        trace.modelKind = undefined;
-      } else switch (intent.intent) {
+      switch (intent.intent) {
         case "search": {
           const result = runtimeConfig.featureFlags.webSearch
             ? await this.handleSearch(message, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens, llmCalls)
@@ -498,7 +478,7 @@ export class ChatOrchestrator {
       trace.routeReason = "llm_unavailable";
     }
 
-    if (intent.intent === "chat" && !microReaction) {
+    if (intent.intent === "chat") {
       const aggressionResult = await this.applyAggressionPipeline({
         message,
         reply,
@@ -548,7 +528,6 @@ export class ChatOrchestrator {
       targetedToBot: message.triggerSource === "reply" || message.mentionedBot || message.mentionsBotByName
     });
     await this.recordRelationshipInteraction(message, messageKind, conflict);
-    await this.recordMicroReactionRelationshipSignal(microReaction, message);
     const reflectionTrace = await this.recordSelfReflectionLesson(
       runtimeConfig.featureFlags.selfReflectionLessonsEnabled,
       message,
@@ -2168,25 +2147,8 @@ export class ChatOrchestrator {
     }
   }
 
-  private async recordMicroReactionRelationshipSignal(
-    microReaction: MicroReactionResult | null,
-    message: MessageEnvelope
-  ) {
-    if (this.relationshipsHardDisabled() || !microReaction || !this.deps.relationships) {
-      return;
-    }
-
-    try {
-      switch (microReaction.kind) {
-        case "praise":
-          await this.deps.relationships.recordInteraction(message.guildId, message.userId, 0.22);
-          return;
-        case "meta_feedback":
-          return;
-      }
-    } catch (error) {
-      this.deps.logger.warn({ error }, "failed to record micro reaction relationship signal");
-    }
+  private async recordMicroReactionRelationshipSignal(): Promise<void> {
+    return;
   }
 
   private recordLlmCall(
