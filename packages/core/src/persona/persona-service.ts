@@ -1,6 +1,6 @@
 import type { FeatureFlags, MessageEnvelope, PersonaSettings, RelationshipOverlay } from "@hori/shared";
 
-import type { CorePromptTemplates } from "./prompt-spec";
+import type { CorePromptTemplates } from "./prompt-spec-stubs";
 import { composeBehaviorPrompt } from "./compose";
 import type { ComposeBehaviorPromptInput } from "./types";
 

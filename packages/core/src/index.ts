@@ -33,7 +33,6 @@ export * from "./brain/response-budget";
 export * from "./brain/conflict-detector";
 
 // --- Phase 2: Relationships + Busy Engine ---
-export * from "./persona/personality-traits";
 export * from "./services/priority-queue";
 export * from "./services/busy-engine";
 export * from "./policies/debounce-policy";
