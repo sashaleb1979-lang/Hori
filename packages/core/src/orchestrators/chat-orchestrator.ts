@@ -18,11 +18,6 @@ import { HELP_TEXT } from "../prompts/system-prompts";
 import { ResponseGuard } from "../safety/response-guard";
 import { RoastPolicy } from "../safety/roast-policy";
 import { ContextBuilderService } from "../services/context-builder";
-import { ContextScoringService } from "../services/context-scoring-service";
-import { EmotionMediaDecisionService } from "../services/emotion-media-decision-service";
-import type { AffinityService } from "../services/affinity-service";
-import type { MediaReactionService } from "../services/media-reaction-service";
-import type { MoodService } from "../services/mood-service";
 import type { EffectiveRoutingConfig, EffectiveRuntimeSettings } from "../services/runtime-config-service";
 import { RuntimeConfigService } from "../services/runtime-config-service";
 
@@ -40,9 +35,6 @@ interface OrchestratorDeps {
   embeddingAdapter: EmbeddingAdapter;
   runtimeConfig: RuntimeConfigService;
   relationships?: RelationshipService;
-  affinity?: AffinityService;
-  mood?: MoodService;
-  media?: MediaReactionService;
   reflection?: ReflectionService;
   sessionBuffer?: SessionBufferService;
   promptSlots?: PromptSlotService;
@@ -101,8 +93,6 @@ export class ChatOrchestrator {
   private readonly roastPolicy = new RoastPolicy();
   private readonly responseGuard = new ResponseGuard();
   private readonly contextBuilder = new ContextBuilderService();
-  private readonly contextScoring = new ContextScoringService();
-  private readonly emotionMediaDecision = new EmotionMediaDecisionService();
   private readonly embeddingCache = new Map<string, { expiresAt: number; value: number[] }>();
   private readonly memoryHydeCache = new Map<string, { expiresAt: number; value: string }>();
 
@@ -227,21 +217,12 @@ export class ChatOrchestrator {
         ? "info_question"
         : "casual_address";
     const contour = { contour: "C" as const, reason: "v7_static" };
-    const affinityRelationship = this.relationshipsHardDisabled()
-      ? null
-      : runtimeConfig.featureFlags.affinitySignalsEnabled
-        ? await this.deps.affinity?.applyRecentOverlay(message.guildId, message.userId, contextBundle.relationship)
-        : contextBundle.relationship;
+    // V7: affinity service удалён → используем base relationship из contextBundle.
+    const affinityRelationship = this.relationshipsHardDisabled() ? null : contextBundle.relationship;
     // V7: emotion+conflict pipeline удалён. Все параметры — фиксированные.
 
-    const contextScores = runtimeConfig.featureFlags.contextConfidenceEnabled
-      ? this.contextScoring.score({
-          bundle: contextBundle,
-          message,
-          messageKind,
-          relationship: affinityRelationship
-        })
-      : undefined;
+    // V7: context-scoring service удалён. mockeryConfidence/contextConfidence больше не вычисляются.
+    const contextScores = undefined;
     const contourMaxChars = this.resolveContextMaxChars(contour.contour, messageKind, runtimeSettings);
     const { contextText, memoryLayers, trace: contextTrace } = this.contextBuilder.buildPromptContext(contextBundle, {
       message,
@@ -269,37 +250,7 @@ export class ChatOrchestrator {
     // V7: mood-engine отключён, mapEmotionToMode удалён → mode фиксирован.
     const effectiveMode = "normal" as const;
 
-    if (
-      runtimeConfig.featureFlags.contextConfidenceEnabled &&
-      (message.triggerSource === "auto_interject" || !message.explicitInvocation) &&
-      contextScores &&
-      contextScores.mockeryConfidence < this.deps.env.AUTOINTERJECT_MIN_CONFIDENCE
-    ) {
-      return this.finish(
-        {
-          triggerSource: message.triggerSource,
-          explicitInvocation: message.explicitInvocation,
-          intent: "ignore",
-          routeReason: "self_interject_low_context_confidence",
-          modelKind: this.deps.modelRouter.pickKind(intent.intent),
-          usedSearch: false,
-          toolNames: [],
-          contextMessages: contextBundle.recentMessages.length,
-          memoryLayers,
-          relationshipApplied: false,
-          responded: false,
-          queue: queueTrace,
-          context: {
-            ...contextTrace,
-            contextConfidence: contextScores.contextConfidence,
-            mockeryConfidence: contextScores.mockeryConfidence
-          }
-        },
-        startedAt,
-        undefined,
-        message
-      );
-    }
+    // V7: auto-interject confidence gate удалён (context-scoring выпилен).
 
     const corePromptTemplates = await this.deps.runtimeConfig.getCorePromptTemplates(message.guildId);
     // V6 Item 12: подгружаем sigil-overrides (отдельный набор поверх defaults).
@@ -379,11 +330,7 @@ export class ChatOrchestrator {
             title: restoredContext.title
           }
         : { active: false },
-      context: {
-        ...contextTrace,
-        contextConfidence: contextScores?.contextConfidence,
-        mockeryConfidence: contextScores?.mockeryConfidence
-      }
+      context: contextTrace
     };
 
     let reply = "";
@@ -476,14 +423,7 @@ export class ChatOrchestrator {
       );
     }
 
-    await this.recordAffinitySignal(runtimeConfig.featureFlags.affinitySignalsEnabled, {
-      guildId: message.guildId,
-      userId: message.userId,
-      messageId: message.messageId,
-      messageKind,
-      content: intent.cleanedContent,
-      targetedToBot: message.triggerSource === "reply" || message.mentionedBot || message.mentionsBotByName
-    });
+    // V7: affinity-service удалён — recordMessageSignal больше не вызывается.
     await this.recordRelationshipInteraction(message, messageKind);
     const reflectionTrace = await this.recordSelfReflectionLesson(
       runtimeConfig.featureFlags.selfReflectionLessonsEnabled,
@@ -1795,21 +1735,6 @@ export class ChatOrchestrator {
     } catch (error) {
       this.deps.logger.warn({ error }, "memory HyDE generation failed");
       return undefined;
-    }
-  }
-
-  private async recordAffinitySignal(
-    enabled: boolean,
-    input: Parameters<AffinityService["recordMessageSignal"]>[0]
-  ) {
-    if (this.relationshipsHardDisabled() || !enabled || !this.deps.affinity) {
-      return;
-    }
-
-    try {
-      await this.deps.affinity.recordMessageSignal(input);
-    } catch (error) {
-      this.deps.logger.warn({ error }, "failed to record affinity signal");
     }
   }
 
