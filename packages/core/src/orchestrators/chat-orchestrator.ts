@@ -450,15 +450,6 @@ export class ChatOrchestrator {
         trace.routeReason = `${trace.routeReason}; micro_reaction:${microReaction.rule}`;
         trace.modelKind = undefined;
       } else switch (intent.intent) {
-        case "help":
-          reply = HELP_TEXT;
-          break;
-        case "analytics":
-          reply = await this.handleAnalytics(message, message.guildId, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens, llmCalls);
-          break;
-        case "summary":
-          reply = await this.handleSummary(message, intent.cleanedContent, systemPrompt, promptContextText, runtimeSettings, behavior.limits.maxTokens, llmCalls);
-          break;
         case "search": {
           const result = runtimeConfig.featureFlags.webSearch
             ? await this.handleSearch(message, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens, llmCalls)
@@ -477,15 +468,6 @@ export class ChatOrchestrator {
           break;
         case "memory_forget":
           reply = await this.handleMemoryForget(message, intent.cleanedContent);
-          break;
-        case "rewrite":
-          reply = await this.handleRewrite(message, intent.cleanedContent, systemPrompt, runtimeSettings, behavior.limits.maxTokens, llmCalls);
-          break;
-        case "profile":
-          reply = runtimeConfig.featureFlags.userProfiles ? await this.handleProfile(message) : "Профили сейчас выключены.";
-          break;
-        case "moderation_style_request":
-          reply = message.isModerator ? "Для такого лучше slash-команду. Так чище." : "Это только для модеров.";
           break;
         case "chat":
         default:
@@ -1031,66 +1013,6 @@ export class ChatOrchestrator {
       },
       moderationAction: null
     };
-  }
-
-  private async handleSummary(
-    message: MessageEnvelope,
-    content: string,
-    systemPrompt: string,
-    contextText: string,
-    runtimeSettings: EffectiveRuntimeSettings,
-    maxTokens?: number,
-    llmCalls?: LlmCallTrace[]
-  ) {
-    const llm = this.getLlmSettings("summary", runtimeSettings, maxTokens);
-    const messages = buildSummaryPrompt(contextText || "Контекста почти нет.", content);
-    messages.unshift({ role: "system", content: systemPrompt });
-
-    const response = await this.deps.llmClient.chat({
-      model: llm.model,
-      messages,
-      temperature: llm.temperature,
-      topP: llm.topP,
-      maxTokens: llm.maxTokens,
-      keepAlive: llm.keepAlive,
-      numCtx: llm.numCtx,
-      numBatch: llm.numBatch,
-      metadata: this.createLlmMetadata(message, "summary", "summary", "summary", "complex")
-    });
-    this.recordLlmCall(llmCalls, "summary", llm.model, messages, response);
-
-    return response.message.content;
-  }
-
-  private async handleAnalytics(
-    message: MessageEnvelope,
-    guildId: string,
-    request: string,
-    systemPrompt: string,
-    runtimeSettings: EffectiveRuntimeSettings,
-    maxTokens?: number,
-    llmCalls?: LlmCallTrace[]
-  ) {
-    const llm = this.getLlmSettings("analytics", runtimeSettings, maxTokens);
-    const window = /за день|сегодня/i.test(request) ? "day" : /за месяц|месяц/i.test(request) ? "month" : "week";
-    const overview = await this.deps.analytics.getOverview(guildId, window);
-    const analyticsText = formatAnalyticsOverview(overview);
-
-    const messages: LlmChatMessage[] = [{ role: "system", content: systemPrompt }, ...buildAnalyticsNarrationPrompt(analyticsText, request)];
-    const response = await this.deps.llmClient.chat({
-      model: llm.model,
-      messages,
-      temperature: llm.temperature,
-      topP: llm.topP,
-      maxTokens: llm.maxTokens,
-      keepAlive: llm.keepAlive,
-      numCtx: llm.numCtx,
-      numBatch: llm.numBatch,
-      metadata: this.createLlmMetadata(message, "analytics", "analytics", "analytics", "complex")
-    });
-    this.recordLlmCall(llmCalls, "analytics", llm.model, messages, response);
-
-    return response.message.content || analyticsText;
   }
 
   private async handleSearch(
@@ -1849,58 +1771,6 @@ export class ChatOrchestrator {
     });
 
     return `забыла: ${selected.title}`;
-  }
-
-  private async handleRewrite(
-    message: MessageEnvelope,
-    cleanedContent: string,
-    systemPrompt: string,
-    runtimeSettings: EffectiveRuntimeSettings,
-    maxTokens?: number,
-    llmCalls?: LlmCallTrace[]
-  ) {
-    const llm = this.getLlmSettings("rewrite", runtimeSettings, maxTokens);
-    const source = message.replyToMessageId ? await this.deps.prisma.message.findUnique({ where: { id: message.replyToMessageId } }) : null;
-
-    if (!source) {
-      return "Если хочешь переписать текст, ответь реплаем на него.";
-    }
-
-    const prompt = buildRewritePrompt(source.content, cleanedContent);
-    prompt.unshift({ role: "system", content: systemPrompt });
-
-    const response = await this.deps.llmClient.chat({
-      model: llm.model,
-      messages: prompt,
-      temperature: llm.temperature,
-      topP: llm.topP,
-      maxTokens: llm.maxTokens,
-      keepAlive: llm.keepAlive,
-      numCtx: llm.numCtx,
-      numBatch: llm.numBatch,
-      metadata: this.createLlmMetadata(message, "rewrite", "rewrite", "rewrite", "complex")
-    });
-    this.recordLlmCall(llmCalls, "rewrite", llm.model, prompt, response);
-
-    return response.message.content;
-  }
-
-  private async handleProfile(message: MessageEnvelope) {
-    const targetUserId = message.mentionedUserIds[0] ?? message.userId;
-    const profile = await this.deps.prisma.userProfile.findUnique({
-      where: {
-        guildId_userId: {
-          guildId: message.guildId,
-          userId: targetUserId
-        }
-      }
-    });
-
-    if (!profile || !profile.isEligible || profile.confidenceScore < 0.45) {
-      return "Нормального профиля нет. Либо данных мало, либо он слишком слабый.";
-    }
-
-    return `${profile.summaryShort}\nТеги: ${profile.styleTags.join(", ")} | ${profile.topicTags.join(", ")}`;
   }
 
   private async buildLinkUnderstandingContext(content: string) {
