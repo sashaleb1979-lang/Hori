@@ -339,6 +339,28 @@ async function tryHandleKnowledgeQuery(
   return true;
 }
 
+/**
+ * Проверяет, содержит ли сообщение кодовое слово одного из prompt-слотов пользователя.
+ * Если да — активирует слот тихо (без ответа в чат).
+ */
+async function tryActivateSlotByKeyword(
+  runtime: BotRuntime,
+  guildId: string,
+  channelId: string,
+  userId: string,
+  content: string
+): Promise<void> {
+  if (!content.trim()) return;
+  const slot = await runtime.promptSlots.findByTriggerInMessage(guildId, userId, content);
+  if (!slot) return;
+  const level = await runtime.relationshipService.getLevel(guildId, userId).catch(() => 0);
+  await runtime.promptSlots.activate(slot.id, { initiatorLevel: level });
+  runtime.logger.info(
+    { guildId, channelId, userId, slotId: slot.id, trigger: slot.trigger },
+    "prompt slot auto-activated by keyword"
+  );
+}
+
 export async function routeMessage(runtime: BotRuntime, message: Message) {
   if (!message.inGuild() || message.author.bot || !runtime.client.user) {
     return;
@@ -399,6 +421,11 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
   void enqueueBackgroundJobs(runtime, envelope).catch((error) => {
     runtime.logger.warn({ messageId: envelope.messageId, error }, "background job scheduling crashed");
   });
+
+  // Авто-активация prompt-слота по кодовому слову в тексте сообщения.
+  void tryActivateSlotByKeyword(runtime, message.guildId, message.channelId, message.author.id, message.content).catch(
+    () => undefined
+  );
 
   if (
     !routingConfig.channelPolicy.isMuted &&

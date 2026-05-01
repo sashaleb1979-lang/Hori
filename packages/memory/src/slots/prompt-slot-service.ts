@@ -27,6 +27,7 @@ export interface PromptSlotRecord {
   ownerLevel: number;
   title: string | null;
   content: string;
+  trigger: string | null;
   activatedAt: Date | null;
   cooldownUntil: Date | null;
   active: boolean;
@@ -41,6 +42,7 @@ interface CreateSlotInput {
   ownerLevel: number;
   title?: string | null;
   content: string;
+  trigger?: string | null;
 }
 
 interface ActivateSlotOptions {
@@ -80,7 +82,8 @@ export class PromptSlotService {
         ownerUserId: input.ownerUserId,
         ownerLevel: input.ownerLevel,
         title: input.title ?? null,
-        content
+        content,
+        trigger: input.trigger ? input.trigger.trim().toLowerCase() : null
       }
     });
   }
@@ -192,5 +195,34 @@ export class PromptSlotService {
 
   async delete(slotId: string): Promise<void> {
     await this.slots.delete({ where: { id: slotId } });
+  }
+
+  /**
+   * Найти слот пользователя, чей trigger встречается в тексте сообщения.
+   * Слот должен быть не активным и не на cooldown.
+   * Совпадение — case-insensitive, без учёта границ слова (trigger может быть
+   * любой подстрокой или фразой).
+   */
+  async findByTriggerInMessage(
+    guildId: string,
+    userId: string,
+    messageContent: string
+  ): Promise<PromptSlotRecord | null> {
+    const now = new Date();
+    const candidates = await this.slots.findMany({
+      where: {
+        guildId,
+        ownerUserId: userId,
+        active: false,
+        trigger: { not: null }
+      }
+    });
+    const lowerContent = messageContent.toLowerCase();
+    for (const slot of candidates) {
+      if (!slot.trigger) continue;
+      if (slot.cooldownUntil && slot.cooldownUntil > now) continue;
+      if (lowerContent.includes(slot.trigger)) return slot;
+    }
+    return null;
   }
 }

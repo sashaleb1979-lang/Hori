@@ -825,6 +825,7 @@ model HoriPromptSlot {
   ownerLevel     Int       @default(0)
   title          String?
   content        String    @db.Text
+  trigger        String?   // кодовое слово для авто-активации из чата
   activatedAt    DateTime?
   cooldownUntil  DateTime?
   active         Boolean   @default(false)
@@ -835,6 +836,7 @@ model HoriPromptSlot {
 
   @@index([guildId, channelId, active, activatedAt])
   @@index([guildId, ownerUserId])
+  @@index([guildId, trigger])
 }
 
 

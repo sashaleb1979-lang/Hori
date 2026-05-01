@@ -1744,8 +1744,8 @@ async function handleHoriSlotCommand(
     }
     const lines = [`🎟️ **Мои prompt-слоты** (${mySlots.length}):`];
     for (const s of mySlots) {
-      const st = s.active ? "✅ active" : s.cooldownUntil && s.cooldownUntil > new Date() ? `⏳ cooldown до ${s.cooldownUntil.toISOString().slice(11, 16)} UTC` : "◾ idle";
-      lines.push(`\`${s.id.slice(0, 8)}\` **${s.title ?? "(без названия)"}** — ${st}${s.channelId ? ` <#${s.channelId}>` : " global"}`);
+      const st = s.active ? "✅ active" : s.cooldownUntil && s.cooldownUntil > new Date() ? `⏳ cooldown до ${s.cooldownUntil.toISOString().slice(11, 16)} UTC` : "▾ idle";
+      lines.push(`\`${s.id.slice(0, 8)}\` **${s.title ?? "(без названия)"}** — ${st}${s.channelId ? ` <#${s.channelId}>` : " global"}${s.trigger ? ` | ключ: \`${s.trigger}\`` : ""}`);
     }
     await interaction.reply({ content: lines.join("\n"), flags: MessageFlags.Ephemeral });
     return;
@@ -1758,6 +1758,7 @@ async function handleHoriSlotCommand(
       return;
     }
     const title = interaction.options.getString("title") ?? null;
+    const keyword = interaction.options.getString("keyword") ?? null;
     const isGlobal = interaction.options.getBoolean("global") ?? false;
     const channelId = isGlobal ? null : interaction.channelId;
 
@@ -1768,14 +1769,15 @@ async function handleHoriSlotCommand(
       ownerUserId: userId,
       ownerLevel: relLevel,
       title,
-      content: content.trim()
+      content: content.trim(),
+      trigger: keyword
     });
 
     // Активируем сразу.
     try {
       await runtime.promptSlots.activate(slot.id, { initiatorLevel: relLevel });
       await interaction.reply({
-        content: `🎟️ Слот создан и активирован на 10 минут.\nID: \`${slot.id.slice(0, 8)}\`${title ? `\nНазвание: **${title}**` : ""}\nКонтекст: ${content.slice(0, 100)}`,
+        content: `🎟️ Слот создан и активирован на 10 минут.\nID: \`${slot.id.slice(0, 8)}\`${title ? `\nНазвание: **${title}**` : ""}${keyword ? `\n🔑 Кодовое слово: \`${keyword}\`` : ""}\nКонтекст: ${content.slice(0, 100)}`,
         flags: MessageFlags.Ephemeral
       });
     } catch {
