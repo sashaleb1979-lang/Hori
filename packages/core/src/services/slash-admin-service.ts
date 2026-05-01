@@ -8,7 +8,12 @@ import { defaultPersonaSettings, type PowerProfileName } from "@hori/config";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
 import { isAiRouterClient, type EmbeddingAdapter, type LlmClient } from "@hori/llm";
 import { MemoryAlbumService, ReflectionService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
-import type { MoodService } from "./mood-service";
+// V7: MoodService удалён. Оставлен локальный stub-тип для обратной совместимости с bootstrap.
+export interface MoodService {
+  status?(guildId: string): Promise<{ mood: string; intensity: number; endsAt: Date } | null>;
+  setMood?(guildId: string, mood: string, minutes: number, reason?: string | null): Promise<void>;
+  clearMood?(guildId: string): Promise<{ count: number } | null>;
+}
 import type { ReplyQueueService } from "./reply-queue-service";
 import { FEATURE_KEY_MAP, type PowerProfileStatus, type RuntimeConfigService } from "./runtime-config-service";
 
@@ -447,7 +452,7 @@ export class SlashAdminService {
   }
 
   async moodStatus(guildId: string) {
-    const mood = await this.mood?.status(guildId);
+    const mood = this.mood?.status ? await this.mood.status(guildId) : null;
 
     if (!mood) {
       return "Mood сейчас neutral.";
@@ -457,12 +462,14 @@ export class SlashAdminService {
   }
 
   async moodSet(guildId: string, mood: PersonaMode, minutes: number, reason?: string | null) {
-    await this.mood?.setMood(guildId, mood, minutes, reason);
+    if (this.mood?.setMood) {
+      await this.mood.setMood(guildId, mood, minutes, reason);
+    }
     return `Mood=${mood} на ${minutes} мин.`;
   }
 
   async moodClear(guildId: string) {
-    const result = await this.mood?.clearMood(guildId);
+    const result = this.mood?.clearMood ? await this.mood.clearMood(guildId) : null;
     return `Mood сброшен: ${result?.count ?? 0}.`;
   }
 

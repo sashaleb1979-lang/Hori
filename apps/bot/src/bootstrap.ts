@@ -2,7 +2,7 @@ import type { Client } from "discord.js";
 
 import { AnalyticsQueryService, MessageIngestService } from "@hori/analytics";
 import { assertEnvForRole, loadEnv } from "@hori/config";
-import { AffinityService, createChatOrchestrator, createRuntimeLlmClient, FlashTrollingService, KnowledgeService, MediaReactionService, MoodService, QueuePhrasePoolService, ReplyQueueService, RuntimeConfigService, SlashAdminService } from "@hori/core";
+import { createChatOrchestrator, createRuntimeLlmClient, FlashTrollingService, KnowledgeService, QueuePhrasePoolService, ReplyQueueService, RuntimeConfigService, SlashAdminService } from "@hori/core";
 import { EmbeddingAdapter, ModelRouter, ToolOrchestrator } from "@hori/llm";
 import type { LlmClient } from "@hori/llm";
 import { ActiveMemoryService, ContextService, InteractionRequestService, MemoryAlbumService, ProfileService, PromptSlotService, ReflectionService, RelationshipService, RetrievalService, SessionBufferService, SummaryService } from "@hori/memory";
@@ -116,9 +116,6 @@ export async function bootstrapBot() {
   const reflectionService = new ReflectionService(prisma);
   const profileService = new ProfileService(prisma, env);
   const runtimeConfig = new RuntimeConfigService(prisma, env);
-  const affinityService = new AffinityService(prisma);
-  const moodService = new MoodService(prisma);
-  const mediaReactionService = new MediaReactionService(prisma);
   const replyQueueService = new ReplyQueueService(prisma, env.REPLY_QUEUE_BUSY_TTL_SEC);
   const queuePhrasePoolService = new QueuePhrasePoolService();
   const flashTrollingService = new FlashTrollingService();
@@ -160,7 +157,7 @@ export async function bootstrapBot() {
     retrievalService,
     summaryService,
     runtimeConfig,
-    moodService,
+    undefined,
     replyQueueService,
     memoryAlbumService,
     reflectionService,
@@ -181,9 +178,6 @@ export async function bootstrapBot() {
     embeddingAdapter,
     runtimeConfig,
     relationships: relationshipService,
-    affinity: affinityService,
-    mood: moodService,
-    media: mediaReactionService,
     reflection: reflectionService,
     sessionBuffer: sessionBufferService,
     promptSlots: promptSlotService

@@ -3,28 +3,19 @@ import type { AppLogger, AppPrismaClient, BotIntent, BotReplyPayload, BotTrace, 
 import { asErrorMessage, botLatencyHistogram, botRepliesCounter, clamp, normalizeWhitespace } from "@hori/shared";
 import { llmCachedTokensCounter, llmCostCounter, llmTokensCounter } from "@hori/shared";
 
-import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, calculateCostUsd, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet } from "@hori/llm";
+import { buildSearchPrompt, calculateCostUsd, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet } from "@hori/llm";
 import type { LlmChatResponse, LlmClient, LlmRequestMetadata, ModelRoutingSlot } from "@hori/llm";
-import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
+import { AnalyticsQueryService } from "@hori/analytics";
 import { ContextService, type PromptSlotService, ReflectionService, RelationshipService, RetrievalService, SessionBufferService } from "@hori/memory";
 import { BraveSearchClient, buildSourceDigest, extractLinksFromMessage, fetchWebPage } from "@hori/search";
-import { chooseConflictStrategy, detectConflict, type ConflictDetection } from "../brain/conflict-detector";
-import { EmotionLabel, type EmotionalState } from "../brain/emotion-state";
-import { createEngineState, generateEmotionalState } from "../brain/emotion-engine";
-import { getHourInTimeZone, pickContourAResponse, resolveContour, type Contour } from "../brain/response-budget";
+// V7: brain pipeline (conflict-detector / emotion-engine / response-budget) удалён. Contour — локальный alias.
+type Contour = "A" | "B" | "C";
 import { IntentRouter } from "../intents/intent-router";
-import { detectMessageKind } from "../persona/prompt-spec-stubs";
+import { detectMessageKind, type CorePromptTemplates } from "../persona/prompt-spec-stubs";
 import { PersonaService } from "../persona/persona-service";
-import { buildRestoredContextBlock, type CorePromptTemplates } from "../persona/prompt-spec-stubs";
-import { HELP_TEXT } from "../prompts/system-prompts";
 import { ResponseGuard } from "../safety/response-guard";
 import { RoastPolicy } from "../safety/roast-policy";
 import { ContextBuilderService } from "../services/context-builder";
-import { ContextScoringService } from "../services/context-scoring-service";
-import { EmotionMediaDecisionService } from "../services/emotion-media-decision-service";
-import type { AffinityService } from "../services/affinity-service";
-import type { MediaReactionService } from "../services/media-reaction-service";
-import type { MoodService } from "../services/mood-service";
 import type { EffectiveRoutingConfig, EffectiveRuntimeSettings } from "../services/runtime-config-service";
 import { RuntimeConfigService } from "../services/runtime-config-service";
 
@@ -42,33 +33,9 @@ interface OrchestratorDeps {
   embeddingAdapter: EmbeddingAdapter;
   runtimeConfig: RuntimeConfigService;
   relationships?: RelationshipService;
-  affinity?: AffinityService;
-  mood?: MoodService;
-  media?: MediaReactionService;
   reflection?: ReflectionService;
   sessionBuffer?: SessionBufferService;
   promptSlots?: PromptSlotService;
-}
-
-export interface DebugTraceRecord {
-  id: string;
-  messageId: string | null;
-  eventType: string;
-  intent: string | null;
-  routeReason: string | null;
-  modelUsed: string | null;
-  usedSearch: boolean;
-  toolCalls: unknown;
-  contextMessages: number | null;
-  memoryLayers: unknown;
-  latencyMs: number | null;
-  promptTokens: number | null;
-  completionTokens: number | null;
-  totalTokens: number | null;
-  tokenSource: string | null;
-  relationshipApplied: boolean;
-  debugTrace: unknown;
-  createdAt: Date;
 }
 
 interface AggressionPipelineResult {
@@ -103,11 +70,8 @@ export class ChatOrchestrator {
   private readonly roastPolicy = new RoastPolicy();
   private readonly responseGuard = new ResponseGuard();
   private readonly contextBuilder = new ContextBuilderService();
-  private readonly contextScoring = new ContextScoringService();
-  private readonly emotionMediaDecision = new EmotionMediaDecisionService();
   private readonly embeddingCache = new Map<string, { expiresAt: number; value: number[] }>();
   private readonly memoryHydeCache = new Map<string, { expiresAt: number; value: string }>();
-  private readonly emotionStateByScope = new Map<string, ReturnType<typeof createEngineState>>();
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
@@ -172,9 +136,8 @@ export class ChatOrchestrator {
       );
     }
 
-    const intent = initialIntent.confidence < 0.7
-      ? await this.classifyWithLlm(initialIntent.cleanedContent, initialIntent, runtimeSettings, llmCalls, message)
-      : initialIntent;
+    // V7: intent-router детерминирован (chat / `?` / русские memory_*) — LLM-fallback больше не нужен.
+    const intent = initialIntent;
 
     if (intent.intent === "chat") {
       const recallSelectionReply = await this.tryHandleMemoryRecallSelection(message, intent.cleanedContent);
@@ -230,30 +193,12 @@ export class ChatOrchestrator {
         ? "info_question"
         : "casual_address";
     const contour = { contour: "C" as const, reason: "v7_static" };
-    const affinityRelationship = this.relationshipsHardDisabled()
-      ? null
-      : runtimeConfig.featureFlags.affinitySignalsEnabled
-        ? await this.deps.affinity?.applyRecentOverlay(message.guildId, message.userId, contextBundle.relationship)
-        : contextBundle.relationship;
-    const conflict = detectConflict(
-      contextBundle.recentMessages.map((entry) => ({ userId: entry.userId ?? "unknown", content: entry.content }))
-    );
-    const emotionalState = this.buildEmotionalState({
-      message,
-      messageKind,
-      relationship: affinityRelationship,
-      conflict,
-      cleanedContent: intent.cleanedContent,
-    });
-    const conflictStrategy = chooseConflictStrategy(emotionalState.subjectiveFeeling, conflict.score);
-    const contextScores = runtimeConfig.featureFlags.contextConfidenceEnabled
-      ? this.contextScoring.score({
-          bundle: contextBundle,
-          message,
-          messageKind,
-          relationship: affinityRelationship
-        })
-      : undefined;
+    // V7: affinity service удалён → используем base relationship из contextBundle.
+    const affinityRelationship = this.relationshipsHardDisabled() ? null : contextBundle.relationship;
+    // V7: emotion+conflict pipeline удалён. Все параметры — фиксированные.
+
+    // V7: context-scoring service удалён. mockeryConfidence/contextConfidence больше не вычисляются.
+    const contextScores = undefined;
     const contourMaxChars = this.resolveContextMaxChars(contour.contour, messageKind, runtimeSettings);
     const { contextText, memoryLayers, trace: contextTrace } = this.contextBuilder.buildPromptContext(contextBundle, {
       message,
@@ -278,40 +223,10 @@ export class ChatOrchestrator {
     const effectiveRoast = runtimeConfig.featureFlags.roast
       ? this.roastPolicy.resolveRoastLevel(guildSettings.roastLevel, affinityRelationship)
       : 0;
-    const activeMood = runtimeConfig.featureFlags.moodEngineEnabled ? await this.deps.mood?.getActiveMode(message.guildId) : null;
-    const effectiveMode = activeMood ?? this.mapEmotionToMode(emotionalState.subjectiveFeeling, conflictStrategy);
+    // V7: mood-engine отключён, mapEmotionToMode удалён → mode фиксирован.
+    const effectiveMode = "normal" as const;
 
-    if (
-      runtimeConfig.featureFlags.contextConfidenceEnabled &&
-      (message.triggerSource === "auto_interject" || !message.explicitInvocation) &&
-      contextScores &&
-      contextScores.mockeryConfidence < this.deps.env.AUTOINTERJECT_MIN_CONFIDENCE
-    ) {
-      return this.finish(
-        {
-          triggerSource: message.triggerSource,
-          explicitInvocation: message.explicitInvocation,
-          intent: "ignore",
-          routeReason: "self_interject_low_context_confidence",
-          modelKind: this.deps.modelRouter.pickKind(intent.intent),
-          usedSearch: false,
-          toolNames: [],
-          contextMessages: contextBundle.recentMessages.length,
-          memoryLayers,
-          relationshipApplied: false,
-          responded: false,
-          queue: queueTrace,
-          context: {
-            ...contextTrace,
-            contextConfidence: contextScores.contextConfidence,
-            mockeryConfidence: contextScores.mockeryConfidence
-          }
-        },
-        startedAt,
-        undefined,
-        message
-      );
-    }
+    // V7: auto-interject confidence gate удалён (context-scoring выпилен).
 
     const corePromptTemplates = await this.deps.runtimeConfig.getCorePromptTemplates(message.guildId);
     // V6 Item 12: подгружаем sigil-overrides (отдельный набор поверх defaults).
@@ -356,14 +271,8 @@ export class ChatOrchestrator {
       sigilPromptOverrides
     });
     const restoredContext = intent.intent === "chat" ? await this.getActiveRestoredContext(message) : null;
-    const systemPrompt = [
-      behavior.prompt,
-      this.buildEmotionGuidance(emotionalState),
-      this.buildConflictGuidance(conflict, conflictStrategy),
-      this.buildContourGuidance(contour.contour),
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+    // V7: ACTIVE_CORE — единственный системный prompt. Никаких dynamic guidance блоков.
+    const systemPrompt = behavior.prompt;
 
     const trace: BotTrace = {
       triggerSource: message.triggerSource,
@@ -378,16 +287,6 @@ export class ChatOrchestrator {
       relationshipApplied: false,
       responded: true,
       responseBudget: contour,
-      conflict,
-      emotion: {
-        label: emotionalState.subjectiveFeeling,
-        mode: effectiveMode,
-        style: {
-          warmth: emotionalState.warmth,
-          energy: emotionalState.energy,
-          directness: emotionalState.directness,
-        }
-      },
       behavior: behavior.trace,
       queue: queueTrace,
       linkUnderstanding: linkContext.trace,
@@ -407,11 +306,7 @@ export class ChatOrchestrator {
             title: restoredContext.title
           }
         : { active: false },
-      context: {
-        ...contextTrace,
-        contextConfidence: contextScores?.contextConfidence,
-        mockeryConfidence: contextScores?.mockeryConfidence
-      }
+      context: contextTrace
     };
 
     let reply = "";
@@ -449,7 +344,7 @@ export class ChatOrchestrator {
               maxTokens: behavior.limits.maxTokens,
               contour: contour.contour,
               llmCalls,
-              restoredContext: restoredContext ? buildRestoredContextBlock(restoredContext) : null
+              restoredContext: null
             });
 
           if (restoredContext) {
@@ -478,7 +373,7 @@ export class ChatOrchestrator {
       trace.aggression = aggressionResult.trace;
     }
 
-    const behaviorLimitedIntents = new Set(["analytics", "summary", "search", "rewrite", "chat"]);
+    const behaviorLimitedIntents = new Set(["search", "chat"]);
     const maxReplyChars = behaviorLimitedIntents.has(intent.intent)
       ? Math.min(runtimeSettings.defaultReplyMaxChars, behavior.limits.maxChars)
       : runtimeSettings.defaultReplyMaxChars;
@@ -504,15 +399,8 @@ export class ChatOrchestrator {
       );
     }
 
-    await this.recordAffinitySignal(runtimeConfig.featureFlags.affinitySignalsEnabled, {
-      guildId: message.guildId,
-      userId: message.userId,
-      messageId: message.messageId,
-      messageKind,
-      content: intent.cleanedContent,
-      targetedToBot: message.triggerSource === "reply" || message.mentionedBot || message.mentionsBotByName
-    });
-    await this.recordRelationshipInteraction(message, messageKind, conflict);
+    // V7: affinity-service удалён — recordMessageSignal больше не вызывается.
+    await this.recordRelationshipInteraction(message, messageKind);
     const reflectionTrace = await this.recordSelfReflectionLesson(
       runtimeConfig.featureFlags.selfReflectionLessonsEnabled,
       message,
@@ -526,60 +414,7 @@ export class ChatOrchestrator {
 
     let replyPayload: string | BotReplyPayload = reply;
 
-    if (runtimeConfig.featureFlags.mediaReactionsEnabled && this.deps.media && behavior.trace.mediaReactionEligible) {
-      const mediaDecision = this.emotionMediaDecision.decide({
-        enabled: true,
-        eligible: behavior.trace.mediaReactionEligible,
-        triggerSource: message.triggerSource,
-        emotionalState,
-        messageKind,
-        channelKind: behavior.trace.channelKind,
-        activeMode: behavior.trace.activeMode,
-        contextConfidence: contextScores?.contextConfidence,
-        conflictScore: conflict.score,
-        relationship: {
-          toneBias: affinityRelationship?.toneBias,
-          closeness: (affinityRelationship as { closeness?: number } | null | undefined)?.closeness,
-          trustLevel: (affinityRelationship as { trustLevel?: number } | null | undefined)?.trustLevel
-        },
-        runtimeSettings
-      });
-
-      if (mediaDecision.allowAutoMedia) {
-        const mediaResult = await this.deps.media.maybeAttachMedia({
-          enabled: true,
-          replyText: reply,
-          guildId: message.guildId,
-          channelId: message.channelId,
-          messageId: message.messageId,
-          channelKind: behavior.trace.channelKind,
-          mode: behavior.trace.activeMode,
-          stylePreset: behavior.trace.stylePreset,
-          triggerTags: [
-            ...mediaDecision.triggerTags,
-            ...(behavior.trace.staleTakeDetected ? ["stale_take"] : [])
-          ],
-          emotionTags: mediaDecision.emotionTags,
-          messageKind,
-          confidence: contextScores?.contextConfidence,
-          intensity: emotionalState.intensity,
-          autoTriggered: true,
-          reasonKey: mediaDecision.reasonKey,
-          globalCooldownSec: runtimeSettings.mediaAutoGlobalCooldownSec
-        });
-
-        replyPayload = mediaResult.payload;
-        trace.media = mediaResult.trace;
-      } else {
-        trace.media = {
-          enabled: true,
-          selected: false,
-          reason: mediaDecision.reason,
-          autoTriggered: true,
-          reasonKey: mediaDecision.reasonKey ?? null
-        };
-      }
-    }
+    // V7: media-reaction pipeline удалён. До фазы 5 (mem-trigger выбор мемов) — никаких auto-media.
 
     botRepliesCounter.inc({ intent: intent.intent });
 
@@ -630,85 +465,6 @@ export class ChatOrchestrator {
 
     const result = await this.handleMessage(envelope);
     return typeof result.reply === "string" ? result.reply : (result.reply?.text ?? "Нечего сказать.");
-  }
-
-  async explainTrace(messageId: string): Promise<DebugTraceRecord | null> {
-    return this.deps.prisma.botEventLog.findFirst({
-      where: { messageId },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        messageId: true,
-        eventType: true,
-        intent: true,
-        routeReason: true,
-        modelUsed: true,
-        usedSearch: true,
-        toolCalls: true,
-        contextMessages: true,
-        memoryLayers: true,
-        latencyMs: true,
-        promptTokens: true,
-        completionTokens: true,
-        totalTokens: true,
-        tokenSource: true,
-        relationshipApplied: true,
-        debugTrace: true,
-        createdAt: true
-      }
-    });
-  }
-
-  private async classifyWithLlm(
-    cleanedContent: string,
-    fallback: ReturnType<IntentRouter["route"]>,
-    runtimeSettings: EffectiveRuntimeSettings,
-    llmCalls?: LlmCallTrace[],
-    message?: MessageEnvelope
-  ) {
-    try {
-      const llm = this.getLlmSettingsForSlot("classifier", "chat", runtimeSettings, 96, { temperature: 0 });
-      const messages = buildIntentClassifierPrompt(cleanedContent);
-      const response = await this.deps.llmClient.chat({
-        model: llm.model,
-        messages,
-        format: "json",
-        temperature: llm.temperature,
-        topP: llm.topP,
-        maxTokens: llm.maxTokens,
-        keepAlive: llm.keepAlive,
-        numCtx: llm.numCtx,
-        numBatch: llm.numBatch,
-        metadata: message ? this.createLlmMetadata(message, "chat", "classifier", "intent_classifier", "simple") : undefined
-      });
-      this.recordLlmCall(llmCalls, "intent_classifier", llm.model, messages, response);
-
-      const raw = response.message.content.trim();
-      let parsed: { intent?: string; confidence?: number; reason?: string } | null = null;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        const start = raw.indexOf("{");
-        const end = raw.lastIndexOf("}");
-        if (start !== -1 && end > start) {
-          try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch { /* give up */ }
-        }
-      }
-
-      if (parsed?.intent) {
-        return {
-          intent: parsed.intent as ReturnType<IntentRouter["route"]>["intent"],
-          confidence: clamp(Number(parsed.confidence ?? 0.5), 0, 1),
-          reason: parsed.reason ?? "llm classifier",
-          cleanedContent,
-          requiresSearch: parsed.intent === "search"
-        };
-      }
-    } catch (error) {
-      this.deps.logger.warn({ error }, "llm intent classification failed");
-    }
-
-    return fallback;
   }
 
   private buildStableChatSystemPrompt(
@@ -1879,21 +1635,6 @@ export class ChatOrchestrator {
     }
   }
 
-  private async recordAffinitySignal(
-    enabled: boolean,
-    input: Parameters<AffinityService["recordMessageSignal"]>[0]
-  ) {
-    if (this.relationshipsHardDisabled() || !enabled || !this.deps.affinity) {
-      return;
-    }
-
-    try {
-      await this.deps.affinity.recordMessageSignal(input);
-    } catch (error) {
-      this.deps.logger.warn({ error }, "failed to record affinity signal");
-    }
-  }
-
   private getChatSettingsForContour(contour: Contour, runtimeSettings: EffectiveRuntimeSettings, maxTokens?: number) {
     const profile = this.deps.modelRouter.pickProfile("chat");
     const contourCap = contour === "C" ? profile.maxTokens : contour === "B" ? 120 : 48;
@@ -1955,153 +1696,9 @@ export class ChatOrchestrator {
     }
   }
 
-  private buildEmotionalState(input: {
-    message: MessageEnvelope;
-    messageKind: ReturnType<typeof detectMessageKind>;
-    relationship?: { toneBias: string; roastLevel: number; praiseBias: number } | null;
-    conflict: ConflictDetection;
-    cleanedContent: string;
-  }) {
-    const scopeKey = `${input.message.guildId}:${input.message.channelId}`;
-    const engine = this.emotionStateByScope.get(scopeKey) ?? createEngineState();
-    this.emotionStateByScope.set(scopeKey, engine);
-
-    const crisisIndicators = /(суицид|самоубийств|убью себя|self-harm|kill myself)/i.test(input.cleanedContent);
-    const negativeConflict = input.conflict.isConflict ? Math.min(0.65, input.conflict.score + 0.2) : 0;
-    const baseValenceByKind: Record<ReturnType<typeof detectMessageKind>, number> = {
-      direct_mention: 0.1,
-      reply_to_bot: 0.18,
-      meta_feedback: -0.2,
-      casual_address: 0.08,
-      smalltalk_hangout: 0.24,
-      info_question: 0.05,
-      opinion_question: 0,
-      request_for_explanation: 0.16,
-      meme_bait: 0.22,
-      provocation: -0.42,
-      repeated_question: -0.28,
-      low_signal_noise: -0.08,
-      command_like_request: 0.04,
-    };
-
-    const sentimentValence = clamp(
-      baseValenceByKind[input.messageKind] - negativeConflict + ((input.relationship?.praiseBias ?? 0) * 0.03) - ((input.relationship?.roastLevel ?? 0) * 0.02),
-      -1,
-      1,
-    );
-
-    const appraisal = {
-      relevance: clamp(
-        0.35 + (input.message.explicitInvocation ? 0.18 : 0) + (input.conflict.isConflict ? input.conflict.score * 0.4 : 0) + (input.messageKind === "request_for_explanation" ? 0.12 : 0),
-        0,
-        1,
-      ),
-      goalImpact: crisisIndicators
-        ? "supportive_opportunity"
-        : input.conflict.isConflict
-          ? "resolution_opportunity"
-          : input.messageKind === "request_for_explanation" || input.messageKind === "info_question"
-            ? "engaging_opportunity"
-            : input.messageKind === "provocation"
-              ? "challenging"
-              : "neutral",
-      copingCapability: input.conflict.isConflict ? "moderate" : "high_capability",
-      socialAppropriateness: crisisIndicators
-        ? "crisis_protocol"
-        : input.conflict.isConflict
-          ? "calm_resolution"
-          : input.messageKind === "smalltalk_hangout" || input.messageKind === "meme_bait"
-            ? "warm_engagement"
-            : input.messageKind === "request_for_explanation" || input.messageKind === "info_question"
-              ? "empathetic_response"
-              : "neutral_response",
-      userEmotionDetected: input.conflict.isConflict ? "conflict" : undefined,
-      crisisIndicators,
-    };
-
-    return generateEmotionalState(
-      appraisal,
-      {
-        valence: sentimentValence,
-        confidence: clamp(0.45 + input.conflict.score * 0.35 + (input.message.explicitInvocation ? 0.1 : 0), 0, 1),
-      },
-      engine,
-    );
-  }
-
-  private mapEmotionToMode(label: EmotionLabel, conflictStrategy: ReturnType<typeof chooseConflictStrategy>) {
-    if (conflictStrategy === "peacemake") {
-      return "focused" as const;
-    }
-
-    if (conflictStrategy === "confront") {
-      return "irritated" as const;
-    }
-
-    if (label === EmotionLabel.PLAYFUL || label === EmotionLabel.CURIOUS || label === EmotionLabel.OVERPLAYFUL) {
-      return "playful" as const;
-    }
-
-    if (label === EmotionLabel.PROTECTIVE || label === EmotionLabel.WARM_CONCERN || label === EmotionLabel.REASSURING || label === EmotionLabel.FOCUSED) {
-      return "focused" as const;
-    }
-
-    if (label === EmotionLabel.REFLECTIVE || label === EmotionLabel.COLD_IGNORE || label === EmotionLabel.TIRED) {
-      return "dry" as const;
-    }
-
-    if (label === EmotionLabel.SUPER_AGGRESSIVE || label === EmotionLabel.SUPER_IRONIC) {
-      return "irritated" as const;
-    }
-
-    return "normal" as const;
-  }
-
-  private buildEmotionGuidance(state: ReturnType<ChatOrchestrator["buildEmotionalState"]>) {
-    return [
-      "[EMOTIONAL STATE]",
-      `Primary label: ${state.subjectiveFeeling}.`,
-      `Latent style: warmth=${state.warmth.toFixed(2)}, energy=${state.energy.toFixed(2)}, directness=${state.directness.toFixed(2)}, engagement=${state.engagement.toFixed(2)}.`,
-      "Use this only as hidden tone control. Never narrate or explain the emotional state to the user.",
-    ].join("\n");
-  }
-
-  private buildConflictGuidance(conflict: ConflictDetection, strategy: ReturnType<typeof chooseConflictStrategy>) {
-    if (!conflict.isConflict) {
-      return null;
-    }
-
-    if (strategy === "peacemake") {
-      return "[CONFLICT SIGNAL]\nRecent messages look conflict-heavy. De-escalate, separate the claims, and avoid adding heat.";
-    }
-
-    if (strategy === "joke") {
-      return "[CONFLICT SIGNAL]\nThere is tension. If you lighten it, do it briefly and without humiliating either side or escalating the fight.";
-    }
-
-    if (strategy === "confront") {
-      return "[CONFLICT SIGNAL]\nЧеловек ведёт себя токсично. Отвечай прямо, коротко, без юмора и сарказма. Не пытайся быть остроумной. Просто скажи что думаешь. Будь грубой если надо, но не язвительной.";
-    }
-
-    return "[CONFLICT SIGNAL]\nRecent messages look conflict-heavy. Do not escalate. Keep the answer dry, bounded and non-inflammatory.";
-  }
-
-  private buildContourGuidance(contour: Contour) {
-    if (contour === "B") {
-      return "[RESPONSE BUDGET]\nKeep the answer compact and tactical. Prefer one short reply over a full essay.";
-    }
-
-    if (contour === "C") {
-      return "[RESPONSE BUDGET]\nThis turn can spend a fuller reasoning budget if needed, but stay concise by Discord standards.";
-    }
-
-    return null;
-  }
-
   private async recordRelationshipInteraction(
     message: MessageEnvelope,
     messageKind: ReturnType<typeof detectMessageKind>,
-    conflict: ConflictDetection,
   ) {
     if (this.relationshipsHardDisabled() || !this.deps.relationships) {
       return;
@@ -2130,10 +1727,6 @@ export class ChatOrchestrator {
     } catch (error) {
       this.deps.logger.warn({ error }, "failed to record relationship interaction");
     }
-  }
-
-  private async recordMicroReactionRelationshipSignal(): Promise<void> {
-    return;
   }
 
   private recordLlmCall(
