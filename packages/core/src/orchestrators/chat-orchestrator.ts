@@ -228,13 +228,7 @@ export class ChatOrchestrator {
     // V7: auto-interject confidence gate удалён (context-scoring выпилен).
 
     const corePromptTemplates = await this.deps.runtimeConfig.getCorePromptTemplates(message.guildId);
-    // V6 Item 12: подгружаем sigil-overrides (отдельный набор поверх defaults).
-    const sigilPromptOverrides = typeof this.deps.runtimeConfig.getSigilPromptOverrides === "function"
-      ? await this.deps.runtimeConfig
-          .getSigilPromptOverrides(message.guildId)
-          .catch(() => ({} as Partial<Record<string, string>>))
-      : ({} as Partial<Record<string, string>>);
-    // V5.1 Phase B: получаем активный prompt-слот для канала, если есть.
+    // Активный prompt-слот для канала, если есть.
     const activePromptSlot = this.deps.promptSlots
       ? await this.deps.promptSlots
           .getActiveSlot(message.guildId, message.channelId)
@@ -265,9 +259,7 @@ export class ChatOrchestrator {
       isReplyToBot: message.triggerSource === "reply",
       isSelfInitiated: message.triggerSource === "auto_interject",
       contour: contour.contour,
-      corePromptTemplates,
-      sigil: intent.sigil ?? null,
-      sigilPromptOverrides
+      sigil: intent.sigil ?? null
     });
     const restoredContext = intent.intent === "chat" ? await this.getActiveRestoredContext(message) : null;
     // V7: ACTIVE_CORE — единственный системный prompt. Никаких dynamic guidance блоков.
@@ -1284,8 +1276,7 @@ export class ChatOrchestrator {
   }
 
   private memoryCardLimitForLevel(level: number): number {
-    // V6 GAP-A: capacity по уровню отношений.
-    // -1 (cold/banned) → 0; 0 (neutral) → 3; 1 (warm) → 5; 2 (close) → 8; 3 (teasing) → 12; 4+ (sweet/legend) → 20.
+    // capacity по уровню отношений: -1 → 0; 0 → 3; 1 → 5; 2 → 8; 3 → 12; 4+ → 20.
     if (level <= -1) return 0;
     if (level === 0) return 3;
     if (level === 1) return 5;

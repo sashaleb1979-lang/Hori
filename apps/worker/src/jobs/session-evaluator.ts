@@ -115,7 +115,7 @@ export function createSessionJob(runtime: WorkerRuntime) {
         createdAt: row.createdAt
       }));
 
-    // V6 Phase C: ≥3 USER replies AND ≥1 Hori reply.
+    // Минимальный размер сессии: ≥3 ответа пользователя И ≥1 ответа Хори.
     const userReplyCount = sessionMessages.filter((entry) => entry.role === "User").length;
     const horiReplyCount = sessionMessages.filter((entry) => entry.role === "Hori").length;
     if (userReplyCount < 3 || horiReplyCount < 1) {

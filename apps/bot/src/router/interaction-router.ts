@@ -4218,7 +4218,7 @@ async function buildV6AuditLog(runtime: BotRuntime, guildId: string) {
 }
 
 
-// V6 Item 12: status + reset для sigil core-prompt overrides.
+// Status + reset для sigil core-prompt overrides.
 // Используем listCorePromptTemplates / setCorePromptTemplate / resetCorePromptTemplate из RuntimeConfigService.
 async function buildV6SigilPromptsStatus(runtime: BotRuntime, guildId: string) {
   try {

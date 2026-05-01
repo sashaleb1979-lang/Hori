@@ -224,8 +224,6 @@ export interface PersonaDebugOverrides {
   isSelfInitiated?: boolean;
 }
 
-import type { CorePromptTemplates } from "./prompt-spec-stubs";
-
 export interface ComposeBehaviorPromptInput {
   personaConfig?: Partial<PersonaConfig>;
   guildSettings: PersonaSettings;
@@ -250,15 +248,9 @@ export interface ComposeBehaviorPromptInput {
    */
   activePromptSlot?: { title?: string | null; content: string } | null;
   /**
-   * V6 Item 12: sigil-символ (`?`/`!`/`*`), если сообщение начиналось с него.
-   * Заставляет compose вставить дополнительный sigil-overlay блок.
+   * Sigil-символ (`?`/`!`/`*`), если сообщение начиналось с него.
    */
   sigil?: string | null;
-  /**
-   * V6 Item 12: панельные override-ы текста sigil-промптов (sigil_question и т.п.).
-   * Если ключ присутствует — заменяет defaultContent из CORE_PROMPT_DEFINITIONS.
-   */
-  sigilPromptOverrides?: Partial<Record<string, string>>;
   requestedDepth?: RequestedDepth;
   activeMode?: PersonaMode;
   channelKind?: ChannelKind;
@@ -278,7 +270,6 @@ export interface ComposeBehaviorPromptInput {
   debugOverrides?: PersonaDebugOverrides;
   isDirectMessage?: boolean;
   contour?: "A" | "B" | "C";
-  corePromptTemplates?: CorePromptTemplates;
 }
 
 export interface ComposeBehaviorPromptOutput {
