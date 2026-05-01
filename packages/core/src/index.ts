@@ -5,7 +5,6 @@ export * from "./persona/persona-service";
 export * from "./policies/interjection-policy";
 export * from "./policies/message-splitting-policy";
 export * from "./policies/selective-engagement-gate";
-export * from "./prompts/system-prompts";
 export * from "./safety/response-guard";
 export * from "./safety/roast-policy";
 export * from "./services/context-builder";

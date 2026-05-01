@@ -11,10 +11,8 @@ import { BraveSearchClient, buildSourceDigest, extractLinksFromMessage, fetchWeb
 // V7: brain pipeline (conflict-detector / emotion-engine / response-budget) удалён. Contour — локальный alias.
 type Contour = "A" | "B" | "C";
 import { IntentRouter } from "../intents/intent-router";
-import { detectMessageKind } from "../persona/prompt-spec-stubs";
+import { detectMessageKind, type CorePromptTemplates } from "../persona/prompt-spec-stubs";
 import { PersonaService } from "../persona/persona-service";
-import { type CorePromptTemplates } from "../persona/prompt-spec-stubs";
-import { HELP_TEXT } from "../prompts/system-prompts";
 import { ResponseGuard } from "../safety/response-guard";
 import { RoastPolicy } from "../safety/roast-policy";
 import { ContextBuilderService } from "../services/context-builder";
