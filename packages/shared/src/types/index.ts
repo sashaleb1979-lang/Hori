@@ -141,28 +141,18 @@ export interface PersonaBehaviorTrace {
 export interface FeatureFlags {
   webSearch: boolean;
   autoInterject: boolean;
-  userProfiles: boolean;
   contextActions: boolean;
   roast: boolean;
   replyQueueEnabled: boolean;
   runtimeConfigCacheEnabled: boolean;
   embeddingCacheEnabled: boolean;
-  channelAwareMode: boolean;
   messageKindAwareMode: boolean;
-  antiSlopStrictMode: boolean;
-  playfulModeEnabled: boolean;
-  irritatedModeEnabled: boolean;
-  ideologicalFlavourEnabled: boolean;
-  analogyBanEnabled: boolean;
-  slangLayerEnabled: boolean;
-  selfInterjectionConstraintsEnabled: boolean;
   memoryAlbumEnabled: boolean;
   interactionRequestsEnabled: boolean;
   linkUnderstandingEnabled: boolean;
   naturalMessageSplittingEnabled: boolean;
   selectiveEngagementEnabled: boolean;
   selfReflectionLessonsEnabled: boolean;
-  emotionalAdviceAnchorsEnabled: boolean;
 }
 
 export interface PersonaSettings {

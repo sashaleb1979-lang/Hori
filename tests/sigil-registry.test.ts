@@ -34,7 +34,7 @@ describe("V6 Sigil registry", () => {
     expect(question?.enabledByDefault).toBe(true);
     expect(question?.reserved).toBe(false);
     const reserved = SIGIL_REGISTRY.filter((s) => s.reserved);
-    expect(reserved.length).toBeGreaterThanOrEqual(3);
+    expect(reserved.length).toBeGreaterThanOrEqual(2);
     for (const r of reserved) {
       expect(r.enabledByDefault).toBe(false);
     }

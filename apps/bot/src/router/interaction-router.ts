@@ -3262,12 +3262,16 @@ function buildCorePromptPanelRows(selected: {
         .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:select`)
         .setPlaceholder("Выбери core prompt")
         .addOptions(
-          ...CORE_PROMPT_KEYS.map((key) => ({
-            label: CORE_PROMPT_DEFINITIONS[key].label,
-            value: key,
-            description: CORE_PROMPT_DEFINITIONS[key].description.slice(0, 100),
-            default: key === selected.key
-          }))
+          ...CORE_PROMPT_KEYS.map((key) => {
+            const def = CORE_PROMPT_DEFINITIONS[key];
+            const description = def.description.slice(0, 100).trim();
+            return {
+              label: def.label,
+              value: key,
+              ...(description ? { description } : {}),
+              default: key === selected.key
+            };
+          })
         )
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(

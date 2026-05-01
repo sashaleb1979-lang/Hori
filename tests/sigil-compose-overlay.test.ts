@@ -6,28 +6,18 @@ import type { BotIntent, FeatureFlags, MessageEnvelope, PersonaSettings } from "
 const featureFlags: FeatureFlags = {
   webSearch: true,
   autoInterject: false,
-  userProfiles: true,
   contextActions: true,
   roast: true,
   replyQueueEnabled: true,
   runtimeConfigCacheEnabled: true,
   embeddingCacheEnabled: true,
-  channelAwareMode: true,
   messageKindAwareMode: true,
-  antiSlopStrictMode: true,
-  playfulModeEnabled: true,
-  irritatedModeEnabled: true,
-  ideologicalFlavourEnabled: true,
-  analogyBanEnabled: true,
-  slangLayerEnabled: true,
-  selfInterjectionConstraintsEnabled: true,
   memoryAlbumEnabled: true,
   interactionRequestsEnabled: true,
   linkUnderstandingEnabled: true,
   naturalMessageSplittingEnabled: true,
   selectiveEngagementEnabled: true,
-  selfReflectionLessonsEnabled: true,
-  emotionalAdviceAnchorsEnabled: true
+  selfReflectionLessonsEnabled: true
 };
 
 const guildSettings: PersonaSettings = {
@@ -63,47 +53,7 @@ const baseMessage: MessageEnvelope = {
 
 const chatIntent: BotIntent = "chat";
 
-describe("V6 Item 12: sigil overlay block in chat system prompt", () => {
-  it("inserts sigil_question default block when sigil = '?'", () => {
-    const out = composeBehaviorPrompt({
-      guildSettings,
-      featureFlags,
-      message: { ...baseMessage, content: "что такое квантовая запутанность" },
-      intent: chatIntent,
-      cleanedContent: "что такое квантовая запутанность",
-      sigil: "?"
-    });
-    expect(out.prompt).toContain("web-search");
-    expect(out.trace.blocksUsed).toContain("SIGIL_OVERLAY");
-  });
-
-  it("inserts sigil_force_rewrite block when sigil = '!'", () => {
-    const out = composeBehaviorPrompt({
-      guildSettings,
-      featureFlags,
-      message: { ...baseMessage, content: "перепиши" },
-      intent: chatIntent,
-      cleanedContent: "перепиши",
-      sigil: "!"
-    });
-    expect(out.prompt).toContain("форс-перезапрос");
-    expect(out.trace.blocksUsed).toContain("SIGIL_OVERLAY");
-  });
-
-  it("uses panel override when provided instead of default", () => {
-    const out = composeBehaviorPrompt({
-      guildSettings,
-      featureFlags,
-      message: { ...baseMessage, content: "test" },
-      intent: chatIntent,
-      cleanedContent: "test",
-      sigil: "?",
-      sigilPromptOverrides: { sigil_question: "ПАНЕЛЬНЫЙ-ОВЕРРАЙД" }
-    });
-    expect(out.prompt).toContain("ПАНЕЛЬНЫЙ-ОВЕРРАЙД");
-    expect(out.prompt).not.toContain("web-search");
-  });
-
+describe("V7: sigil overlay block disabled in ACTIVE_CORE compose", () => {
   it("does not include SIGIL_OVERLAY when no sigil", () => {
     const out = composeBehaviorPrompt({
       guildSettings,
@@ -126,4 +76,18 @@ describe("V6 Item 12: sigil overlay block in chat system prompt", () => {
     });
     expect(out.trace.blocksUsed).not.toContain("SIGIL_OVERLAY");
   });
+
+  it("does not inject sigil overlay block even when sigil = '?' (V7 removes overlay; search handled via tool loop)", () => {
+    const out = composeBehaviorPrompt({
+      guildSettings,
+      featureFlags,
+      message: { ...baseMessage, content: "что такое квантовая запутанность" },
+      intent: chatIntent,
+      cleanedContent: "что такое квантовая запутанность",
+      sigil: "?"
+    });
+    expect(out.assembly.sigilOverlayBlock).toBe("");
+    expect(out.trace.blocksUsed).not.toContain("SIGIL_OVERLAY");
+  });
 });
+

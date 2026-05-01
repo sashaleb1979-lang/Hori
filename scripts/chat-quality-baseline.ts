@@ -41,27 +41,18 @@ interface HistoryTurn {
 const featureFlags: FeatureFlags = {
   webSearch: true,
   autoInterject: false,
-  userProfiles: true,
   contextActions: true,
   roast: true,
-  contextV2Enabled: true,
-  contextConfidenceEnabled: true,
-  topicEngineEnabled: true,
-  affinitySignalsEnabled: true,
-  moodEngineEnabled: true,
   replyQueueEnabled: true,
-  mediaReactionsEnabled: false,
   runtimeConfigCacheEnabled: true,
   embeddingCacheEnabled: true,
-  channelAwareMode: true,
   messageKindAwareMode: true,
-  antiSlopStrictMode: true,
-  playfulModeEnabled: true,
-  irritatedModeEnabled: true,
-  ideologicalFlavourEnabled: true,
-  analogyBanEnabled: true,
-  slangLayerEnabled: true,
-  selfInterjectionConstraintsEnabled: true
+  memoryAlbumEnabled: true,
+  interactionRequestsEnabled: true,
+  linkUnderstandingEnabled: true,
+  naturalMessageSplittingEnabled: true,
+  selectiveEngagementEnabled: true,
+  selfReflectionLessonsEnabled: true
 };
 
 const guildSettings: PersonaSettings = {

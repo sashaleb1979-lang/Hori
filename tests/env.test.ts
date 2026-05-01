@@ -16,7 +16,7 @@ describe("loadEnv", () => {
 
     expect(env.FEATURE_WEB_SEARCH).toBe(true);
     expect(env.FEATURE_AUTOINTERJECT).toBe(false);
-    expect(env.FEATURE_EMOTIONAL_ADVICE_ANCHORS_ENABLED).toBe(true);
+    expect(env.FEATURE_MEMORY_HYDE_ENABLED).toBe(true);
     expect(env.OLLAMA_FAST_MODEL).toBe("qwen3.5:9b");
     expect(env.OLLAMA_SMART_MODEL).toBe("qwen3.5:9b");
     expect(env.LLM_MAX_CONTEXT_MESSAGES).toBe(12);
@@ -50,7 +50,7 @@ describe("loadEnv", () => {
         features: {
           webSearch: false,
           roast: false,
-          emotionalAdviceAnchorsEnabled: false
+          memoryHydeEnabled: false
         },
         llm: {
           contextMessages: 16
@@ -73,7 +73,7 @@ describe("loadEnv", () => {
     expect(env.BRAVE_SEARCH_API_KEY).toBe("brave-key");
     expect(env.FEATURE_WEB_SEARCH).toBe(false);
     expect(env.FEATURE_ROAST).toBe(false);
-    expect(env.FEATURE_EMOTIONAL_ADVICE_ANCHORS_ENABLED).toBe(false);
+    expect(env.FEATURE_MEMORY_HYDE_ENABLED).toBe(false);
     expect(env.LLM_MAX_CONTEXT_MESSAGES).toBe(16);
     expect(env.USER_PROFILE_MIN_MESSAGES).toBe(80);
     expect(env.SEARCH_MAX_REQUESTS_PER_RESPONSE).toBe(1);
