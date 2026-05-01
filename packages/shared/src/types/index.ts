@@ -144,13 +144,7 @@ export interface FeatureFlags {
   userProfiles: boolean;
   contextActions: boolean;
   roast: boolean;
-  contextV2Enabled: boolean;
-  contextConfidenceEnabled: boolean;
-  topicEngineEnabled: boolean;
-  affinitySignalsEnabled: boolean;
-  moodEngineEnabled: boolean;
   replyQueueEnabled: boolean;
-  mediaReactionsEnabled: boolean;
   runtimeConfigCacheEnabled: boolean;
   embeddingCacheEnabled: boolean;
   channelAwareMode: boolean;

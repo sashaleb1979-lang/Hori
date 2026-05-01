@@ -15,7 +15,6 @@ export class ContextBuilderService {
       message?: MessageEnvelope;
       intent?: BotIntent;
       maxChars?: number;
-      contextV2Enabled?: boolean;
       messageKind?: string;
     } = {}
   ) {

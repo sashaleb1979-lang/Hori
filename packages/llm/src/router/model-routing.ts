@@ -10,13 +10,10 @@ export const MODEL_ROUTING_SLOTS = [
   "classifier",
   "chat",
   "summary",
-  "rewrite",
   "search",
   "analytics",
   "profile",
-  "memory",
-  "relationship_eval",
-  "code_analysis"
+  "memory"
 ] as const;
 
 export type ModelRoutingSlot = (typeof MODEL_ROUTING_SLOTS)[number];
@@ -43,13 +40,10 @@ const balancedOpenAiSlots: ModelRoutingSlots = {
   classifier: "gpt-5-nano",
   chat: "gpt-5.4-nano",
   summary: "gpt-5.4-nano",
-  rewrite: "gpt-5.4-nano",
   search: "gpt-5.4-nano",
   analytics: "gpt-5.4-nano",
   profile: "gpt-5.4-nano",
-  memory: "gpt-5.4-nano",
-  relationship_eval: "gpt-5-nano",
-  code_analysis: "gpt-5.4-mini"
+  memory: "gpt-5.4-nano"
 };
 
 export const MODEL_ROUTING_PRESETS = {
@@ -69,13 +63,10 @@ export const MODEL_ROUTING_PRESETS = {
       classifier: "gpt-5-nano",
       chat: "gpt-5-nano",
       summary: "gpt-5-nano",
-      rewrite: "gpt-5-nano",
       search: "gpt-5-nano",
       analytics: "gpt-5-nano",
       profile: "gpt-5-nano",
-      memory: "gpt-5-nano",
-      relationship_eval: "gpt-5-nano",
-      code_analysis: "gpt-5-nano"
+      memory: "gpt-5-nano"
     }
   },
   quality_openai: {
@@ -85,13 +76,10 @@ export const MODEL_ROUTING_PRESETS = {
       classifier: "gpt-5-nano",
       chat: "gpt-5.4-mini",
       summary: "gpt-5.4-nano",
-      rewrite: "gpt-5.4-nano",
       search: "gpt-5.4-nano",
       analytics: "gpt-5.4-nano",
       profile: "gpt-5.4-nano",
-      memory: "gpt-5.4-nano",
-      relationship_eval: "gpt-5-nano",
-      code_analysis: "gpt-5.4-mini"
+      memory: "gpt-5.4-nano"
     }
   }
 } as const satisfies Record<string, ModelRoutingPreset>;
@@ -151,8 +139,6 @@ export function slotForIntent(intent: string): ModelRoutingSlot {
   switch (intent) {
     case "analytics":
       return "analytics";
-    case "rewrite":
-      return "rewrite";
     case "summary":
       return "summary";
     case "search":
@@ -162,10 +148,6 @@ export function slotForIntent(intent: string): ModelRoutingSlot {
     case "memory_write":
     case "memory_forget":
       return "memory";
-    case "relationship_eval":
-      return "relationship_eval";
-    case "code_analysis":
-      return "code_analysis";
     default:
       return "chat";
   }
@@ -277,13 +259,10 @@ function buildPresetSlots(env: AppEnv, preset: ModelRoutingPresetName): ModelRou
       classifier: legacy.chat,
       chat: legacy.chat,
       summary: legacy.smart,
-      rewrite: legacy.smart,
       search: legacy.smart,
       analytics: legacy.smart,
       profile: legacy.smart,
-      memory: legacy.smart,
-      relationship_eval: legacy.chat,
-      code_analysis: legacy.smart
+      memory: legacy.smart
     };
   }
 

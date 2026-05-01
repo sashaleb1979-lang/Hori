@@ -17,32 +17,48 @@ function openaiEnv() {
   });
 }
 
-describe("V6 Phase J: model routing extra slots", () => {
-  it("registers relationship_eval and code_analysis as routing slots", () => {
-    expect(MODEL_ROUTING_SLOTS).toContain("relationship_eval");
-    expect(MODEL_ROUTING_SLOTS).toContain("code_analysis");
-    expect(isModelRoutingSlot("relationship_eval")).toBe(true);
-    expect(isModelRoutingSlot("code_analysis")).toBe(true);
+describe("model routing slots", () => {
+  it("registers the 7 active routing slots", () => {
+    expect(MODEL_ROUTING_SLOTS).toContain("classifier");
+    expect(MODEL_ROUTING_SLOTS).toContain("chat");
+    expect(MODEL_ROUTING_SLOTS).toContain("summary");
+    expect(MODEL_ROUTING_SLOTS).toContain("search");
+    expect(MODEL_ROUTING_SLOTS).toContain("analytics");
+    expect(MODEL_ROUTING_SLOTS).toContain("profile");
+    expect(MODEL_ROUTING_SLOTS).toContain("memory");
+    expect(MODEL_ROUTING_SLOTS).toHaveLength(7);
   });
 
-  it("slotForIntent maps the new intents", () => {
-    expect(slotForIntent("relationship_eval")).toBe("relationship_eval");
-    expect(slotForIntent("code_analysis")).toBe("code_analysis");
+  it("does not register deleted slots", () => {
+    expect(isModelRoutingSlot("relationship_eval")).toBe(false);
+    expect(isModelRoutingSlot("code_analysis")).toBe(false);
+    expect(isModelRoutingSlot("rewrite")).toBe(false);
   });
 
-  it("balanced_openai routes relationship_eval to gpt-5-nano by default", () => {
+  it("slotForIntent maps active intents correctly", () => {
+    expect(slotForIntent("analytics")).toBe("analytics");
+    expect(slotForIntent("summary")).toBe("summary");
+    expect(slotForIntent("search")).toBe("search");
+    expect(slotForIntent("profile")).toBe("profile");
+    expect(slotForIntent("memory_write")).toBe("memory");
+    expect(slotForIntent("memory_forget")).toBe("memory");
+    expect(slotForIntent("chat")).toBe("chat");
+    expect(slotForIntent("rewrite")).toBe("chat"); // falls through to default
+  });
+
+  it("balanced_openai preset resolves all 7 slots", () => {
     const env = openaiEnv();
     const resolved = resolveModelRouting(env, null);
-    expect(resolved.slots.relationship_eval).toBe("gpt-5-nano");
-    expect(resolved.slots.code_analysis).toBe("gpt-5.4-mini");
+    expect(resolved.slots.classifier).toBe("gpt-5-nano");
+    expect(resolved.slots.chat).toBe("gpt-5.4-nano");
+    expect(resolved.slots.memory).toBe("gpt-5.4-nano");
   });
 
-  it("override applied to relationship_eval persists through resolve", () => {
+  it("override applied to memory slot persists through resolve", () => {
     const env = openaiEnv();
-    const stored = serializeModelRouting("balanced_openai", { relationship_eval: "gpt-5-nano", code_analysis: "gpt-5.4-mini" });
+    const stored = serializeModelRouting("balanced_openai", { memory: "gpt-5-nano" });
     const resolved = resolveModelRouting(env, stored);
-    expect(resolved.slots.relationship_eval).toBe("gpt-5-nano");
-    expect(resolved.slots.code_analysis).toBe("gpt-5.4-mini");
-    expect(resolved.overrides.relationship_eval).toBe("gpt-5-nano");
+    expect(resolved.slots.memory).toBe("gpt-5-nano");
+    expect(resolved.overrides.memory).toBe("gpt-5-nano");
   });
 });

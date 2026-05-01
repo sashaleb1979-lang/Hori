@@ -204,7 +204,6 @@ export class ChatOrchestrator {
       message,
       intent: intent.intent,
       maxChars: contourMaxChars,
-      contextV2Enabled: runtimeConfig.featureFlags.contextV2Enabled,
       messageKind
     });
     const linkContext = runtimeConfig.featureFlags.webSearch && runtimeConfig.featureFlags.linkUnderstandingEnabled
