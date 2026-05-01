@@ -1350,7 +1350,7 @@ async function routeStringSelectInteraction(
   }
 
   if (interaction.customId === `${HORI_PANEL_PREFIX}:tab`) {
-    if (!isOwner) {
+    if (!isOwner && !hasManageGuild(interaction)) {
       await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
       return;
     }
@@ -1977,7 +1977,7 @@ async function handleHoriPanelAction(
     return;
   }
 
-  if (!isOwner) {
+  if (!isOwner && !isModerator) {
     await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
     return;
   }
@@ -2126,7 +2126,7 @@ async function handleHoriPanelAction(
       const state = await getOwnerLockdownState(runtime, true);
       await interaction.update(
         buildHoriPanelDetailResponse(
-          "system",
+          "runtime",
           isOwner,
           isModerator,
           "Owner Lockdown",
@@ -2141,7 +2141,7 @@ async function handleHoriPanelAction(
     const cleared = enabled ? await runtime.replyQueue.clearAll() : { count: 0 };
     await interaction.update(
       buildHoriPanelDetailResponse(
-        "system",
+        "runtime",
         isOwner,
         isModerator,
         enabled ? "Lockdown включён" : "Lockdown выключен",
@@ -2165,13 +2165,61 @@ async function handleHoriPanelAction(
 
     await interaction.update({
       ...buildHoriPanelDetailResponse(
-        "memory",
+        "people",
         isOwner,
         isModerator,
         scope === "server" ? "Memory-build сервера" : "Memory-build канала",
         await startMemoryBuildRun(runtime, interaction.guildId, scope === "channel" ? interaction.channelId : null, scope, "recent", interaction.user.id)
       )
     });
+    return;
+  }
+
+  // V7: actions that open a sub-panel instead of a detail embed.
+  if (action === "cores_open_panel" || action === "cores_evaluator" || action === "cores_aggression_checker") {
+    if (!isOwner) {
+      await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const coreKeyMap: Record<string, string> = {
+      cores_open_panel: "common_core_base",
+      cores_evaluator: "evaluator",
+      cores_aggression_checker: "aggression_checker"
+    };
+    const key = coreKeyMap[action] ?? "common_core_base";
+    if (!isCorePromptKey(key)) {
+      await interaction.reply({ content: "Неизвестный ключ core prompt.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, key);
+    return;
+  }
+
+  if (action === "runtime_llm_panel") {
+    if (!isOwner) {
+      await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.update(await buildLlmPanelResponse(runtime, "chat", interaction.guildId));
+    return;
+  }
+
+  if (action === "runtime_power") {
+    if (!isOwner) {
+      await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const powerStatus = await runtime.runtimeConfig.getPowerProfileStatus();
+    await interaction.update(buildPowerPanelResponse(await runtime.slashAdmin.powerPanel(), powerStatus.activeProfile));
+    return;
+  }
+
+  if (action === "people_lookup" || action === "people_set_state") {
+    if (action === "people_set_state" && !isOwner) {
+      await interaction.reply({ content: "Смена уровня только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.showModal(buildRelationshipModal());
     return;
   }
 
@@ -2323,6 +2371,110 @@ async function resolveHoriActionContent(
     case "v6_audit_log":
       if (!isOwner) return "Audit log только для владельца.";
       return buildV6AuditLog(runtime, guildId);
+    // ── V7 action IDs ────────────────────────────────────────────────────────
+    case "home_status":
+      return buildHoriStatus(runtime, guildId, interaction.channelId);
+    case "home_runtime":
+      return runtime.slashAdmin.runtimeModesStatus();
+    case "home_audit_recent":
+      if (!isModerator && !isOwner) return "Аудит только для модеров.";
+      return buildV6AuditLog(runtime, guildId);
+    case "home_help":
+      return `${await runtime.slashAdmin.handleHelp()}\n\nВидимый список команд держится вокруг /hori.`;
+    case "cores_preview":
+      return buildStyleStatus(runtime, guildId);
+    case "people_self":
+      return runtime.slashAdmin.relationshipDetails(guildId, interaction.user.id);
+    case "people_deltas":
+      if (!isOwner) return "Дельты роста только для владельца.";
+      return buildV6RelationshipDeltas(runtime);
+    case "people_reset_cold":
+      if (!isOwner) return "Снятие заморозки только для владельца. Используй /hori relationship user:@кто action:reset-cold.";
+      return "Используй /hori relationship user:@кто action:reset-cold для снятия заморозки.";
+    case "aggression_status":
+      return buildV6RelationshipStatus(runtime, guildId, interaction.user.id);
+    case "aggression_events":
+      return runtime.slashAdmin.aggressionEvents(guildId, interaction.user.id, 8);
+    case "aggression_stage_reset":
+      if (!isOwner) return "Сброс stage только для владельца.";
+      return "Используй /hori aggression user:@кто action:reset для сброса stage агрессии.";
+    case "aggression_policy":
+      return buildV6RelationshipDeltas(runtime);
+    case "aggression_phrases":
+      return buildV6QueueStatus(runtime);
+    case "slots_list":
+      return buildV6RecallStatus(runtime, guildId, interaction.channelId);
+    case "slots_inventory":
+      return buildV6RecallStatus(runtime, guildId, interaction.channelId);
+    case "slots_force_activate":
+      if (!isOwner) return "Force activate только для владельца.";
+      return "Используй /hori slot user:@кто action:activate для активации слота.";
+    case "slots_deactivate":
+      if (!isOwner) return "Деактивация только для владельца.";
+      return "Используй /hori slot user:@кто action:deactivate для снятия слота.";
+    case "slots_legacy_cards":
+      if (!isOwner) return "Legacy карты только для владельца.";
+      return runtime.slashAdmin.listMemoryCards(guildId, interaction.user.id, 8);
+    case "channels_status":
+      return buildChannelPolicyStatus(runtime, guildId, interaction.channelId);
+    case "channels_matrix":
+      return buildChannelMatrix(runtime, guildId);
+    case "channels_set_full":
+      if (!isModerator && !isOwner) return "Это только для модеров.";
+      return runtime.slashAdmin.channelConfig(guildId, interaction.channelId, {
+        allowBotReplies: true,
+        allowInterjections: true,
+        isMuted: false,
+        topicInterestTags: null
+      });
+    case "channels_set_silent":
+      if (!isModerator && !isOwner) return "Это только для модеров.";
+      return runtime.slashAdmin.channelConfig(guildId, interaction.channelId, {
+        allowBotReplies: false,
+        allowInterjections: false,
+        isMuted: true,
+        topicInterestTags: null
+      });
+    case "channels_set_off":
+      if (!isModerator && !isOwner) return "Это только для модеров.";
+      return runtime.slashAdmin.channelConfig(guildId, interaction.channelId, {
+        allowBotReplies: false,
+        allowInterjections: false,
+        isMuted: false,
+        topicInterestTags: null
+      });
+    case "queue_phrase_pools":
+      return buildV6QueueStatus(runtime);
+    case "queue_reset_pools":
+      if (!isOwner) return "Сброс phrase pools только для владельца.";
+      return resetV6QueuePools(runtime);
+    case "queue_meme_status":
+      return buildV6FlashStatus(runtime);
+    case "runtime_status":
+      return runtime.slashAdmin.runtimeModesStatus();
+    case "runtime_sigils":
+      return buildV6SigilsStatus(runtime);
+    case "runtime_features":
+      return buildFeatureStatus(runtime, guildId);
+    case "runtime_lockdown": {
+      const lockdownState = await getOwnerLockdownState(runtime, true);
+      return `Owner lockdown: ${lockdownState.enabled ? "**on**" : "off"}${lockdownState.updatedBy ? `\nПоследнее изменение: ${lockdownState.updatedBy}` : ""}`;
+    }
+    case "audit_recent":
+      if (!isModerator && !isOwner) return "Аудит только для модеров.";
+      return buildV6AuditLog(runtime, guildId);
+    case "audit_runtime":
+      if (!isModerator && !isOwner) return "Аудит рантайма только для модеров.";
+      return buildV6AuditLog(runtime, guildId);
+    case "audit_relationships":
+      if (!isModerator && !isOwner) return "Аудит отношений только для модеров.";
+      return buildV6RelationshipStatus(runtime, guildId, interaction.user.id);
+    case "audit_aggression":
+      if (!isModerator && !isOwner) return "Аудит агрессии только для модеров.";
+      return runtime.slashAdmin.aggressionEvents(guildId, interaction.user.id, 8);
+    case "audit_slots":
+      if (!isModerator && !isOwner) return "Аудит слотов только для модеров.";
+      return buildV6RecallStatus(runtime, guildId, interaction.channelId);
     default:
       return "Неизвестная кнопка панели.";
   }
@@ -2514,7 +2666,49 @@ function horiActionTitle(action: string) {
     feature_status: "Feature flags",
     channel_policy: "Channel policy",
     llm_panel: "LLM models",
-    debug_latest: "Latest trace"
+    debug_latest: "Latest trace",
+    home_status: "Статус",
+    home_runtime: "Рантайм",
+    home_audit_recent: "Свежий аудит",
+    home_help: "Справка",
+    cores_preview: "Превью сборки",
+    cores_evaluator: "Evaluator",
+    cores_aggression_checker: "Aggression checker",
+    cores_open_panel: "Редактор кор",
+    people_self: "Моё отношение",
+    people_lookup: "Найти пользователя",
+    people_set_state: "Поставить уровень",
+    people_reset_cold: "Снять заморозку",
+    people_deltas: "Дельты роста",
+    aggression_status: "Состояние агрессии",
+    aggression_events: "События агрессии",
+    aggression_stage_reset: "Сброс stage",
+    aggression_policy: "Политика агрессии",
+    aggression_phrases: "Фразы замены",
+    slots_list: "Активные слоты",
+    slots_inventory: "Реестр слотов",
+    slots_force_activate: "Активировать слот",
+    slots_deactivate: "Снять слот",
+    slots_legacy_cards: "Legacy карты",
+    channels_status: "Текущий канал",
+    channels_matrix: "Матрица сервера",
+    channels_set_full: "Канал: Full",
+    channels_set_silent: "Канал: Silent",
+    channels_set_off: "Канал: Off",
+    queue_phrase_pools: "Phrase pools",
+    queue_reset_pools: "Reset pools",
+    queue_meme_status: "Memes",
+    runtime_status: "Рантайм сводка",
+    runtime_llm_panel: "LLM маршрутизация",
+    runtime_power: "Power profile",
+    runtime_sigils: "Sigils",
+    runtime_features: "Feature flags",
+    runtime_lockdown: "Owner Lockdown",
+    audit_recent: "Последние 25",
+    audit_runtime: "Runtime аудит",
+    audit_relationships: "Аудит отношений",
+    audit_aggression: "Аудит агрессии",
+    audit_slots: "Аудит слотов"
   };
 
   return titles[action] ?? "Panel action";
@@ -3322,6 +3516,24 @@ async function buildChannelPolicyStatus(runtime: BotRuntime, guildId: string, ch
     `📏 Длина: **${policy.responseLengthOverride ?? "inherit"}**`,
     `🏷️ Теги: ${policy.topicInterestTags.join(", ") || "—"}`
   ].join("\n");
+}
+
+async function buildChannelMatrix(runtime: BotRuntime, guildId: string) {
+  try {
+    const configs = await runtime.prisma.channelConfig.findMany({
+      where: { guildId },
+      orderBy: { channelId: "asc" },
+      take: 20
+    });
+    if (!configs.length) return "📡 **Channel matrix** — нет сохранённых настроек каналов.";
+    const lines = configs.map((cfg) => {
+      const mode = !cfg.allowBotReplies ? "🔴 off" : cfg.isMuted ? "🟡 silent" : "🟢 full";
+      return `<#${cfg.channelId}> ${mode}`;
+    });
+    return [`📡 **Channel matrix** (${configs.length} каналов)`, ...lines].join("\n");
+  } catch (error) {
+    return `Не удалось получить матрицу каналов: ${asErrorMessage(error)}`;
+  }
 }
 
 async function buildStyleStatus(runtime: BotRuntime, guildId: string) {
