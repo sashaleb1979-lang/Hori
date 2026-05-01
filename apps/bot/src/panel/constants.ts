@@ -9,56 +9,12 @@ export const CORE_PROMPT_PANEL_PREFIX = "core-prompt-panel";
 export const V5_PANEL_PREFIX = "v5-panel";
 
 export const POWER_PROFILES = ["economy", "balanced", "expanded", "max"] as const;
-export const HORI_PANEL_TABS = [
-  "main",
-  "persona",
-  "behavior",
-  "memory",
-  "channels",
-  "llm",
-  "system",
-  "relationship",
-  "recall",
-  "sigils",
-  "queue",
-  "flash",
-  "audit"
-] as const;
 
-export type HoriPanelTab = (typeof HORI_PANEL_TABS)[number];
-
-export const TAB_EMOJI: Record<HoriPanelTab, string> = {
-  main: "🏠",
-  persona: "🎭",
-  behavior: "⚡",
-  memory: "🧠",
-  channels: "📡",
-  llm: "🤖",
-  system: "⚙️",
-  relationship: "💞",
-  recall: "🔮",
-  sigils: "🔣",
-  queue: "📬",
-  flash: "🎯",
-  audit: "📜"
-};
-
-export const TAB_COLOR: Record<HoriPanelTab, number> = {
-  main: 0x5865F2,
-  persona: 0xED4245,
-  behavior: 0xFEE75C,
-  memory: 0x57F287,
-  channels: 0x5865F2,
-  llm: 0x57F287,
-  system: 0xEB459E,
-  relationship: 0xED4245,
-  recall: 0x9B59B6,
-  sigils: 0xF39C12,
-  queue: 0x3498DB,
-  flash: 0xE74C3C,
-  audit: 0x95A5A6
-};
-
+/**
+ * Feature flags, которые ещё могут переключаться панелью. Старые тоггл-кнопки
+ * перенесены в `runtime`/`channels`/`queue`-вкладки. Этот словарь живёт здесь,
+ * потому что dispatcher агрегирует обе стороны (on/off) под общим ключом.
+ */
 export const PANEL_FEATURE_LABELS = {
   web_search: "Web search",
   link_understanding_enabled: "Link understanding",
@@ -82,4 +38,17 @@ export const PANEL_FEATURE_LABELS = {
 
 export type PanelFeatureKey = keyof typeof PANEL_FEATURE_LABELS;
 
-export const HORI_PANEL_OWNER_ONLY_MESSAGE = "Hori master panel доступна только владельцу. Для обычной работы используй прямые ветки /hori.";
+export const HORI_PANEL_OWNER_ONLY_MESSAGE =
+  "Hori master panel доступна только владельцу. Для обычной работы используй прямые ветки /hori.";
+
+// Re-export new IA primitives, чтобы существующий код мог переезжать постепенно.
+export {
+  PANEL_TABS,
+  PANEL_TAB_IDS,
+  PANEL_TAB_BY_ID,
+  DEFAULT_PANEL_TAB_ID,
+  getPanelTab,
+  resolvePanelTab
+} from "./registry";
+
+export type { PanelTabDefinition, PanelAction, PanelAccess, PanelViewer } from "./types";

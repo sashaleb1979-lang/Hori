@@ -54,36 +54,26 @@ import {
 import type { BotRuntime } from "../bootstrap";
 import {
   CORE_PROMPT_PANEL_PREFIX,
+  DEFAULT_PANEL_TAB_ID,
   HORI_ACTION_PREFIX,
   HORI_MODAL_PREFIX,
   HORI_PANEL_OWNER_ONLY_MESSAGE,
   HORI_PANEL_PREFIX,
-  HORI_PANEL_TABS,
   HORI_STATE_PANEL_PREFIX,
   LLM_PANEL_PREFIX,
   MEMORY_ALBUM_MODAL_PREFIX,
   PANEL_FEATURE_LABELS,
   POWER_PANEL_PREFIX,
   POWER_PROFILES,
-  TAB_COLOR,
-  TAB_EMOJI,
   V5_PANEL_PREFIX,
-  type HoriPanelTab,
   type PanelFeatureKey
 } from "../panel/constants";
+import { buildPanelResponse, buildDetailEmbed, parsePanelTabId } from "../panel/render";
 import { getOwnerLockdownState, isBotOwner, setOwnerLockdownState, shouldIgnoreForOwnerLockdown } from "./owner-lockdown";
 import { BotStateService, HORI_STATE_TABS, horiStateTabLabel, parseHoriStateTab, type HoriStateTab } from "../services/bot-state-service";
 
 const PUBLIC_COMMANDS = new Set(["hori", "bot-help", "bot-album"]);
 const OWNER_COMMANDS = new Set(["bot-ai-url", "bot-import", "bot-lockdown", "bot-power"]);
-type HoriPanelAction = {
-  id: string;
-  label: string;
-  emoji?: string;
-  style?: ButtonStyle;
-  ownerOnly?: boolean;
-  modOnly?: boolean;
-};
 
 function ensureModerator(interaction: ChatInputCommandInteraction | ContextMenuCommandInteraction | ModalSubmitInteraction) {
   return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
@@ -578,7 +568,7 @@ async function handleHoriCommand(
       return;
     }
 
-    const tab = parseHoriPanelTab(interaction.options.getString("tab")) ?? "main";
+    const tab = parsePanelTabId(interaction.options.getString("tab"));
     await interaction.reply({
       ...buildHoriPanelResponse(tab, isOwner, isModerator),
       flags: MessageFlags.Ephemeral
@@ -1365,7 +1355,7 @@ async function routeStringSelectInteraction(
       return;
     }
 
-    const tab = parseHoriPanelTab(interaction.values[0]) ?? "main";
+    const tab = parsePanelTabId(interaction.values[0]);
     await interaction.update(buildHoriPanelResponse(tab, isOwner, hasManageGuild(interaction)));
   }
 }
@@ -1553,7 +1543,7 @@ async function handleCorePromptPanelButton(
   }
 
   if (action === "back") {
-    await interaction.update(buildHoriPanelResponse("persona", isOwner, hasManageGuild(interaction)));
+    await interaction.update(buildHoriPanelResponse("cores", isOwner, hasManageGuild(interaction)));
     return;
   }
 
@@ -2005,7 +1995,7 @@ async function handleHoriPanelAction(
   }
 
   if (action === "panel_home") {
-    await interaction.update(buildHoriPanelResponse("main", isOwner, isModerator));
+    await interaction.update(buildHoriPanelResponse("home", isOwner, isModerator));
     return;
   }
 
@@ -2035,7 +2025,7 @@ async function handleHoriPanelAction(
   }
 
   if (action === "v5_controls_back") {
-    await interaction.update(buildHoriPanelResponse("persona", isOwner, isModerator));
+    await interaction.update(buildHoriPanelResponse("cores", isOwner, isModerator));
     return;
   }
 
@@ -2338,93 +2328,18 @@ async function resolveHoriActionContent(
   }
 }
 
-function buildHoriPanelResponse(tab: HoriPanelTab, isOwner: boolean, isModerator: boolean) {
-  return {
-    content: "",
-    embeds: [buildHoriPanelEmbed(tab, isOwner, isModerator)],
-    components: buildHoriPanelRows(tab, isOwner, isModerator)
-  };
+function buildHoriPanelResponse(tab: string, isOwner: boolean, isModerator: boolean) {
+  return buildPanelResponse(tab, { isOwner, isModerator });
 }
 
 function buildHoriPanelDetailResponse(
-  tab: HoriPanelTab,
+  tab: string,
   isOwner: boolean,
   isModerator: boolean,
   title: string,
   body: string
 ) {
-  return {
-    content: "",
-    embeds: [buildHoriPanelEmbed(tab, isOwner, isModerator), buildHoriDetailEmbed(title, body)],
-    components: buildHoriPanelRows(tab, isOwner, isModerator)
-  };
-}
-
-function buildHoriPanelEmbed(tab: HoriPanelTab, isOwner: boolean, isModerator: boolean) {
-  const role = isOwner ? "👑 owner" : isModerator ? "🛡️ moderator" : "👤 user";
-
-  const tabText: Record<HoriPanelTab, string> = {
-    main: "Быстрый доступ к статусу, помощи, поиску, очереди и профилю. Отсюда можно перейти в любой раздел.",
-    persona: "Пока здесь только живые вещи для chat path: текст чата и редактор V5 core prompt-ов. Остальное временно убрано из панели.",
-    behavior: "Активность бота: чтение чата, auto-interject, reply queue, natural message splitting, media reactions.",
-    memory: "Всё про память: Active Memory, hybrid recall, memory-build, topic engine, album, reflection, профили людей и отношения.",
-    channels: "Каналы: policy, mute, reply length override, topic tags, поиск, summary. Web search и link understanding тоже тут.",
-    llm: "LLM routing: preset, модели по функциям, legacy fallback и диагностика токенов без россыпи env.",
-    system: "Система: State panel, Power profile, lockdown, AI URL, debug trace, feature flags, context/safety diagnostics и эксперименты.",
-    relationship: "V6 Relationship: дельты привязанности, escalation decay, уровни 0–5 и core-prompt привязка через corePromptKeyForLevel.",
-    recall: "V6 Recall: PromptSlot активации (10 мин active / 6 ч cooldown), уровневая преемптация, channel-vs-global приоритет.",
-    sigils: "V6 Sigils: реестр триггеров (?, !, *, >, ^), включение/отключение через панель.",
-    queue: "V6 Queue: панель-настраиваемые phrase pools (initial/followup × warm/neutral/cold).",
-    flash: "V6 Flash trolling: weighted 4:1:4 (retort:question:meme), MemeIndexer как single source of truth по assets/memes/catalog.json.",
-    audit: "V6 Audit: история изменений core prompt и других runtime-настроек (кто/когда/что)."
-  };
-
-  const actions = getHoriTabActions(tab, isOwner, isModerator).map((a) => a.label).join(" · ") || "—";
-
-  return new EmbedBuilder()
-    .setTitle(`${TAB_EMOJI[tab]} Hori Panel — ${horiTabLabel(tab)}`)
-    .setColor(TAB_COLOR[tab])
-    .setDescription(tabText[tab])
-    .addFields(
-      { name: "Доступ", value: role, inline: true },
-      { name: "Кнопки", value: actions.slice(0, 1024) }
-    );
-}
-
-function buildHoriPanelRows(tab: HoriPanelTab, isOwner: boolean, isModerator: boolean) {
-  const rows: Array<ActionRowBuilder<StringSelectMenuBuilder | ButtonBuilder>> = [
-    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId(`${HORI_PANEL_PREFIX}:tab`)
-        .setPlaceholder("Раздел панели")
-        .addOptions(
-          ...HORI_PANEL_TABS.map((value) => ({
-            label: horiTabLabel(value),
-            value,
-            emoji: TAB_EMOJI[value],
-            default: value === tab
-          }))
-        )
-    )
-  ];
-
-  const actions = getHoriTabActions(tab, isOwner, isModerator);
-  for (let index = 0; index < actions.length; index += 5) {
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        ...actions.slice(index, index + 5).map((action) => {
-          const btn = new ButtonBuilder()
-            .setCustomId(`${HORI_ACTION_PREFIX}:${action.id}`)
-            .setLabel(action.label)
-            .setStyle(action.style ?? ButtonStyle.Secondary);
-          if (action.emoji) btn.setEmoji(action.emoji);
-          return btn;
-        })
-      )
-    );
-  }
-
-  return rows;
+  return buildPanelResponse(tab, { isOwner, isModerator }, { detail: { title, body } });
 }
 
 async function buildHoriStatePanelResponse(runtime: BotRuntime, tab: HoriStateTab, guildId: string, channelId: string) {
@@ -2519,189 +2434,45 @@ function buildHoriStatePanelRows(tab: HoriStateTab) {
   ];
 }
 
-function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boolean) {
-  const byTab: Record<HoriPanelTab, HoriPanelAction[]> = {
-    main: [
-      { id: "status", label: "Статус", emoji: "📊", style: ButtonStyle.Primary },
-      { id: "help", label: "Help", emoji: "❓" },
-      { id: "search_query_modal", label: "Поиск", emoji: "🔍" },
-      { id: "queue_status", label: "Queue", emoji: "📬" },
-      { id: "mood_status", label: "Mood", emoji: "🎭" },
-      { id: "profile_self", label: "Мой профиль", emoji: "👤" },
-      { id: "memory_self", label: "Моя память", emoji: "💭" }
-    ],
-    persona: [
-      { id: "style_edit_modal", label: "Текст чата", emoji: "✏️", modOnly: true, style: ButtonStyle.Primary },
-      { id: "core_prompt_panel", label: "Core prompts", emoji: "🧩", ownerOnly: true, style: ButtonStyle.Primary },
-      { id: "v5_controls", label: "V5 Controls", emoji: "🎛️", ownerOnly: true, style: ButtonStyle.Primary }
-    ],
-    behavior: [
-      { id: "read_chat_on", label: "Читать чат", emoji: "📖", modOnly: true, style: ButtonStyle.Primary },
-      { id: "read_chat_off", label: "Тихий режим", emoji: "🔇", modOnly: true },
-      { id: "natural_split_on", label: "Split ON", emoji: "✂️", modOnly: true },
-      { id: "natural_split_off", label: "Split OFF", emoji: "📃", modOnly: true },
-      featureAction("auto_interject", true, "Interject ON", { emoji: "✅", modOnly: true }),
-      featureAction("auto_interject", false, "Interject OFF", { emoji: "❌", modOnly: true }),
-      featureAction("reply_queue_enabled", true, "Queue ON", { emoji: "✅", modOnly: true }),
-      featureAction("reply_queue_enabled", false, "Queue OFF", { emoji: "❌", modOnly: true }),
-      featureAction("media_reactions_enabled", true, "Media ON", { emoji: "✅", modOnly: true }),
-      featureAction("media_reactions_enabled", false, "Media OFF", { emoji: "❌", modOnly: true }),
-      featureAction("selective_engagement_enabled", true, "Engage ON", { emoji: "✅", modOnly: true }),
-      featureAction("selective_engagement_enabled", false, "Engage OFF", { emoji: "❌", modOnly: true }),
-      { id: "media_sync", label: "GIF pack", emoji: "🎞️", ownerOnly: true },
-      { id: "media_list", label: "Media list", emoji: "📋" }
-    ],
-    memory: [
-      { id: "memory_status", label: "Memory", emoji: "🧠", style: ButtonStyle.Primary },
-      { id: "memory_build_channel", label: "Build канал", emoji: "🔨", modOnly: true },
-      { id: "memory_build_server", label: "Build сервер", emoji: "🏗️", ownerOnly: true },
-      featureAction("topic_engine_enabled", true, "Topic ON", { emoji: "✅", modOnly: true }),
-      featureAction("topic_engine_enabled", false, "Topic OFF", { emoji: "❌", modOnly: true }),
-      featureAction("memory_album_enabled", true, "Album ON", { emoji: "✅", modOnly: true }),
-      featureAction("memory_album_enabled", false, "Album OFF", { emoji: "❌", modOnly: true }),
-      featureAction("interaction_requests_enabled", true, "Requests ON", { emoji: "✅", modOnly: true }),
-      featureAction("interaction_requests_enabled", false, "Requests OFF", { emoji: "❌", modOnly: true }),
-      { id: "summary_current", label: "Summary", emoji: "📝" },
-      { id: "topic_status", label: "Topic", emoji: "💬" },
-      { id: "reflection_list", label: "Lessons", emoji: "📚" },
-      { id: "profile_self", label: "Мой профиль", emoji: "👤" },
-      { id: "dossier_modal", label: "Досье", emoji: "🔎", ownerOnly: true, style: ButtonStyle.Primary },
-      { id: "relationship_self", label: "Отношение", emoji: "💞" },
-      { id: "relationship_edit_modal", label: "Edit relation", emoji: "✏️", ownerOnly: true },
-      { id: "relationship_hint", label: "Hints", emoji: "💡", ownerOnly: true }
-    ],
-    channels: [
-      { id: "channel_policy", label: "Policy", emoji: "📋", style: ButtonStyle.Primary },
-      { id: "channel_edit_modal", label: "Edit channel", emoji: "✏️", modOnly: true },
-      { id: "topic_status", label: "Topic", emoji: "💬" },
-      { id: "topic_reset", label: "Reset topic", emoji: "🗑️", modOnly: true },
-      { id: "queue_status", label: "Queue", emoji: "📬" },
-      { id: "queue_clear", label: "Clear queue", emoji: "🧹", modOnly: true },
-      { id: "summary_current", label: "Summary", emoji: "📝" },
-      { id: "memory_status", label: "Memory канала", emoji: "🧠" },
-      { id: "search_query_modal", label: "Поиск", emoji: "🔍", style: ButtonStyle.Primary },
-      { id: "search_diagnose", label: "Диагностика", emoji: "🩺" },
-      featureAction("web_search", true, "Search ON", { emoji: "✅", modOnly: true }),
-      featureAction("web_search", false, "Search OFF", { emoji: "❌", modOnly: true }),
-      featureAction("link_understanding_enabled", true, "Links ON", { emoji: "✅", modOnly: true }),
-      featureAction("link_understanding_enabled", false, "Links OFF", { emoji: "❌", modOnly: true })
-    ],
-    llm: [
-      { id: "llm_panel", label: "LLM models", emoji: "🤖", ownerOnly: true, style: ButtonStyle.Primary },
-      { id: "state_brain", label: "Brain", emoji: "🧠", ownerOnly: true },
-      { id: "state_tokens", label: "Tokens", emoji: "🪙", ownerOnly: true },
-      { id: "debug_latest", label: "Latest trace", emoji: "🔬", ownerOnly: true },
-      { id: "power_panel", label: "Power", emoji: "⚡", ownerOnly: true }
-    ],
-    system: [
-      { id: "state_panel", label: "State", emoji: "📡", ownerOnly: true, style: ButtonStyle.Primary },
-      { id: "llm_panel", label: "LLM models", emoji: "🤖", ownerOnly: true, style: ButtonStyle.Primary },
-      { id: "power_panel", label: "Power", emoji: "⚡", ownerOnly: true, style: ButtonStyle.Primary },
-      { id: "ai_url_modal", label: "AI URL", emoji: "🔗", ownerOnly: true },
-      { id: "lockdown_status", label: "Lockdown?", emoji: "🔒", ownerOnly: true },
-      { id: "lockdown_on", label: "Lockdown ON", emoji: "🚨", ownerOnly: true, style: ButtonStyle.Danger },
-      { id: "lockdown_off", label: "Lockdown OFF", emoji: "🔓", ownerOnly: true },
-      { id: "debug_latest", label: "Latest trace", emoji: "🔬", style: ButtonStyle.Primary },
-      { id: "feature_status", label: "Фичи", emoji: "🏷️" },
-      { id: "search_diagnose", label: "Search diag", emoji: "🩺" },
-      { id: "stats_week", label: "Stats", emoji: "📊" },
-      featureAction("anti_slop_strict_mode", true, "Strict ON", { emoji: "✅", modOnly: true }),
-      featureAction("anti_slop_strict_mode", false, "Strict OFF", { emoji: "❌", modOnly: true }),
-      featureAction("context_confidence_enabled", true, "Ctx conf ON", { emoji: "✅", modOnly: true }),
-      featureAction("context_confidence_enabled", false, "Ctx conf OFF", { emoji: "❌", modOnly: true }),
-      featureAction("context_actions", true, "Ctx actions ON", { emoji: "✅", modOnly: true }),
-      featureAction("context_actions", false, "Ctx actions OFF", { emoji: "❌", modOnly: true }),
-      featureAction("channel_aware_mode", true, "Channel-aware ON", { emoji: "✅", modOnly: true }),
-      featureAction("channel_aware_mode", false, "Channel-aware OFF", { emoji: "❌", modOnly: true }),
-      featureAction("message_kind_aware_mode", true, "Kind-aware ON", { emoji: "✅", modOnly: true }),
-      featureAction("message_kind_aware_mode", false, "Kind-aware OFF", { emoji: "❌", modOnly: true }),
-      featureAction("self_reflection_lessons_enabled", true, "Reflect ON", { emoji: "✅", modOnly: true }),
-      featureAction("self_reflection_lessons_enabled", false, "Reflect OFF", { emoji: "❌", modOnly: true }),
-      { id: "reflection_status", label: "Reflection", emoji: "🪞" },
-      { id: "state_trace", label: "Trace", emoji: "📜", ownerOnly: true },
-      { id: "state_tokens", label: "Tokens", emoji: "🪙", ownerOnly: true },
-      { id: "state_search", label: "Search state", emoji: "🔎", ownerOnly: true }
-    ],
-    relationship: [
-      { id: "v6_relationship_status", label: "Status", emoji: "📊", style: ButtonStyle.Primary },
-      { id: "v6_relationship_deltas", label: "Deltas", emoji: "🔢", ownerOnly: true },
-      { id: "relationship_self", label: "Моё отношение", emoji: "💞" },
-      { id: "relationship_edit_modal", label: "Edit relation", emoji: "✏️", ownerOnly: true }
-    ],
-    recall: [
-      { id: "v6_recall_status", label: "Active slots", emoji: "🔮", style: ButtonStyle.Primary },
-      { id: "memory_status", label: "Memory", emoji: "🧠" },
-      { id: "summary_current", label: "Summary", emoji: "📝" }
-    ],
-    sigils: [
-      { id: "v6_sigils_status", label: "Sigils", emoji: "🔣", style: ButtonStyle.Primary },
-      { id: "v6_sigils_question_on", label: "? ON", emoji: "✅", ownerOnly: true },
-      { id: "v6_sigils_question_off", label: "? OFF", emoji: "❌", ownerOnly: true }
-    ],
-    queue: [
-      { id: "v6_queue_status", label: "Pools", emoji: "📬", style: ButtonStyle.Primary },
-      { id: "queue_status", label: "Текущая", emoji: "📋" },
-      { id: "queue_clear", label: "Clear", emoji: "🧹", modOnly: true },
-      { id: "v6_queue_reset", label: "Reset packs", emoji: "♻️", ownerOnly: true }
-    ],
-    flash: [
-      { id: "v6_flash_status", label: "Flash cfg", emoji: "🎯", style: ButtonStyle.Primary },
-      { id: "v6_flash_memes", label: "Memes", emoji: "🖼️" }
-    ],
-    audit: [
-      { id: "v6_audit_log", label: "Last 25", emoji: "📜", style: ButtonStyle.Primary, ownerOnly: true }
-    ]
-  };
-
-  return byTab[tab].filter((action) => {
-    if (action.ownerOnly) return isOwner;
-    if (action.modOnly) return isOwner || isModerator;
-    return true;
-  });
-}
-
-function parseHoriPanelTab(value: string | null | undefined): HoriPanelTab | null {
-  return HORI_PANEL_TABS.includes(value as HoriPanelTab) ? (value as HoriPanelTab) : null;
-}
-
-function horiTabLabel(tab: HoriPanelTab) {
-  const labels: Record<HoriPanelTab, string> = {
-    main: "🏠 Главная",
-    persona: "🎭 Персона",
-    behavior: "⚡ Поведение",
-    memory: "🧠 Память и люди",
-    channels: "📡 Каналы и поиск",
-    llm: "🤖 LLM",
-    system: "⚙️ Система",
-    relationship: "💞 Relationship",
-    recall: "🔮 Recall",
-    sigils: "🔣 Sigils",
-    queue: "📬 Queue",
-    flash: "🎯 Flash",
-    audit: "📜 Audit"
-  };
-  return labels[tab];
-}
-
-function inferTabForHoriAction(action: string): HoriPanelTab {
+/**
+ * Маршрутизация устаревших action id (например `feature_*`, `v6_*`, `style_*`)
+ * на вкладку, к которой их логично прикрепить в новой IA. Используется только
+ * чтобы при клике по кнопке-обработчику корректно отрисовать тот таб, в котором
+ * пользователь скорее всего находится. Если action не распознан — fallback на
+ * `home`.
+ */
+function inferTabForHoriAction(action: string): string {
   const featureToggle = parsePanelFeatureToggleAction(action);
   if (featureToggle) {
     return inferPanelTabForFeatureKey(featureToggle.key);
   }
 
-  if (action.startsWith("v6_relationship") || action === "relationship_self" || action === "relationship_edit_modal") return "relationship";
-  if (action.startsWith("v6_recall")) return "recall";
-  if (action.startsWith("v6_sigils")) return "sigils";
-  if (action.startsWith("v6_queue")) return "queue";
-  if (action.startsWith("v6_flash")) return "flash";
-  if (action.startsWith("v6_audit")) return "audit";
-  if (action.startsWith("memory") || action.startsWith("reflection") || action.startsWith("profile") || action.startsWith("relationship") || action === "dossier_modal") return "memory";
-  if (action.startsWith("search") || action.startsWith("channel") || action === "read_chat_on" || action === "read_chat_off" || action.startsWith("topic") || action.startsWith("queue") || action === "summary_current") return "channels";
-  if (action.startsWith("llm")) return "llm";
-  if (action.startsWith("lockdown") || action === "power_panel" || action === "state_panel" || action === "ai_url_modal" || action.startsWith("debug") || action === "feature_status" || action === "stats_week" || action.startsWith("state_")) return "system";
-  if (action === "core_prompt_panel" || action === "v5_controls" || action === "v5_controls_back" || action.startsWith("style") || action.startsWith("mood")) return "persona";
-  if (action.startsWith("natural") || action === "media_list" || action === "media_sync") return "behavior";
-  return "main";
+  // Новые action-id панели V7: префикс совпадает с tab id.
+  const prefixMatch = action.match(/^([a-z]+)_/);
+  if (prefixMatch) {
+    const candidate = prefixMatch[1];
+    if (candidate === "home" || candidate === "cores" || candidate === "people"
+      || candidate === "aggression" || candidate === "slots" || candidate === "channels"
+      || candidate === "queue" || candidate === "runtime" || candidate === "audit") {
+      return candidate;
+    }
+  }
+
+  // Legacy action mappings → новая IA.
+  if (action.startsWith("v6_relationship") || action.startsWith("relationship")) return "people";
+  if (action.startsWith("v6_recall") || action.startsWith("v6_sigils")) return "runtime";
+  if (action.startsWith("v6_queue") || action === "queue_status" || action === "queue_clear") return "queue";
+  if (action.startsWith("v6_flash")) return "queue";
+  if (action.startsWith("v6_audit") || action === "audit_log") return "audit";
+  if (action.startsWith("channel_") || action === "read_chat_on" || action === "read_chat_off") return "channels";
+  if (action.startsWith("memory") || action.startsWith("profile") || action === "dossier_modal" || action.startsWith("reflection") || action.startsWith("topic")) return "people";
+  if (action.startsWith("llm") || action.startsWith("state_") || action.startsWith("debug")
+    || action === "power_panel" || action === "ai_url_modal" || action.startsWith("lockdown")
+    || action === "feature_status" || action === "stats_week") return "runtime";
+  if (action === "core_prompt_panel" || action === "v5_controls" || action === "v5_controls_back"
+    || action.startsWith("style") || action.startsWith("mood")) return "cores";
+  if (action.startsWith("natural") || action === "media_list" || action === "media_sync") return "runtime";
+  return DEFAULT_PANEL_TAB_ID;
 }
 
 function horiActionTitle(action: string) {
@@ -2749,15 +2520,6 @@ function horiActionTitle(action: string) {
   return titles[action] ?? "Panel action";
 }
 
-function featureAction(key: PanelFeatureKey, enabled: boolean, label: string, options: Omit<HoriPanelAction, "id" | "label"> = {}): HoriPanelAction {
-  return {
-    id: `feature_${key}_${enabled ? "on" : "off"}`,
-    label,
-    style: enabled ? ButtonStyle.Success : ButtonStyle.Secondary,
-    ...options
-  };
-}
-
 function parsePanelFeatureToggleAction(action: string): { key: PanelFeatureKey; enabled: boolean } | null {
   if (!action.startsWith("feature_")) {
     return null;
@@ -2776,7 +2538,12 @@ function parsePanelFeatureToggleAction(action: string): { key: PanelFeatureKey; 
   return null;
 }
 
-function inferPanelTabForFeatureKey(key: PanelFeatureKey): HoriPanelTab {
+/**
+ * Куда вернуть пользователя после переключения feature flag через legacy кнопку.
+ * Старые toggle-кнопки больше не выводятся, но обработчики остаются для совместимости
+ * с уже отрисованными панелями.
+ */
+function inferPanelTabForFeatureKey(key: PanelFeatureKey): string {
   switch (key) {
     case "web_search":
     case "link_understanding_enabled":
@@ -2785,22 +2552,19 @@ function inferPanelTabForFeatureKey(key: PanelFeatureKey): HoriPanelTab {
     case "reply_queue_enabled":
     case "media_reactions_enabled":
     case "selective_engagement_enabled":
-      return "behavior";
-    case "playful_mode_enabled":
-    case "irritated_mode_enabled":
-    case "roast":
-      return "persona";
     case "topic_engine_enabled":
     case "memory_album_enabled":
     case "interaction_requests_enabled":
-      return "memory";
+    case "playful_mode_enabled":
+    case "irritated_mode_enabled":
+    case "roast":
     case "anti_slop_strict_mode":
     case "context_confidence_enabled":
     case "channel_aware_mode":
     case "message_kind_aware_mode":
     case "context_actions":
     case "self_reflection_lessons_enabled":
-      return "system";
+      return "runtime";
   }
 }
 
@@ -2813,11 +2577,9 @@ async function applyPanelFeatureToggle(runtime: BotRuntime, guildId: string, key
 }
 
 function buildHoriDetailEmbed(title: string, body: string) {
-  return new EmbedBuilder()
-    .setTitle(title)
-    .setColor(0x2B2D31)
-    .setDescription(clipPanelText(body));
+  return buildDetailEmbed(title, body);
 }
+
 
 async function buildLlmPanelResponse(runtime: BotRuntime, selectedSlot: ModelRoutingSlot = "chat", guildId?: string) {
   const [status, hydeStatus, embedStatus, chatProviderStatus] = await Promise.all([

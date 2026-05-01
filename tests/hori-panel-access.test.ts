@@ -347,7 +347,7 @@ describe("/hori panel access", () => {
   });
 
   it("allows the owner to open the master panel", async () => {
-    const interaction = createPanelInteraction("owner-1", "persona");
+    const interaction = createPanelInteraction("owner-1", "cores");
 
     await routeInteraction(createRuntime(["owner-1"]), interaction as never);
 
@@ -373,8 +373,8 @@ describe("/hori panel access", () => {
     );
   });
 
-  it("shows only chat text and core prompt actions in the persona panel", async () => {
-    const interaction = createPanelInteraction("owner-1", "persona");
+  it("shows owner-only cores actions on the cores panel", async () => {
+    const interaction = createPanelInteraction("owner-1", "cores");
 
     await routeInteraction(createRuntime(["owner-1"]), interaction as never);
 
@@ -385,22 +385,24 @@ describe("/hori panel access", () => {
         component.data?.label ?? component.toJSON?.().label ?? ""
     );
 
-    expect(labels).toEqual(["Текст чата", "Core prompts", "V5 Controls"]);
+    // owner видит редактор кор, превью, evaluator и aggression checker.
+    expect(labels).toContain("Редактор кор");
+    expect(labels).toContain("Превью сборки");
+    expect(labels).toContain("Evaluator");
+    expect(labels).toContain("Aggression checker");
   });
 
-  it("shows only sigil toggle actions in the sigils panel", async () => {
-    const interaction = createPanelInteraction("owner-1", "sigils");
+  it("hides owner-only cores actions for moderators", async () => {
+    const interaction = createPanelInteraction("mod-1", "cores");
+    interaction.memberPermissions.has = vi.fn().mockReturnValue(true);
 
     await routeInteraction(createRuntime(["owner-1"]), interaction as never);
 
-    const response = interaction.reply.mock.calls[0]?.[0];
-    const buttonRow = response?.components?.[1];
-    const labels = (buttonRow?.components ?? []).map(
-      (component: { data?: { label?: string }; toJSON?: () => { label?: string } }) =>
-        component.data?.label ?? component.toJSON?.().label ?? ""
-    );
-
-    expect(labels).toEqual(["Sigils", "? ON", "? OFF"]);
+    // Не-owner panel доступна только владельцу — должен прийти отказ.
+    expect(interaction.reply).toHaveBeenCalledWith({
+      content: expect.stringContaining("только владельцу"),
+      flags: EPHEMERAL_FLAG
+    });
   });
 
   it("lets the owner open the core prompt panel from persona actions", async () => {
