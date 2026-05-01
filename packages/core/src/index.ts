@@ -2,7 +2,6 @@ export * from "./intents/intent-router";
 export * from "./orchestrators/chat-orchestrator";
 export * from "./persona";
 export * from "./persona/persona-service";
-export * from "./policies/interjection-policy";
 export * from "./policies/message-splitting-policy";
 export * from "./policies/selective-engagement-gate";
 export * from "./safety/response-guard";
