@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { EMPTY_REPLY_FALLBACK, prepareReplyForDelivery, resolveModerationReplyForDelivery } from "../apps/bot/src/router/message-router";
+vi.mock("../apps/bot/src/router/background-jobs", () => ({
+  enqueueBackgroundJobs: vi.fn(async () => undefined)
+}));
+
+vi.mock("../apps/bot/src/router/owner-lockdown", () => ({
+  getOwnerLockdownState: vi.fn(async () => ({ enabled: false, updatedBy: null, updatedAt: new Date(0) })),
+  isBotOwner: vi.fn(() => false)
+}));
+
+import { EMPTY_REPLY_FALLBACK, prepareReplyForDelivery, resolveModerationReplyForDelivery, routeMessage } from "../apps/bot/src/router/message-router";
 
 describe("prepareReplyForDelivery", () => {
   it("replaces blank string replies with a fallback", () => {
@@ -89,5 +98,170 @@ describe("prepareReplyForDelivery", () => {
 
     expect(timeout).toHaveBeenCalledWith(15 * 60 * 1000, "Hori stage 4 aggression timeout");
     expect(reply).toBe("ответ тайм-аут на 15 минут.");
+  });
+
+  it("ingests delivered bot replies so later chat turns include assistant history", async () => {
+    const ingestMessage = vi.fn().mockResolvedValue({ deduplicated: false });
+    const sentReply = {
+      id: "bot-msg-1",
+      inGuild: () => true,
+      guildId: "guild-1",
+      channelId: "channel-1",
+      author: {
+        id: "bot-1",
+        username: "Hori",
+        globalName: "Hori"
+      },
+      member: {
+        displayName: "Hori"
+      },
+      content: "Привет",
+      createdAt: new Date("2026-05-01T10:00:01.000Z"),
+      reference: {
+        messageId: "user-msg-1"
+      },
+      mentions: {
+        has: () => false,
+        users: new Map()
+      },
+      guild: {
+        name: "Guild 1"
+      },
+      channel: {
+        name: "general"
+      }
+    };
+    const member = {
+      displayName: "Гном",
+      permissions: {
+        has: () => false
+      }
+    };
+    const message = {
+      id: "user-msg-1",
+      guildId: "guild-1",
+      channelId: "channel-1",
+      content: "<@bot-1> привет",
+      createdAt: new Date("2026-05-01T10:00:00.000Z"),
+      author: {
+        id: "user-1",
+        username: "Gnom",
+        bot: false
+      },
+      member,
+      guild: {
+        name: "Guild 1",
+        members: {
+          fetch: vi.fn(),
+          fetchMe: vi.fn(),
+          me: null
+        }
+      },
+      channel: {
+        name: "general",
+        send: vi.fn()
+      },
+      mentions: {
+        has: (id: string) => id === "bot-1",
+        users: new Map([["bot-1", { id: "bot-1" }]])
+      },
+      attachments: {
+        size: 0
+      },
+      reference: null,
+      inGuild: () => true,
+      reply: vi.fn().mockResolvedValue(sentReply)
+    };
+    const runtime = {
+      client: {
+        user: {
+          id: "bot-1",
+          username: "Hori"
+        }
+      },
+      env: {
+        DISCORD_OWNER_IDS: [],
+        AUTOINTERJECT_CHANNEL_ALLOWLIST: [],
+        NATURAL_SPLIT_COOLDOWN_SEC: 60,
+        NATURAL_SPLIT_CHANCE: 0.01
+      },
+      prisma: {
+        botEventLog: {
+          create: vi.fn()
+        },
+        interjectionLog: {
+          create: vi.fn()
+        }
+      },
+      runtimeConfig: {
+        getRoutingConfig: vi.fn().mockResolvedValue({
+          guildSettings: {
+            botName: "Хори",
+            interjectTendency: 0,
+            forbiddenWords: []
+          },
+          featureFlags: {
+            autoInterject: false,
+            replyQueueEnabled: false,
+            naturalMessageSplittingEnabled: false
+          },
+          channelPolicy: {
+            isMuted: false,
+            allowBotReplies: true,
+            allowInterjections: false,
+            topicInterestTags: []
+          }
+        })
+      },
+      ingestService: {
+        ingestMessage
+      },
+      knowledge: {
+        matchTrigger: vi.fn()
+      },
+      orchestrator: {
+        handleMessage: vi.fn().mockResolvedValue({
+          reply: "Привет",
+          moderationAction: null,
+          trace: {
+            responded: true,
+            intent: "chat",
+            triggerSource: "mention",
+            behavior: {
+              messageKind: "casual_address"
+            }
+          }
+        })
+      },
+      logger: {
+        error: vi.fn(),
+        warn: vi.fn()
+      },
+      replyQueue: {},
+      queuePhrasePool: {},
+      relationshipService: {}
+    };
+
+    await routeMessage(runtime as never, message as never);
+
+    expect(ingestMessage).toHaveBeenCalledTimes(2);
+    expect(ingestMessage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        messageId: "user-msg-1",
+        isBotUser: false
+      })
+    );
+    expect(ingestMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        messageId: "bot-msg-1",
+        userId: "bot-1",
+        content: "Привет",
+        replyToMessageId: "user-msg-1",
+        isBotUser: true,
+        explicitInvocation: false
+      })
+    );
   });
 });

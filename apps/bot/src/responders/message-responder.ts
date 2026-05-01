@@ -13,6 +13,7 @@ export async function sendReply(message: Message, reply: string | BotReplyPayloa
   const text = typeof reply === "string" ? reply : reply.text;
   const media = typeof reply === "string" ? null : reply.media;
   const chunks = media || !options.naturalChunks?.length ? splitLongMessage(text) : options.naturalChunks;
+  const deliveredMessages: Message[] = [];
 
   for (let index = 0; index < chunks.length; index += 1) {
     if (index > 0 && options.naturalChunks?.length) {
@@ -20,11 +21,15 @@ export async function sendReply(message: Message, reply: string | BotReplyPayloa
     }
 
     if (index === 0) {
-      await message.reply(media ? mediaReplyPayload(chunks[index], media.filePath) : chunks[index]);
+      const delivered = await message.reply(media ? mediaReplyPayload(chunks[index], media.filePath) : chunks[index]);
+      deliveredMessages.push(delivered);
     } else if ("send" in message.channel) {
-      await message.channel.send(chunks[index]);
+      const delivered = await message.channel.send(chunks[index]);
+      deliveredMessages.push(delivered as Message);
     }
   }
+
+  return deliveredMessages;
 }
 
 export async function sendReplyToChannel(

@@ -99,6 +99,56 @@ export async function resolveModerationReplyForDelivery(
   return timeoutApplied ? applyModerationReplacement(reply, moderationAction.replacementText) : reply;
 }
 
+async function ingestDeliveredBotReplies(runtime: BotRuntime, deliveredMessages: Message[]) {
+  if (!runtime.client.user || !deliveredMessages.length) {
+    return;
+  }
+
+  const results = await Promise.allSettled(
+    deliveredMessages
+      .filter((delivered) => delivered.inGuild())
+      .map(async (delivered) => {
+        await runtime.ingestService.ingestMessage({
+          messageId: delivered.id,
+          guildId: delivered.guildId!,
+          channelId: delivered.channelId,
+          userId: delivered.author.id,
+          username: delivered.author.username,
+          displayName: delivered.member?.displayName ?? delivered.author.globalName ?? delivered.author.username,
+          content: delivered.content,
+          createdAt: delivered.createdAt,
+          replyToMessageId: delivered.reference?.messageId ?? null,
+          mentionCount: delivered.mentions.users.size,
+          mentionedBot: delivered.mentions.has(runtime.client.user!.id),
+          mentionsBotByName: false,
+          mentionedUserIds: [...delivered.mentions.users.keys()],
+          triggerSource: undefined,
+          isDirectMessage: false,
+          isModerator: false,
+          explicitInvocation: false,
+          guildName: delivered.guild?.name,
+          channelName: "name" in delivered.channel ? delivered.channel.name : null,
+          isBotUser: true
+        });
+      })
+  );
+
+  for (const [index, result] of results.entries()) {
+    if (result.status === "rejected") {
+      const delivered = deliveredMessages[index];
+      runtime.logger.warn(
+        {
+          error: result.reason,
+          messageId: delivered?.id,
+          channelId: delivered?.channelId,
+          guildId: delivered?.guildId
+        },
+        "failed to ingest delivered bot reply"
+      );
+    }
+  }
+}
+
 async function tryApplyModerationAction(
   runtime: BotRuntime,
   message: Message,
@@ -548,10 +598,11 @@ async function processInvocation(
       naturalSplitCooldownByChannel.set(message.channelId, Date.now());
     }
 
-    await sendReply(message, replyToSend, {
+    const deliveredReplies = await sendReply(message, replyToSend, {
       naturalChunks: splitPlan?.chunks,
       naturalDelayMs: splitPlan?.delayMs
     });
+    await ingestDeliveredBotReplies(runtime, deliveredReplies);
     replyDelivered = true;
 
     if (autoInterject) {
@@ -597,7 +648,8 @@ async function processInvocation(
 
     if (!replyDelivered) {
       try {
-        await sendReply(message, EMPTY_REPLY_FALLBACK);
+        const deliveredReplies = await sendReply(message, EMPTY_REPLY_FALLBACK);
+        await ingestDeliveredBotReplies(runtime, deliveredReplies);
       } catch (replyError) {
         runtime.logger.warn(
           {

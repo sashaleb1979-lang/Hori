@@ -335,7 +335,7 @@ export class ChatOrchestrator {
               maxTokens: behavior.limits.maxTokens,
               contour: contour.contour,
               llmCalls,
-              restoredContext: null
+              restoredContext: restoredContext ? this.formatRestoredContextText(restoredContext) : null
             });
 
           if (restoredContext) {
@@ -477,17 +477,32 @@ export class ChatOrchestrator {
     message: MessageEnvelope,
     contextBundle: Awaited<ReturnType<ContextService["buildContext"]>>
   ): LlmChatMessage[] {
-    const turns = contextBundle.recentMessages
+    return contextBundle.recentMessages
       .filter((entry) => entry.id !== message.messageId)
-      .filter((entry) => entry.userId === message.userId || entry.isBot)
       .filter((entry) => normalizeWhitespace(entry.content).length > 0)
       .slice(-8)
-      .map((entry) => ({
-        role: entry.isBot ? "assistant" as const : "user" as const,
-        content: entry.content
-      }));
+      .map((entry) => {
+        if (entry.isBot) {
+          return { role: "assistant" as const, content: entry.content };
+        }
+        const prefix = entry.userId !== message.userId ? `[${entry.author}]: ` : "";
+        return { role: "user" as const, content: `${prefix}${entry.content}` };
+      });
+  }
 
-    return turns.slice(-8);
+  private formatRestoredContextText(ctx: {
+    title: string;
+    summary: string[];
+    details: string[];
+    openQuestions: string[];
+  }): string {
+    const lines: string[] = [`[Память: ${ctx.title}]`];
+    if (ctx.summary.length) lines.push(...ctx.summary);
+    if (ctx.details.length) lines.push(...ctx.details);
+    if (ctx.openQuestions.length) {
+      lines.push("Открытые вопросы:", ...ctx.openQuestions.map((q) => `- ${q}`));
+    }
+    return lines.join("\n");
   }
 
   private async handleChat(options: {
