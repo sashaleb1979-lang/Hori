@@ -3,9 +3,9 @@ import type { AppLogger, AppPrismaClient, BotIntent, BotReplyPayload, BotTrace, 
 import { asErrorMessage, botLatencyHistogram, botRepliesCounter, clamp, normalizeWhitespace } from "@hori/shared";
 import { llmCachedTokensCounter, llmCostCounter, llmTokensCounter } from "@hori/shared";
 
-import { buildAnalyticsNarrationPrompt, buildIntentClassifierPrompt, buildRewritePrompt, buildSearchPrompt, buildSummaryPrompt, calculateCostUsd, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet } from "@hori/llm";
+import { buildSearchPrompt, calculateCostUsd, EmbeddingAdapter, ModelRouter, ToolOrchestrator, defaultToolSet } from "@hori/llm";
 import type { LlmChatResponse, LlmClient, LlmRequestMetadata, ModelRoutingSlot } from "@hori/llm";
-import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
+import { AnalyticsQueryService } from "@hori/analytics";
 import { ContextService, type PromptSlotService, ReflectionService, RelationshipService, RetrievalService, SessionBufferService } from "@hori/memory";
 import { BraveSearchClient, buildSourceDigest, extractLinksFromMessage, fetchWebPage } from "@hori/search";
 // V7: brain pipeline (conflict-detector / emotion-engine / response-budget) удалён. Contour — локальный alias.
@@ -159,9 +159,8 @@ export class ChatOrchestrator {
       );
     }
 
-    const intent = initialIntent.confidence < 0.7
-      ? await this.classifyWithLlm(initialIntent.cleanedContent, initialIntent, runtimeSettings, llmCalls, message)
-      : initialIntent;
+    // V7: intent-router детерминирован (chat / `?` / русские memory_*) — LLM-fallback больше не нужен.
+    const intent = initialIntent;
 
     if (intent.intent === "chat") {
       const recallSelectionReply = await this.tryHandleMemoryRecallSelection(message, intent.cleanedContent);
@@ -397,7 +396,7 @@ export class ChatOrchestrator {
       trace.aggression = aggressionResult.trace;
     }
 
-    const behaviorLimitedIntents = new Set(["analytics", "summary", "search", "rewrite", "chat"]);
+    const behaviorLimitedIntents = new Set(["search", "chat"]);
     const maxReplyChars = behaviorLimitedIntents.has(intent.intent)
       ? Math.min(runtimeSettings.defaultReplyMaxChars, behavior.limits.maxChars)
       : runtimeSettings.defaultReplyMaxChars;
@@ -516,58 +515,6 @@ export class ChatOrchestrator {
         createdAt: true
       }
     });
-  }
-
-  private async classifyWithLlm(
-    cleanedContent: string,
-    fallback: ReturnType<IntentRouter["route"]>,
-    runtimeSettings: EffectiveRuntimeSettings,
-    llmCalls?: LlmCallTrace[],
-    message?: MessageEnvelope
-  ) {
-    try {
-      const llm = this.getLlmSettingsForSlot("classifier", "chat", runtimeSettings, 96, { temperature: 0 });
-      const messages = buildIntentClassifierPrompt(cleanedContent);
-      const response = await this.deps.llmClient.chat({
-        model: llm.model,
-        messages,
-        format: "json",
-        temperature: llm.temperature,
-        topP: llm.topP,
-        maxTokens: llm.maxTokens,
-        keepAlive: llm.keepAlive,
-        numCtx: llm.numCtx,
-        numBatch: llm.numBatch,
-        metadata: message ? this.createLlmMetadata(message, "chat", "classifier", "intent_classifier", "simple") : undefined
-      });
-      this.recordLlmCall(llmCalls, "intent_classifier", llm.model, messages, response);
-
-      const raw = response.message.content.trim();
-      let parsed: { intent?: string; confidence?: number; reason?: string } | null = null;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        const start = raw.indexOf("{");
-        const end = raw.lastIndexOf("}");
-        if (start !== -1 && end > start) {
-          try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch { /* give up */ }
-        }
-      }
-
-      if (parsed?.intent) {
-        return {
-          intent: parsed.intent as ReturnType<IntentRouter["route"]>["intent"],
-          confidence: clamp(Number(parsed.confidence ?? 0.5), 0, 1),
-          reason: parsed.reason ?? "llm classifier",
-          cleanedContent,
-          requiresSearch: parsed.intent === "search"
-        };
-      }
-    } catch (error) {
-      this.deps.logger.warn({ error }, "llm intent classification failed");
-    }
-
-    return fallback;
   }
 
   private buildStableChatSystemPrompt(
@@ -1830,10 +1777,6 @@ export class ChatOrchestrator {
     } catch (error) {
       this.deps.logger.warn({ error }, "failed to record relationship interaction");
     }
-  }
-
-  private async recordMicroReactionRelationshipSignal(): Promise<void> {
-    return;
   }
 
   private recordLlmCall(
