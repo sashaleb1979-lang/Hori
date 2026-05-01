@@ -2467,32 +2467,6 @@ async function resolveHoriActionContent(
       return buildChannelPolicyStatus(runtime, guildId, interaction.channelId);
     case "debug_latest":
       return buildLatestDebugTrace(runtime, guildId);
-    case "v6_relationship_status":
-      return buildV6RelationshipStatus(runtime, guildId, interaction.user.id);
-    case "v6_relationship_deltas":
-      return buildV6RelationshipDeltas(runtime);
-    case "v6_recall_status":
-      return buildV6RecallStatus(runtime, guildId, interaction.channelId);
-    case "v6_sigils_status":
-      return buildV6SigilsStatus(runtime);
-    case "v6_sigils_question_on":
-      if (!isOwner) return "Sigils изменяет только владелец.";
-      return setV6SigilState(runtime, "?", true, interaction.user.id);
-    case "v6_sigils_question_off":
-      if (!isOwner) return "Sigils изменяет только владелец.";
-      return setV6SigilState(runtime, "?", false, interaction.user.id);
-    case "v6_queue_status":
-      return buildV6QueueStatus(runtime);
-    case "v6_queue_reset":
-      if (!isOwner) return "Сброс phrase pools только для владельца.";
-      return resetV6QueuePools(runtime);
-    case "v6_flash_status":
-      return buildV6FlashStatus(runtime);
-    case "v6_flash_memes":
-      return buildV6FlashMemes(runtime);
-    case "v6_audit_log":
-      if (!isOwner) return "Audit log только для владельца.";
-      return buildV6AuditLog(runtime, guildId);
     // ── V7 action IDs ────────────────────────────────────────────────────────
     case "home_status":
       return buildHoriStatus(runtime, guildId, interaction.channelId);
