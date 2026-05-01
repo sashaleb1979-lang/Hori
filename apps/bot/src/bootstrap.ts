@@ -121,7 +121,7 @@ export async function bootstrapBot() {
   const flashTrollingService = new FlashTrollingService();
   const promptSlotService = new PromptSlotService(prisma);
   const sessionBufferService = redisReady ? new SessionBufferService(prisma, redis) : new SessionBufferService(prisma);
-  const contextService = new ContextService(prisma, summaryService, profileService, relationshipService, retrievalService, activeMemoryService, redisReady ? redis : undefined, sessionBufferService);
+  const contextService = new ContextService(prisma, activeMemoryService, redisReady ? redis : undefined);
 
   const { client: llmClient } = createRuntimeLlmClient(env, logger, runtimeConfig, "bot");
 

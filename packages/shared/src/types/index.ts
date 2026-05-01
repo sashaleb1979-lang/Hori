@@ -484,27 +484,13 @@ export interface BotReplyPayload {
 
 export interface ContextBundle {
   recentMessages: ContextMessage[];
-  summaries: Array<{ summaryShort: string; summaryLong: string; rangeStart: Date; rangeEnd: Date; topicTags?: string[] }>;
-  serverMemories: Array<{ key: string; value: string; type: string }>;
-  userProfile?: {
-    summaryShort: string;
-    styleTags: string[];
-    topicTags: string[];
-    confidenceScore: number;
-  } | null;
   relationship?: RelationshipOverlay | null;
 }
 
 export interface ContextBundleV2 extends ContextBundle {
   version: "v2";
-  replyChain: ContextMessage[];
   repliedMessageId?: string | null;
-  activeTopic?: ActiveTopicContext | null;
-  topicWindow: ContextMessage[];
-  entities: ContextEntity[];
-  entityMemories: Array<{ key: string; value: string; type: string; score: number }>;
   activeMemory?: ActiveMemoryContext;
-  sessionMessages?: ContextMessage[];
 }
 
 export interface AnalyticsTopItem {

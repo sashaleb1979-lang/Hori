@@ -1,24 +1,13 @@
 import type { AppPrismaClient, BotIntent, ContextBundleV2, MessageEnvelope } from "@hori/shared";
 import type { AppRedisClient } from "@hori/shared";
 
-import { SessionBufferService } from "../session/session-buffer-service";
-
-import { SummaryService } from "../summaries/summary-service";
-import { ProfileService } from "../profiles/profile-service";
-import { RelationshipService } from "../relationships/relationship-service";
-import { RetrievalService } from "../retrieval/retrieval-service";
 import { ActiveMemoryService } from "../active/active-memory-service";
 
 export class ContextService {
   constructor(
     private readonly prisma: AppPrismaClient,
-    private readonly summaries: SummaryService,
-    private readonly profiles: ProfileService,
-    private readonly relationships: RelationshipService,
-    private readonly retrieval: RetrievalService,
     private readonly activeMemory?: ActiveMemoryService,
-    private readonly redis?: AppRedisClient,
-    private readonly sessionBuffer?: SessionBufferService
+    private readonly redis?: AppRedisClient
   ) {}
 
   async buildContext(options: {
@@ -63,16 +52,8 @@ export class ContextService {
           createdAt: message.createdAt,
           replyToMessageId: message.replyToMessageId
         })),
-      summaries: [],
-      serverMemories: [],
-      userProfile: null,
       relationship: null,
-      replyChain: [],
       repliedMessageId: options.message?.replyToMessageId ?? null,
-      activeTopic: null,
-      topicWindow: [],
-      entities: [],
-      entityMemories: [],
       activeMemory
     };
   }
