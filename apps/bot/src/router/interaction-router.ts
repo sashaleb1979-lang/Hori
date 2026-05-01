@@ -1021,6 +1021,11 @@ async function handleHoriCommand(
     return;
   }
 
+  if (subcommand === "slot") {
+    await handleHoriSlotCommand(runtime, interaction);
+    return;
+  }
+
   await interaction.reply({ content: "Не знаю такую ветку `/hori`.", flags: MessageFlags.Ephemeral });
 }
 
@@ -1718,6 +1723,123 @@ async function routeModalSubmit(runtime: BotRuntime, interaction: ModalSubmitInt
   });
 }
 
+async function handleHoriSlotCommand(
+  runtime: BotRuntime,
+  interaction: ChatInputCommandInteraction
+) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const action = interaction.options.getString("action", true);
+  const guildId = interaction.guildId;
+  const userId = interaction.user.id;
+
+  if (action === "list") {
+    const mySlots = await runtime.promptSlots.listForOwner(guildId, userId);
+    if (!mySlots.length) {
+      await interaction.reply({ content: "🎟️ У тебя нет слотов. Создай через `/hori slot action:create content:...`", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const lines = [`🎟️ **Мои prompt-слоты** (${mySlots.length}):`];
+    for (const s of mySlots) {
+      const st = s.active ? "✅ active" : s.cooldownUntil && s.cooldownUntil > new Date() ? `⏳ cooldown до ${s.cooldownUntil.toISOString().slice(11, 16)} UTC` : "◾ idle";
+      lines.push(`\`${s.id.slice(0, 8)}\` **${s.title ?? "(без названия)"}** — ${st}${s.channelId ? ` <#${s.channelId}>` : " global"}`);
+    }
+    await interaction.reply({ content: lines.join("\n"), flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (action === "create") {
+    const content = interaction.options.getString("content");
+    if (!content?.trim()) {
+      await interaction.reply({ content: "Укажи content — текст контекста для слота.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const title = interaction.options.getString("title") ?? null;
+    const isGlobal = interaction.options.getBoolean("global") ?? false;
+    const channelId = isGlobal ? null : interaction.channelId;
+
+    const relLevel = await runtime.relationshipService.getLevel(guildId, userId).catch(() => 0);
+    const slot = await runtime.promptSlots.create({
+      guildId,
+      channelId,
+      ownerUserId: userId,
+      ownerLevel: relLevel,
+      title,
+      content: content.trim()
+    });
+
+    // Активируем сразу.
+    try {
+      await runtime.promptSlots.activate(slot.id, { initiatorLevel: relLevel });
+      await interaction.reply({
+        content: `🎟️ Слот создан и активирован на 10 минут.\nID: \`${slot.id.slice(0, 8)}\`${title ? `\nНазвание: **${title}**` : ""}\nКонтекст: ${content.slice(0, 100)}`,
+        flags: MessageFlags.Ephemeral
+      });
+    } catch {
+      await interaction.reply({
+        content: `🎟️ Слот создан (ID: \`${slot.id.slice(0, 8)}\`), но не удалось активировать — может быть cooldown или конфликт уровней. Активируй вручную: \`/hori slot action:activate id:${slot.id.slice(0, 8)}\``,
+        flags: MessageFlags.Ephemeral
+      });
+    }
+    return;
+  }
+
+  if (action === "activate") {
+    const rawId = interaction.options.getString("id");
+    if (!rawId?.trim()) {
+      await interaction.reply({ content: "Укажи id слота. Список: `/hori slot action:list`", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const mySlots = await runtime.promptSlots.listForOwner(guildId, userId);
+    const slot = mySlots.find((s) => s.id.startsWith(rawId.trim()) || s.id === rawId.trim());
+    if (!slot) {
+      await interaction.reply({ content: `Слот \`${rawId}\` не найден. Список: \`/hori slot action:list\``, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const relLevel = await runtime.relationshipService.getLevel(guildId, userId).catch(() => 0);
+    try {
+      await runtime.promptSlots.activate(slot.id, { initiatorLevel: relLevel });
+      await interaction.reply({ content: `✅ Слот **${slot.title ?? slot.id.slice(0, 8)}** активирован на 10 минут.`, flags: MessageFlags.Ephemeral });
+    } catch (error) {
+      await interaction.reply({ content: `Не удалось активировать: ${asErrorMessage(error)}`, flags: MessageFlags.Ephemeral });
+    }
+    return;
+  }
+
+  if (action === "deactivate") {
+    const active = await runtime.promptSlots.getActiveSlot(guildId, interaction.channelId);
+    if (!active || active.ownerUserId !== userId) {
+      await interaction.reply({ content: "Нет активных слотов от тебя в этом канале.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await runtime.promptSlots.deactivate(active.id);
+    await interaction.reply({ content: `⏹️ Слот **${active.title ?? active.id.slice(0, 8)}** деактивирован.`, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (action === "delete") {
+    const rawId = interaction.options.getString("id");
+    if (!rawId?.trim()) {
+      await interaction.reply({ content: "Укажи id слота. Список: `/hori slot action:list`", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const mySlots = await runtime.promptSlots.listForOwner(guildId, userId);
+    const slot = mySlots.find((s) => s.id.startsWith(rawId.trim()) || s.id === rawId.trim());
+    if (!slot) {
+      await interaction.reply({ content: `Слот \`${rawId}\` не найден.`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await runtime.promptSlots.delete(slot.id);
+    await interaction.reply({ content: `🗑️ Слот **${slot.title ?? slot.id.slice(0, 8)}** удалён.`, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  await interaction.reply({ content: "Неизвестное действие.", flags: MessageFlags.Ephemeral });
+}
+
 async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubmitInteraction) {
   if (!interaction.guildId) {
     await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
@@ -2391,8 +2513,21 @@ async function resolveHoriActionContent(
     case "people_reset_cold":
       if (!isOwner) return "Снятие заморозки только для владельца. Используй /hori relationship user:@кто action:reset-cold.";
       return "Используй /hori relationship user:@кто action:reset-cold для снятия заморозки.";
-    case "aggression_status":
-      return buildV6RelationshipStatus(runtime, guildId, interaction.user.id);
+    case "aggression_status": {
+      try {
+        const escalated = await runtime.prisma.relationshipProfile.findMany({
+          where: { guildId, escalationStage: { gt: 0 } },
+          orderBy: { escalationStage: "desc" },
+          take: 10,
+          select: { userId: true, escalationStage: true, relationshipState: true, escalationUpdatedAt: true }
+        });
+        if (!escalated.length) return "🛡️ **Aggression status** — нет активных escalation.";
+        const lines = escalated.map((r) => `<@${r.userId}> stage=\`${r.escalationStage}\` state=\`${r.relationshipState}\`${r.escalationUpdatedAt ? ` upd=\`${r.escalationUpdatedAt.toISOString().slice(0, 10)}\`` : ""}`);
+        return [`🛡️ **Aggression status** (${escalated.length} пользователей с escalation > 0)`, ...lines].join("\n");
+      } catch (error) {
+        return `Не удалось получить aggression status: ${asErrorMessage(error)}`;
+      }
+    }
     case "aggression_events":
       return runtime.slashAdmin.aggressionEvents(guildId, interaction.user.id, 8);
     case "aggression_stage_reset":
@@ -2402,10 +2537,41 @@ async function resolveHoriActionContent(
       return buildV6RelationshipDeltas(runtime);
     case "aggression_phrases":
       return buildV6QueueStatus(runtime);
-    case "slots_list":
-      return buildV6RecallStatus(runtime, guildId, interaction.channelId);
-    case "slots_inventory":
-      return buildV6RecallStatus(runtime, guildId, interaction.channelId);
+    case "slots_list": {
+      try {
+        const active = await runtime.promptSlots.getActiveSlot(guildId, interaction.channelId);
+        const mySlots = await runtime.promptSlots.listForOwner(guildId, interaction.user.id);
+        const lines: string[] = [`🏟️ **Prompt slots** — <#${interaction.channelId}>`];
+        lines.push(active
+          ? `▶️ Активен: \`${active.title ?? active.id}\` owner=<@${active.ownerUserId}> активен ${active.activatedAt ? active.activatedAt.toISOString().slice(11, 16) : "?"} UTC`
+          : `⏹️ Активных слотов нет (10 мин active / 6 ч cooldown).`);
+        if (mySlots.length) {
+          lines.push("", `📂 Мои слоты (${mySlots.length}):`);
+          for (const s of mySlots.slice(0, 5)) {
+            const st = s.active ? "✅" : s.cooldownUntil && s.cooldownUntil > new Date() ? "⏳" : "▫️";
+            lines.push(`${st} \`${s.title ?? s.id.slice(0, 8)}\` lvl=${s.ownerLevel}${s.channelId ? ` <#${s.channelId}>` : " global"}`);
+          }
+        }
+        return lines.join("\n");
+      } catch (error) {
+        return `Не удалось получить slots: ${asErrorMessage(error)}`;
+      }
+    }
+    case "slots_inventory": {
+      try {
+        const mySlots = await runtime.promptSlots.listForOwner(guildId, interaction.user.id);
+        if (!mySlots.length) return "📦 **Slots inventory** — у тебя нет зарегистрированных слотов.";
+        const lines = [`📦 **Slots inventory** (${mySlots.length} слотов):`];
+        for (const s of mySlots) {
+          const st = s.active ? "✅ active" : s.cooldownUntil && s.cooldownUntil > new Date() ? `⏳ cooldown до ${s.cooldownUntil.toISOString().slice(11, 16)}` : "▫️ idle";
+          lines.push(`**${s.title ?? s.id.slice(0, 8)}** (lvl=${s.ownerLevel}${s.channelId ? ` <#${s.channelId}>` : " global"}) — ${st}`);
+          lines.push(`> ${s.content.slice(0, 100)}`);
+        }
+        return lines.join("\n");
+      } catch (error) {
+        return `Не удалось получить inventory: ${asErrorMessage(error)}`;
+      }
+    }
     case "slots_force_activate":
       if (!isOwner) return "Force activate только для владельца.";
       return "Используй /hori slot user:@кто action:activate для активации слота.";

@@ -223,6 +223,28 @@ const horiCommandDefinition = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand
+      .setName("slot")
+      .setDescription("Управлять личным prompt-слотом (10 мин / 6 ч cooldown)")
+      .addStringOption((option) =>
+        option
+          .setName("action")
+          .setDescription("Действие")
+          .setRequired(true)
+          .addChoices(
+            { name: "create", value: "create" },
+            { name: "list", value: "list" },
+            { name: "activate", value: "activate" },
+            { name: "deactivate", value: "deactivate" },
+            { name: "delete", value: "delete" }
+          )
+      )
+      .addStringOption((option) => option.setName("content").setDescription("Текст контекста (для create)").setMaxLength(500))
+      .addStringOption((option) => option.setName("title").setDescription("Короткое название слота (для create)").setMaxLength(64))
+      .addStringOption((option) => option.setName("id").setDescription("ID слота (для activate/deactivate/delete)"))
+      .addBooleanOption((option) => option.setName("global").setDescription("Глобальный слот (без привязки к каналу)"))
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
       .setName("memory")
       .setDescription("Управлять долгой памятью")
       .addStringOption((option) =>
@@ -398,12 +420,6 @@ const horiCommandDefinition = new SlashCommandBuilder()
           )
       )
       .addStringOption((option) => option.setName("profile").setDescription("Пресет мощности").addChoices(...powerProfileChoices))
-  )
-  .addSubcommand((subcommand) =>
-    subcommand
-      .setName("ai-url")
-      .setDescription("Owner: сменить Ollama URL")
-      .addStringOption((option) => option.setName("url").setDescription("Новый URL (https://...)").setRequired(true))
   )
   .addSubcommand((subcommand) =>
     subcommand
