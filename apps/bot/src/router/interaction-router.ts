@@ -4082,7 +4082,7 @@ async function buildV6RelationshipStatus(runtime: BotRuntime, guildId: string, u
       `level: \`${level}\``,
       `state: \`${vector.relationshipState}\``,
       `closeness: \`${vector.closeness?.toFixed?.(2) ?? "—"}\``,
-      `trust: \`${vector.trust?.toFixed?.(2) ?? "—"}\``,
+      `trustLevel: \`${vector.trustLevel?.toFixed?.(2) ?? "—"}\``,
       `escalationStage: \`${vector.escalationStage ?? 0}\``
     ];
     return lines.join("\n");
@@ -4113,10 +4113,8 @@ async function buildV6RecallStatus(runtime: BotRuntime, guildId: string, channel
     if (!active) return "**V6 Recall** — активных PromptSlot нет (10 мин active / 6 ч cooldown).";
     return [
       `**V6 Recall — активный slot**`,
-      `kind: \`${active.kind ?? "—"}\``,
-      `priority: \`${active.priority ?? "—"}\``,
       `activatedAt: \`${active.activatedAt?.toISOString?.() ?? "—"}\``,
-      `expiresAt: \`${active.expiresAt?.toISOString?.() ?? "—"}\``
+      `cooldownUntil: \`${active.cooldownUntil?.toISOString?.() ?? "—"}\``
     ].join("\n");
   } catch (error) {
     return `Не удалось получить recall: ${asErrorMessage(error)}`;
@@ -4180,7 +4178,7 @@ function buildV6FlashStatus(runtime: BotRuntime) {
     return [
       `**V6 Flash trolling**`,
       `weights: retort=\`${w.retort}\` question=\`${w.question}\` meme=\`${w.meme}\``,
-      `cooldownMs: \`${cfg.cooldownMs ?? "—"}\``
+      `intervalMinutes: \`${cfg.intervalMinutes ?? "—"}\``
     ].join("\n");
   } catch (error) {
     return `Не удалось получить flash cfg: ${asErrorMessage(error)}`;
