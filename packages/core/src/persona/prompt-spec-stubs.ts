@@ -92,14 +92,6 @@ export function corePromptKeyForSigil(sigil: string | null | undefined): CorePro
   }
 }
 
-export function buildSigilOverlayBlock(_sigil: string | null | undefined, _templates?: CorePromptTemplates): string {
-  return "";
-}
-
-export function buildRestoredContextBlock(_data: unknown): string {
-  return "";
-}
-
 export function detectMessageKind(_input: unknown): MessageKind {
   return "casual_address";
 }

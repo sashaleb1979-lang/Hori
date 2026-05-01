@@ -13,7 +13,7 @@ type Contour = "A" | "B" | "C";
 import { IntentRouter } from "../intents/intent-router";
 import { detectMessageKind } from "../persona/prompt-spec-stubs";
 import { PersonaService } from "../persona/persona-service";
-import { buildRestoredContextBlock, type CorePromptTemplates } from "../persona/prompt-spec-stubs";
+import { type CorePromptTemplates } from "../persona/prompt-spec-stubs";
 import { HELP_TEXT } from "../prompts/system-prompts";
 import { ResponseGuard } from "../safety/response-guard";
 import { RoastPolicy } from "../safety/roast-policy";
@@ -346,7 +346,7 @@ export class ChatOrchestrator {
               maxTokens: behavior.limits.maxTokens,
               contour: contour.contour,
               llmCalls,
-              restoredContext: restoredContext ? buildRestoredContextBlock(restoredContext) : null
+              restoredContext: null
             });
 
           if (restoredContext) {
