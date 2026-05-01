@@ -263,7 +263,15 @@ export class ChatOrchestrator {
     });
     const restoredContext = intent.intent === "chat" ? await this.getActiveRestoredContext(message) : null;
     // V7: ACTIVE_CORE — единственный системный prompt. Никаких dynamic guidance блоков.
-    const systemPrompt = behavior.prompt;
+    const corePrompt = behavior.prompt;
+    // Личные инструкции пользователя (карточка, редактируется через "хори запомни").
+    const userCard = await this.deps.prisma.userMemoryNote.findUnique({
+      where: { guildId_userId_key: { guildId: message.guildId, userId: message.userId, key: "_prompt_card" } },
+      select: { value: true, active: true }
+    }).catch(() => null);
+    const systemPrompt = (userCard?.active && userCard.value.trim())
+      ? `${corePrompt}\n\n[Персональные инструкции от ${message.displayName ?? message.username}]\n${userCard.value}`
+      : corePrompt;
 
     const trace: BotTrace = {
       triggerSource: message.triggerSource,

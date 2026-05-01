@@ -1654,6 +1654,11 @@ async function handleRememberMomentContext(
 }
 
 async function routeModalSubmit(runtime: BotRuntime, interaction: ModalSubmitInteraction) {
+  if (interaction.customId.startsWith("PROMPT_CARD_MODAL:")) {
+    await handlePromptCardModalSubmit(runtime, interaction);
+    return;
+  }
+
   if (interaction.customId.startsWith(`${HORI_MODAL_PREFIX}:`)) {
     await handleHoriModalSubmit(runtime, interaction);
     return;
@@ -1998,7 +2003,78 @@ async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubm
   }
 }
 
+/** Открыть модальный редактор личных инструкций. */
+async function handlePromptCardEditButton(runtime: BotRuntime, interaction: ButtonInteraction) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  // Только сам пользователь может редактировать свою карточку.
+  const ownerId = interaction.customId.split(":")[2];
+  if (interaction.user.id !== ownerId) {
+    await interaction.reply({ content: "Это чужая карточка.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const existing = await runtime.prisma.userMemoryNote.findUnique({
+    where: { guildId_userId_key: { guildId: interaction.guildId, userId: interaction.user.id, key: "_prompt_card" } },
+    select: { value: true }
+  }).catch(() => null);
+
+  const modal = new ModalBuilder()
+    .setCustomId(`PROMPT_CARD_MODAL:${interaction.user.id}`)
+    .setTitle("Мои инструкции для Хори");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("content")
+        .setLabel("Инструкции (каждая с новой строки)")
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(false)
+        .setMaxLength(1000)
+        .setValue(existing?.value ?? "")
+        .setPlaceholder("Например:\nГовори со мной без мата\nЯ предпочитаю краткие ответы\nСейчас я в роли модератора")
+    )
+  );
+
+  await interaction.showModal(modal);
+}
+
+/** Сохранить личные инструкции из модала. */
+async function handlePromptCardModalSubmit(runtime: BotRuntime, interaction: ModalSubmitInteraction) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const content = interaction.fields.getTextInputValue("content").trim();
+  const guildId = interaction.guildId;
+  const userId = interaction.user.id;
+
+  if (!content) {
+    // Пустое значение — удаляем карточку.
+    await runtime.prisma.userMemoryNote.deleteMany({
+      where: { guildId, userId, key: "_prompt_card" }
+    });
+    await interaction.reply({ content: "🗑️ Инструкции удалены.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  await runtime.prisma.userMemoryNote.upsert({
+    where: { guildId_userId_key: { guildId, userId, key: "_prompt_card" } },
+    create: { guildId, userId, key: "_prompt_card", value: content, source: "user_prompt_card", active: true },
+    update: { value: content, active: true }
+  });
+
+  await interaction.reply({ content: `✅ Инструкции сохранены (${content.split("\n").filter(Boolean).length} строк).`, flags: MessageFlags.Ephemeral });
+}
+
 async function routeButtonInteraction(runtime: BotRuntime, interaction: ButtonInteraction, isOwner: boolean) {
+  if (interaction.customId.startsWith("PROMPT_CARD:edit:")) {
+    await handlePromptCardEditButton(runtime, interaction);
+    return;
+  }
+
   if (interaction.customId.startsWith(`${CORE_PROMPT_PANEL_PREFIX}:`)) {
     await handleCorePromptPanelButton(runtime, interaction, isOwner);
     return;

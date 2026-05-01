@@ -1,5 +1,5 @@
 import type { GuildMember, Message } from "discord.js";
-import { PermissionFlagsBits } from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } from "discord.js";
 
 import { trackIngestedMessage } from "@hori/analytics";
 import { DEFAULT_DEBOUNCE, IntentRouter, createChannelDebouncer, detectMessageKind, evaluateSelectiveEngagement, implicitMentionKindWhen, planNaturalMessageSplit, resolveActivation, shouldDebounce } from "@hori/core";
@@ -361,6 +361,41 @@ async function tryActivateSlotByKeyword(
   );
 }
 
+/**
+ * Перехватывает "хори запомни" / "хори вспомни" — отправляет кнопку редактора
+ * личной карточки инструкций. Возвращает true если обработал.
+ */
+async function tryHandlePromptCardCommand(
+  runtime: BotRuntime,
+  message: Message
+): Promise<boolean> {
+  if (!message.inGuild()) return false;
+  const text = message.content.trim();
+  if (!/^(?:хори\s+)?(запомни|вспомни)\b/i.test(text)) return false;
+
+  const existing = await runtime.prisma.userMemoryNote.findUnique({
+    where: { guildId_userId_key: { guildId: message.guildId, userId: message.author.id, key: "_prompt_card" } },
+    select: { value: true }
+  }).catch(() => null);
+
+  const hasCard = Boolean(existing?.value?.trim());
+  const label = hasCard ? "✏️ Редактировать инструкции" : "✏️ Добавить инструкции";
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`PROMPT_CARD:edit:${message.author.id}`)
+      .setLabel(label)
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  await message.reply({
+    content: hasCard
+      ? `📋 Твои инструкции сохранены. Нажми чтобы изменить.`
+      : `📋 У тебя нет личных инструкций. Нажми чтобы добавить.`,
+    components: [row]
+  });
+  return true;
+}
+
 export async function routeMessage(runtime: BotRuntime, message: Message) {
   if (!message.inGuild() || message.author.bot || !runtime.client.user) {
     return;
@@ -436,6 +471,10 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
   }
 
   if (!explicitInvocation && !autoInterject) {
+    return;
+  }
+
+  if (explicitInvocation && await tryHandlePromptCardCommand(runtime, message)) {
     return;
   }
 
