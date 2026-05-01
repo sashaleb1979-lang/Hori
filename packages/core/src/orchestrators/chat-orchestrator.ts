@@ -40,27 +40,6 @@ interface OrchestratorDeps {
   promptSlots?: PromptSlotService;
 }
 
-export interface DebugTraceRecord {
-  id: string;
-  messageId: string | null;
-  eventType: string;
-  intent: string | null;
-  routeReason: string | null;
-  modelUsed: string | null;
-  usedSearch: boolean;
-  toolCalls: unknown;
-  contextMessages: number | null;
-  memoryLayers: unknown;
-  latencyMs: number | null;
-  promptTokens: number | null;
-  completionTokens: number | null;
-  totalTokens: number | null;
-  tokenSource: string | null;
-  relationshipApplied: boolean;
-  debugTrace: unknown;
-  createdAt: Date;
-}
-
 interface AggressionPipelineResult {
   reply: string;
   trace: NonNullable<BotTrace["aggression"]>;
@@ -488,33 +467,6 @@ export class ChatOrchestrator {
 
     const result = await this.handleMessage(envelope);
     return typeof result.reply === "string" ? result.reply : (result.reply?.text ?? "Нечего сказать.");
-  }
-
-  async explainTrace(messageId: string): Promise<DebugTraceRecord | null> {
-    return this.deps.prisma.botEventLog.findFirst({
-      where: { messageId },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        messageId: true,
-        eventType: true,
-        intent: true,
-        routeReason: true,
-        modelUsed: true,
-        usedSearch: true,
-        toolCalls: true,
-        contextMessages: true,
-        memoryLayers: true,
-        latencyMs: true,
-        promptTokens: true,
-        completionTokens: true,
-        totalTokens: true,
-        tokenSource: true,
-        relationshipApplied: true,
-        debugTrace: true,
-        createdAt: true
-      }
-    });
   }
 
   private buildStableChatSystemPrompt(
