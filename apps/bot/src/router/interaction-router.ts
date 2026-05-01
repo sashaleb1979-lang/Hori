@@ -2321,11 +2321,6 @@ async function resolveHoriActionContent(
     case "v6_sigils_question_off":
       if (!isOwner) return "Sigils изменяет только владелец.";
       return setV6SigilState(runtime, "?", false, interaction.user.id);
-    case "v6_sigils_prompts_status":
-      return buildV6SigilPromptsStatus(runtime, guildId);
-    case "v6_sigils_prompts_reset":
-      if (!isOwner) return "Сброс sigil-промптов только для владельца.";
-      return resetV6SigilPrompts(runtime, guildId, interaction.user.id);
     case "v6_queue_status":
       return buildV6QueueStatus(runtime);
     case "v6_queue_reset":
@@ -2641,9 +2636,7 @@ function getHoriTabActions(tab: HoriPanelTab, isOwner: boolean, isModerator: boo
     sigils: [
       { id: "v6_sigils_status", label: "Sigils", emoji: "🔣", style: ButtonStyle.Primary },
       { id: "v6_sigils_question_on", label: "? ON", emoji: "✅", ownerOnly: true },
-      { id: "v6_sigils_question_off", label: "? OFF", emoji: "❌", ownerOnly: true },
-      { id: "v6_sigils_prompts_status", label: "Prompts", emoji: "📜" },
-      { id: "v6_sigils_prompts_reset", label: "Reset prompts", emoji: "♻️", ownerOnly: true }
+      { id: "v6_sigils_question_off", label: "? OFF", emoji: "❌", ownerOnly: true }
     ],
     queue: [
       { id: "v6_queue_status", label: "Pools", emoji: "📬", style: ButtonStyle.Primary },
@@ -4219,50 +4212,3 @@ async function buildV6AuditLog(runtime: BotRuntime, guildId: string) {
 
 
 // Status + reset для sigil core-prompt overrides.
-// Используем listCorePromptTemplates / setCorePromptTemplate / resetCorePromptTemplate из RuntimeConfigService.
-async function buildV6SigilPromptsStatus(runtime: BotRuntime, guildId: string) {
-  try {
-    const templates = await runtime.runtimeConfig.listCorePromptTemplates(guildId);
-    const sigilEntries = templates.filter((entry: { key: string }) => entry.key.startsWith("sigil_"));
-    if (sigilEntries.length === 0) {
-      return "**V6 Sigil prompts**\n(нет sigil-промптов в реестре)";
-    }
-    const lines = sigilEntries.map((entry: { key: string; label?: string; source: string; content: string }) => {
-      const overridden = entry.source === "runtime_setting";
-      const preview = entry.content.length > 80 ? entry.content.slice(0, 80) + "…" : entry.content;
-      return "`" + entry.key + "` · " + (overridden ? "**override**" : "default") + "\n  " + preview;
-    });
-    return [
-      "**V6 Sigil prompts** (Item 12)",
-      "Текст вставляется как overlay в system prompt, когда сообщение начинается с соответствующего знака.",
-      ...lines,
-      "_Редактирование — через стандартное модальное \"Edit core prompt\" (выбрать ключ `sigil_*`)._"
-    ].join("\n");
-  } catch (error) {
-    return "Не удалось получить sigil-промпты: " + asErrorMessage(error);
-  }
-}
-
-async function resetV6SigilPrompts(runtime: BotRuntime, guildId: string, updatedBy: string) {
-  try {
-    const templates = await runtime.runtimeConfig.listCorePromptTemplates(guildId);
-    const sigilOverrides = templates.filter(
-      (entry: { key: string; source: string }) => entry.key.startsWith("sigil_") && entry.source === "runtime_setting"
-    );
-    if (sigilOverrides.length === 0) {
-      return "Sigil-промпты уже на default — сбрасывать нечего.";
-    }
-    let reset = 0;
-    for (const entry of sigilOverrides) {
-      try {
-        await runtime.runtimeConfig.resetCorePromptTemplate(guildId, entry.key as never, updatedBy);
-        reset += 1;
-      } catch {
-        // best-effort, продолжаем
-      }
-    }
-    return "Сброшено sigil-промптов: `" + reset + "` из `" + sigilOverrides.length + "`.";
-  } catch (error) {
-    return "Не удалось сбросить sigil-промпты: " + asErrorMessage(error);
-  }
-}

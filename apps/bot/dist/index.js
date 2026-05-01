@@ -2572,11 +2572,6 @@ async function resolveHoriActionContent(runtime, interaction, action, isOwner, i
     case "v6_sigils_question_off":
       if (!isOwner) return "Sigils \u0438\u0437\u043C\u0435\u043D\u044F\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446.";
       return setV6SigilState(runtime, "?", false, interaction.user.id);
-    case "v6_sigils_prompts_status":
-      return buildV6SigilPromptsStatus(runtime, guildId);
-    case "v6_sigils_prompts_reset":
-      if (!isOwner) return "\u0421\u0431\u0440\u043E\u0441 sigil-\u043F\u0440\u043E\u043C\u043F\u0442\u043E\u0432 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430.";
-      return resetV6SigilPrompts(runtime, guildId, interaction.user.id);
     case "v6_queue_status":
       return buildV6QueueStatus(runtime);
     case "v6_queue_reset":
@@ -2816,9 +2811,7 @@ function getHoriTabActions(tab, isOwner, isModerator) {
     sigils: [
       { id: "v6_sigils_status", label: "Sigils", emoji: "\u{1F523}", style: import_discord3.ButtonStyle.Primary },
       { id: "v6_sigils_question_on", label: "? ON", emoji: "\u2705", ownerOnly: true },
-      { id: "v6_sigils_question_off", label: "? OFF", emoji: "\u274C", ownerOnly: true },
-      { id: "v6_sigils_prompts_status", label: "Prompts", emoji: "\u{1F4DC}" },
-      { id: "v6_sigils_prompts_reset", label: "Reset prompts", emoji: "\u267B\uFE0F", ownerOnly: true }
+      { id: "v6_sigils_question_off", label: "? OFF", emoji: "\u274C", ownerOnly: true }
     ],
     queue: [
       { id: "v6_queue_status", label: "Pools", emoji: "\u{1F4EC}", style: import_discord3.ButtonStyle.Primary },
@@ -3286,12 +3279,16 @@ function buildCorePromptPanelRows(selected) {
   return [
     new import_discord3.ActionRowBuilder().addComponents(
       new import_discord3.StringSelectMenuBuilder().setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:select`).setPlaceholder("\u0412\u044B\u0431\u0435\u0440\u0438 core prompt").addOptions(
-        ...import_core.CORE_PROMPT_KEYS.map((key) => ({
-          label: import_core.CORE_PROMPT_DEFINITIONS[key].label,
-          value: key,
-          description: import_core.CORE_PROMPT_DEFINITIONS[key].description.slice(0, 100),
-          default: key === selected.key
-        }))
+        ...import_core.CORE_PROMPT_KEYS.map((key) => {
+          const def = import_core.CORE_PROMPT_DEFINITIONS[key];
+          const description = def.description.slice(0, 100).trim();
+          return {
+            label: def.label,
+            value: key,
+            ...description ? { description } : {},
+            default: key === selected.key
+          };
+        })
       )
     ),
     new import_discord3.ActionRowBuilder().addComponents(
@@ -3805,7 +3802,7 @@ async function buildV6RelationshipStatus(runtime, guildId, userId) {
       `level: \`${level}\``,
       `state: \`${vector.relationshipState}\``,
       `closeness: \`${vector.closeness?.toFixed?.(2) ?? "\u2014"}\``,
-      `trust: \`${vector.trust?.toFixed?.(2) ?? "\u2014"}\``,
+      `trustLevel: \`${vector.trustLevel?.toFixed?.(2) ?? "\u2014"}\``,
       `escalationStage: \`${vector.escalationStage ?? 0}\``
     ];
     return lines.join("\n");
@@ -3834,10 +3831,8 @@ async function buildV6RecallStatus(runtime, guildId, channelId) {
     if (!active) return "**V6 Recall** \u2014 \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0445 PromptSlot \u043D\u0435\u0442 (10 \u043C\u0438\u043D active / 6 \u0447 cooldown).";
     return [
       `**V6 Recall \u2014 \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0439 slot**`,
-      `kind: \`${active.kind ?? "\u2014"}\``,
-      `priority: \`${active.priority ?? "\u2014"}\``,
       `activatedAt: \`${active.activatedAt?.toISOString?.() ?? "\u2014"}\``,
-      `expiresAt: \`${active.expiresAt?.toISOString?.() ?? "\u2014"}\``
+      `cooldownUntil: \`${active.cooldownUntil?.toISOString?.() ?? "\u2014"}\``
     ].join("\n");
   } catch (error) {
     return `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C recall: ${(0, import_shared3.asErrorMessage)(error)}`;
@@ -3895,7 +3890,7 @@ function buildV6FlashStatus(runtime) {
     return [
       `**V6 Flash trolling**`,
       `weights: retort=\`${w.retort}\` question=\`${w.question}\` meme=\`${w.meme}\``,
-      `cooldownMs: \`${cfg.cooldownMs ?? "\u2014"}\``
+      `intervalMinutes: \`${cfg.intervalMinutes ?? "\u2014"}\``
     ].join("\n");
   } catch (error) {
     return `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C flash cfg: ${(0, import_shared3.asErrorMessage)(error)}`;
@@ -3925,50 +3920,6 @@ async function buildV6AuditLog(runtime, guildId) {
     return [`**V6 Audit \u2014 \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 ${entries.length}**`, ...lines].join("\n");
   } catch (error) {
     return `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C audit: ${(0, import_shared3.asErrorMessage)(error)}`;
-  }
-}
-async function buildV6SigilPromptsStatus(runtime, guildId) {
-  try {
-    const templates = await runtime.runtimeConfig.listCorePromptTemplates(guildId);
-    const sigilEntries = templates.filter((entry) => entry.key.startsWith("sigil_"));
-    if (sigilEntries.length === 0) {
-      return "**V6 Sigil prompts**\n(\u043D\u0435\u0442 sigil-\u043F\u0440\u043E\u043C\u043F\u0442\u043E\u0432 \u0432 \u0440\u0435\u0435\u0441\u0442\u0440\u0435)";
-    }
-    const lines = sigilEntries.map((entry) => {
-      const overridden = entry.source === "runtime_setting";
-      const preview = entry.content.length > 80 ? entry.content.slice(0, 80) + "\u2026" : entry.content;
-      return "`" + entry.key + "` \xB7 " + (overridden ? "**override**" : "default") + "\n  " + preview;
-    });
-    return [
-      "**V6 Sigil prompts** (Item 12)",
-      "\u0422\u0435\u043A\u0441\u0442 \u0432\u0441\u0442\u0430\u0432\u043B\u044F\u0435\u0442\u0441\u044F \u043A\u0430\u043A overlay \u0432 system prompt, \u043A\u043E\u0433\u0434\u0430 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u043D\u0430\u0447\u0438\u043D\u0430\u0435\u0442\u0441\u044F \u0441 \u0441\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0443\u044E\u0449\u0435\u0433\u043E \u0437\u043D\u0430\u043A\u0430.",
-      ...lines,
-      '_\u0420\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u2014 \u0447\u0435\u0440\u0435\u0437 \u0441\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u043E\u0435 \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 "Edit core prompt" (\u0432\u044B\u0431\u0440\u0430\u0442\u044C \u043A\u043B\u044E\u0447 `sigil_*`)._'
-    ].join("\n");
-  } catch (error) {
-    return "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C sigil-\u043F\u0440\u043E\u043C\u043F\u0442\u044B: " + (0, import_shared3.asErrorMessage)(error);
-  }
-}
-async function resetV6SigilPrompts(runtime, guildId, updatedBy) {
-  try {
-    const templates = await runtime.runtimeConfig.listCorePromptTemplates(guildId);
-    const sigilOverrides = templates.filter(
-      (entry) => entry.key.startsWith("sigil_") && entry.source === "runtime_setting"
-    );
-    if (sigilOverrides.length === 0) {
-      return "Sigil-\u043F\u0440\u043E\u043C\u043F\u0442\u044B \u0443\u0436\u0435 \u043D\u0430 default \u2014 \u0441\u0431\u0440\u0430\u0441\u044B\u0432\u0430\u0442\u044C \u043D\u0435\u0447\u0435\u0433\u043E.";
-    }
-    let reset = 0;
-    for (const entry of sigilOverrides) {
-      try {
-        await runtime.runtimeConfig.resetCorePromptTemplate(guildId, entry.key, updatedBy);
-        reset += 1;
-      } catch {
-      }
-    }
-    return "\u0421\u0431\u0440\u043E\u0448\u0435\u043D\u043E sigil-\u043F\u0440\u043E\u043C\u043F\u0442\u043E\u0432: `" + reset + "` \u0438\u0437 `" + sigilOverrides.length + "`.";
-  } catch (error) {
-    return "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u0431\u0440\u043E\u0441\u0438\u0442\u044C sigil-\u043F\u0440\u043E\u043C\u043F\u0442\u044B: " + (0, import_shared3.asErrorMessage)(error);
   }
 }
 
@@ -4710,15 +4661,12 @@ async function bootstrapBot() {
   const reflectionService = new import_memory2.ReflectionService(prisma);
   const profileService = new import_memory2.ProfileService(prisma, env);
   const runtimeConfig = new import_core3.RuntimeConfigService(prisma, env);
-  const affinityService = new import_core3.AffinityService(prisma);
-  const moodService = new import_core3.MoodService(prisma);
-  const mediaReactionService = new import_core3.MediaReactionService(prisma);
   const replyQueueService = new import_core3.ReplyQueueService(prisma, env.REPLY_QUEUE_BUSY_TTL_SEC);
   const queuePhrasePoolService = new import_core3.QueuePhrasePoolService();
   const flashTrollingService = new import_core3.FlashTrollingService();
   const promptSlotService = new import_memory2.PromptSlotService(prisma);
   const sessionBufferService = redisReady ? new import_memory2.SessionBufferService(prisma, redis) : new import_memory2.SessionBufferService(prisma);
-  const contextService = new import_memory2.ContextService(prisma, summaryService, profileService, relationshipService, retrievalService, activeMemoryService, redisReady ? redis : void 0, sessionBufferService);
+  const contextService = new import_memory2.ContextService(prisma, activeMemoryService, redisReady ? redis : void 0);
   const { client: llmClient } = (0, import_core3.createRuntimeLlmClient)(env, logger, runtimeConfig, "bot");
   const modelRouter = new import_llm3.ModelRouter(env);
   const embeddingAdapter = new import_llm3.EmbeddingAdapter(llmClient, modelRouter);
@@ -4752,7 +4700,7 @@ async function bootstrapBot() {
     retrievalService,
     summaryService,
     runtimeConfig,
-    moodService,
+    void 0,
     replyQueueService,
     memoryAlbumService,
     reflectionService,
@@ -4773,9 +4721,6 @@ async function bootstrapBot() {
     embeddingAdapter,
     runtimeConfig,
     relationships: relationshipService,
-    affinity: affinityService,
-    mood: moodService,
-    media: mediaReactionService,
     reflection: reflectionService,
     sessionBuffer: sessionBufferService,
     promptSlots: promptSlotService

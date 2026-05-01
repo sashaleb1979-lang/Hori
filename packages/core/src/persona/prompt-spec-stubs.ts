@@ -12,15 +12,12 @@
 
 import type { MessageKind } from "@hori/shared";
 
-// Широкий union ключей: новые camelCase + V6 legacy snake_case.
+// Широкий union ключей: новые camelCase + legacy snake_case, которые ещё реально используются.
 export const CORE_PROMPT_KEYS = [
   "commonCore",
   "memorySummarizer",
   "aggressionChecker",
   "relationshipEvaluator",
-  "sigil_question",
-  "sigil_force_rewrite",
-  "sigil_summary",
   "common_core_base",
   "relationship_base"
 ] as const;
@@ -56,9 +53,6 @@ export interface CorePromptTemplates {
   memorySummarizer: string;
   aggressionChecker: string;
   relationshipEvaluator: string;
-  sigil_question: string;
-  sigil_force_rewrite: string;
-  sigil_summary: string;
   // *Prompt fields: читаются orchestrator-ом (aggressionChecker, memorySummarizer) и worker-ом (relationshipEvaluator).
   memorySummarizerPrompt: string;
   aggressionCheckerPrompt: string;
@@ -70,9 +64,6 @@ export const DEFAULT_CORE_PROMPT_TEMPLATES: CorePromptTemplates = {
   memorySummarizer: "",
   aggressionChecker: "",
   relationshipEvaluator: "",
-  sigil_question: "",
-  sigil_force_rewrite: "",
-  sigil_summary: "",
   memorySummarizerPrompt:
     "Сделай сжатое резюме диалога на русском. Только факты из текста. Не придумывай. Если данных мало — скажи прямо.",
   aggressionCheckerPrompt:
@@ -80,20 +71,6 @@ export const DEFAULT_CORE_PROMPT_TEMPLATES: CorePromptTemplates = {
   relationshipEvaluatorPrompt:
     "Ты оцениваешь, как изменилось отношение пользователя к Хори после сессии диалога.\nПредыдущая характеристика: {previous_characteristic}\nДиалог:\n{session_messages}\n\nОтветь строго JSON без лишних полей:\n{\"verdict\":\"A|B|V\",\"characteristic\":\"краткое описание отношений (до 200 символов)\",\"lastChange\":\"что изменилось (до 100 символов)\"}\nverdict: A=стало хуже, B=без изменений, V=стало лучше."
 };
-
-export function corePromptKeyForSigil(sigil: string | null | undefined): CorePromptKey | null {
-  if (!sigil) return null;
-  switch (sigil) {
-    case "?":
-      return "sigil_question";
-    case "!":
-      return "sigil_force_rewrite";
-    case "*":
-      return "sigil_summary";
-    default:
-      return null;
-  }
-}
 
 export function detectMessageKind(_input: unknown): MessageKind {
   return "casual_address";

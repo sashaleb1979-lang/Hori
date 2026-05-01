@@ -388,6 +388,21 @@ describe("/hori panel access", () => {
     expect(labels).toEqual(["Текст чата", "Core prompts", "V5 Controls"]);
   });
 
+  it("shows only sigil toggle actions in the sigils panel", async () => {
+    const interaction = createPanelInteraction("owner-1", "sigils");
+
+    await routeInteraction(createRuntime(["owner-1"]), interaction as never);
+
+    const response = interaction.reply.mock.calls[0]?.[0];
+    const buttonRow = response?.components?.[1];
+    const labels = (buttonRow?.components ?? []).map(
+      (component: { data?: { label?: string }; toJSON?: () => { label?: string } }) =>
+        component.data?.label ?? component.toJSON?.().label ?? ""
+    );
+
+    expect(labels).toEqual(["Sigils", "? ON", "? OFF"]);
+  });
+
   it("lets the owner open the core prompt panel from persona actions", async () => {
     const interaction = createCorePromptPanelButtonInteraction("owner-1");
 
