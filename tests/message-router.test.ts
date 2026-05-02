@@ -264,4 +264,88 @@ describe("prepareReplyForDelivery", () => {
       })
     );
   });
+
+  it("returns before ingest when channel access mode is off", async () => {
+    const ingestMessage = vi.fn();
+    const message = {
+      guildId: "guild-1",
+      channelId: "channel-1",
+      content: "<@bot-1> привет",
+      author: { id: "user-1", username: "user", bot: false },
+      member: { permissions: { has: () => false } },
+      guild: { members: { fetch: vi.fn() } },
+      mentions: { users: new Map(), has: () => true },
+      attachments: { size: 0 },
+      inGuild: () => true
+    };
+    const runtime = {
+      client: { user: { id: "bot-1", username: "Hori" } },
+      env: { DISCORD_OWNER_IDS: [], AUTOINTERJECT_CHANNEL_ALLOWLIST: [] },
+      runtimeConfig: {
+        getRoutingConfig: vi.fn().mockResolvedValue({
+          guildSettings: { botName: "Хори", interjectTendency: 0, forbiddenWords: [] },
+          featureFlags: { autoInterject: false, replyQueueEnabled: false, naturalMessageSplittingEnabled: false },
+          channelPolicy: { accessMode: "off", isMuted: true, allowBotReplies: false, allowInterjections: false, topicInterestTags: [] }
+        })
+      },
+      ingestService: { ingestMessage },
+      prisma: {},
+      logger: { warn: vi.fn(), error: vi.fn() }
+    };
+
+    await routeMessage(runtime as never, message as never);
+
+    expect(ingestMessage).not.toHaveBeenCalled();
+  });
+
+  it("still ingests user messages in silent channels", async () => {
+    const ingestMessage = vi.fn().mockResolvedValue({ deduplicated: false });
+    const createLog = vi.fn().mockResolvedValue(undefined);
+    const message = {
+      id: "user-msg-2",
+      guildId: "guild-1",
+      channelId: "channel-1",
+      content: "<@bot-1> привет",
+      createdAt: new Date("2026-05-01T10:00:00.000Z"),
+      author: { id: "user-1", username: "user", bot: false },
+      member: {
+        displayName: "user",
+        permissions: { has: () => false }
+      },
+      guild: {
+        name: "Guild 1",
+        members: { fetch: vi.fn() }
+      },
+      channel: { name: "general" },
+      mentions: {
+        users: new Map([["bot-1", { id: "bot-1" }]]),
+        has: (id: string) => id === "bot-1"
+      },
+      attachments: { size: 0 },
+      reference: null,
+      inGuild: () => true
+    };
+    const runtime = {
+      client: { user: { id: "bot-1", username: "Hori" } },
+      env: { DISCORD_OWNER_IDS: [], AUTOINTERJECT_CHANNEL_ALLOWLIST: [] },
+      runtimeConfig: {
+        getRoutingConfig: vi.fn().mockResolvedValue({
+          guildSettings: { botName: "Хори", interjectTendency: 0, forbiddenWords: [] },
+          featureFlags: { autoInterject: false, replyQueueEnabled: false, naturalMessageSplittingEnabled: false },
+          channelPolicy: { accessMode: "silent", isMuted: false, allowBotReplies: false, allowInterjections: false, topicInterestTags: [] }
+        })
+      },
+      ingestService: { ingestMessage },
+      prisma: { botEventLog: { create: createLog } },
+      knowledge: { matchTrigger: vi.fn() },
+      logger: { warn: vi.fn(), error: vi.fn() }
+    };
+
+    await routeMessage(runtime as never, message as never);
+
+    expect(ingestMessage).toHaveBeenCalledTimes(1);
+    expect(createLog).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ routeReason: "channel replies disabled" })
+    }));
+  });
 });

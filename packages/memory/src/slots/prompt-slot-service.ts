@@ -19,6 +19,16 @@ import type { AppPrismaClient } from "@hori/shared";
 export const SLOT_ACTIVE_WINDOW_MS = 10 * 60 * 1000;
 export const SLOT_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
+/** Максимум активных слотов по уровню отношений (-1..4). */
+export const SLOT_LIMITS_BY_LEVEL: Record<number, number> = {
+  [-1]: 0,
+  0: 2,
+  1: 3,
+  2: 4,
+  3: 5,
+  4: 6
+};
+
 export interface PromptSlotRecord {
   id: string;
   guildId: string;
@@ -31,6 +41,8 @@ export interface PromptSlotRecord {
   activatedAt: Date | null;
   cooldownUntil: Date | null;
   active: boolean;
+  strength: number;
+  lastDeactivatedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -175,13 +187,14 @@ export class PromptSlotService {
     });
   }
 
-  /** Деактивировать слот: active=false, cooldown=now+6h. */
+  /** Деактивировать слот: active=false, cooldown=now+6h, lastDeactivatedAt=now. */
   async deactivate(slotId: string, now: Date = new Date()): Promise<PromptSlotRecord> {
     return this.slots.update({
       where: { id: slotId },
       data: {
         active: false,
-        cooldownUntil: new Date(now.getTime() + SLOT_COOLDOWN_MS)
+        cooldownUntil: new Date(now.getTime() + SLOT_COOLDOWN_MS),
+        lastDeactivatedAt: now
       }
     });
   }
@@ -195,6 +208,57 @@ export class PromptSlotService {
 
   async delete(slotId: string): Promise<void> {
     await this.slots.delete({ where: { id: slotId } });
+  }
+
+  /** Удалить все слоты пользователя на сервере. */
+  async deleteAllForUser(guildId: string, userId: string): Promise<number> {
+    const all = await this.slots.findMany({ where: { guildId, ownerUserId: userId } });
+    for (const s of all) {
+      await this.slots.delete({ where: { id: s.id } });
+    }
+    return all.length;
+  }
+
+  /** Получить лимит слотов по уровню отношений. */
+  getLimit(level: number): number {
+    const clamped = Math.max(-1, Math.min(4, Math.round(level)));
+    return SLOT_LIMITS_BY_LEVEL[clamped] ?? 2;
+  }
+
+  /** Проверить, может ли пользователь создать ещё один слот. */
+  async canCreate(guildId: string, userId: string, level: number): Promise<boolean> {
+    const limit = this.getLimit(level);
+    if (limit <= 0) return false;
+    const existing = await this.slots.findMany({ where: { guildId, ownerUserId: userId } });
+    return existing.length < limit;
+  }
+
+  /** Принудительно активировать слот (игнорирует cooldown и preemption). */
+  async forceActivate(slotId: string): Promise<PromptSlotRecord> {
+    return this.activate(slotId, { forceIgnoreCooldown: true, initiatorLevel: 999 });
+  }
+
+  /** Обновить силу слота (0=слабый, 1=обычный, 2=жёсткий). */
+  async setStrength(slotId: string, strength: 0 | 1 | 2): Promise<PromptSlotRecord> {
+    return this.slots.update({
+      where: { id: slotId },
+      data: { strength }
+    });
+  }
+
+  /** Обновить содержимое и/или название слота. */
+  async updateContent(slotId: string, content: string, title?: string | null): Promise<PromptSlotRecord> {
+    const trimmed = content.trim();
+    if (!trimmed) {
+      throw new Error("PromptSlot.content is empty");
+    }
+    return this.slots.update({
+      where: { id: slotId },
+      data: {
+        content: trimmed,
+        ...(title !== undefined ? { title } : {})
+      }
+    });
   }
 
   /**

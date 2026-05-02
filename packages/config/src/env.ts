@@ -112,7 +112,7 @@ const coreEnvSchema = z.object({
   DATABASE_URL: urlish,
   REDIS_URL: urlish,
 
-  LLM_PROVIDER: z.enum(["ollama", "openai", "router"]).default("ollama"),
+  LLM_PROVIDER: z.enum(["ollama", "openai", "router"]).default("router"),
 
   OLLAMA_BASE_URL: urlish.optional(),
   OLLAMA_FAST_MODEL: z.string().default("qwen3.5:9b"),
@@ -186,7 +186,8 @@ const compactConfigSchema = z
         linkUnderstandingEnabled: z.boolean().optional(),
         naturalMessageSplittingEnabled: z.boolean().optional(),
         selectiveEngagementEnabled: z.boolean().optional(),
-        selfReflectionLessonsEnabled: z.boolean().optional()
+        selfReflectionLessonsEnabled: z.boolean().optional(),
+        mediaReactionsEnabled: z.boolean().optional()
       })
       .partial()
       .optional(),
@@ -310,6 +311,7 @@ const legacyAdvancedSchema = z
     FEATURE_NATURAL_MESSAGE_SPLITTING_ENABLED: boolish.optional(),
     FEATURE_SELECTIVE_ENGAGEMENT_ENABLED: boolish.optional(),
     FEATURE_SELF_REFLECTION_LESSONS_ENABLED: boolish.optional(),
+    FEATURE_MEDIA_REACTIONS_ENABLED: boolish.optional(),
     LLM_MAX_CONTEXT_MESSAGES: intish.optional(),
     LLM_MAX_TOOL_CALLS: intish.optional(),
     LLM_REPLY_MAX_TOKENS: intish.optional(),
@@ -555,6 +557,7 @@ function parseCompactConfig(cfg?: string): Partial<RuntimeTuning> {
     FEATURE_NATURAL_MESSAGE_SPLITTING_ENABLED: parsed.features?.naturalMessageSplittingEnabled,
     FEATURE_SELECTIVE_ENGAGEMENT_ENABLED: parsed.features?.selectiveEngagementEnabled,
     FEATURE_SELF_REFLECTION_LESSONS_ENABLED: parsed.features?.selfReflectionLessonsEnabled,
+    FEATURE_MEDIA_REACTIONS_ENABLED: parsed.features?.mediaReactionsEnabled,
     LLM_MAX_CONTEXT_MESSAGES: parsed.llm?.contextMessages,
     LLM_MAX_TOOL_CALLS: parsed.llm?.toolCalls,
     LLM_REPLY_MAX_TOKENS: parsed.llm?.replyMaxTokens,

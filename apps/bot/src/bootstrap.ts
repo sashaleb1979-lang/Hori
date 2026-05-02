@@ -11,6 +11,7 @@ import { createLogger, createPrismaClient, createRedisClient, createAppQueues, e
 
 import { createDiscordClient } from "./gateway/create-discord-client";
 import { registerEvents } from "./events/register-events";
+import { startFlashTrollingScheduler } from "./runtime/flash-trolling-scheduler";
 
 interface BotQueueHandle {
   add(jobName: string, payload?: unknown, options?: unknown): Promise<unknown>;
@@ -208,6 +209,9 @@ export async function bootstrapBot() {
 
   registerEvents(runtime);
   await client.login(env.DISCORD_TOKEN);
+
+  // Запустить flash-trolling scheduler (если enabled в конфиге).
+  startFlashTrollingScheduler(runtime);
 
   return runtime;
 }

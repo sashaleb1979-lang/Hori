@@ -1323,6 +1323,24 @@ async function routeStringSelectInteraction(
   interaction: StringSelectMenuInteraction,
   isOwner: boolean
 ) {
+  if (interaction.customId === `${HORI_ACTION_PREFIX}:channels_pick`) {
+    if (!interaction.guildId) {
+      await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const isModerator = hasManageGuild(interaction);
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.update(
+      await buildChannelMatrixDetailResponse(runtime, interaction.guildId, interaction.values[0], isOwner, isModerator)
+    );
+    return;
+  }
+
   if (interaction.customId.startsWith(`${CORE_PROMPT_PANEL_PREFIX}:`)) {
     await handleCorePromptPanelSelect(runtime, interaction, isOwner);
     return;
@@ -1654,6 +1672,11 @@ async function handleRememberMomentContext(
 }
 
 async function routeModalSubmit(runtime: BotRuntime, interaction: ModalSubmitInteraction) {
+  if (interaction.customId.startsWith("SLOT_MODAL:create:")) {
+    await handleSlotCreateModalSubmit(runtime, interaction);
+    return;
+  }
+
   if (interaction.customId.startsWith("PROMPT_CARD_MODAL:")) {
     await handlePromptCardModalSubmit(runtime, interaction);
     return;
@@ -1857,6 +1880,33 @@ async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubm
   const isModerator = ensureModerator(interaction);
   const [, modalKind, channelIdFromModal] = interaction.customId.split(":");
 
+  // core-override модал доступен модераторам и владельцу — проверяем до owner gate
+  if (modalKind === "core-override") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Mood override только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const userId = interaction.fields.getTextInputValue("userId").trim();
+    const coreId = interaction.fields.getTextInputValue("coreId").trim().toLowerCase();
+    const durationRaw = interaction.fields.getTextInputValue("duration").trim().toLowerCase();
+    const reason = interaction.fields.getTextInputValue("reason").trim() || null;
+
+    const validCoreIds = ["core_annoyed", "core_base", "core_warm", "core_close", "core_teasing", "core_sweet", "core_serious"];
+    if (!validCoreIds.includes(coreId)) {
+      await interaction.reply({ content: `Неизвестный coreId: \`${coreId}\`. Допустимые: ${validCoreIds.join(", ")}`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const durationMs: number | null = durationRaw === "forever" || durationRaw === "" ? null
+      : durationRaw === "1h" ? 3_600_000
+      : durationRaw === "6h" ? 21_600_000
+      : durationRaw === "24h" ? 86_400_000
+      : null;
+    await runtime.runtimeConfig.setCoreOverride(interaction.guildId, userId, coreId, durationMs, reason, interaction.user.id);
+    const exp = durationMs ? `на ${durationRaw}` : "бессрочно";
+    await interaction.reply({ content: `✅ Mood override выставлен для <@${userId}>: \`${coreId}\` ${exp}.`, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
   if (!isOwner) {
     await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
     return;
@@ -2004,6 +2054,123 @@ async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubm
 }
 
 /** Открыть модальный редактор личных инструкций. */
+async function handleSlotButtonInteraction(runtime: BotRuntime, interaction: ButtonInteraction) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const guildId = interaction.guildId;
+  const userId = interaction.user.id;
+  const parts = interaction.customId.split(":");
+  const action = parts[1]; // create | activate | delete | deleteAll
+
+  if (action === "create") {
+    const ownerId = parts[2];
+    if (userId !== ownerId) {
+      await interaction.reply({ content: "Это чужая кнопка.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const relLevel = await runtime.relationshipService.getLevel(guildId, userId).catch(() => 0);
+    const canCreate = await runtime.promptSlots.canCreate(guildId, userId, relLevel);
+    if (!canCreate) {
+      const limit = runtime.promptSlots.getLimit(relLevel);
+      await interaction.reply({ content: `⚠️ Лимит слотов (${limit}) исчерпан. Удали слот через «хори забудь» и попробуй снова.`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const modal = new ModalBuilder()
+      .setCustomId(`SLOT_MODAL:create:${userId}`)
+      .setTitle("Новый prompt-слот");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("title")
+          .setLabel("Название (необязательно)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setMaxLength(60)
+          .setPlaceholder("Напр.: Я модератор")
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("content")
+          .setLabel("Контекст / инструкции")
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setMaxLength(1900)
+          .setPlaceholder("Напр.: Сейчас идёт собрание модераторов. Обращайся ко мне по-деловому.")
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("trigger")
+          .setLabel("Кодовое слово (необязательно)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setMaxLength(40)
+          .setPlaceholder("Напр.: модератор")
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("scope")
+          .setLabel("Область: 'channel' или 'global'")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setMaxLength(10)
+          .setPlaceholder("channel")
+          .setValue("channel")
+      )
+    );
+    await interaction.showModal(modal);
+    return;
+  }
+
+  if (action === "activate") {
+    const slotId = parts[2];
+    const mySlots = await runtime.promptSlots.listForOwner(guildId, userId);
+    const slot = mySlots.find((s) => s.id === slotId);
+    if (!slot) {
+      await interaction.reply({ content: "Слот не найден или не твой.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const relLevel = await runtime.relationshipService.getLevel(guildId, userId).catch(() => 0);
+    try {
+      await runtime.promptSlots.activate(slot.id, { initiatorLevel: relLevel });
+      await interaction.reply({
+        content: `✅ Слот **${slot.title ?? slot.id.slice(0, 8)}** активирован на 10 минут.`,
+        flags: MessageFlags.Ephemeral
+      });
+    } catch (err) {
+      await interaction.reply({ content: `Не удалось активировать: ${asErrorMessage(err)}`, flags: MessageFlags.Ephemeral });
+    }
+    return;
+  }
+
+  if (action === "delete") {
+    const slotId = parts[2];
+    const mySlots = await runtime.promptSlots.listForOwner(guildId, userId);
+    const slot = mySlots.find((s) => s.id === slotId);
+    if (!slot) {
+      await interaction.reply({ content: "Слот не найден или не твой.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await runtime.promptSlots.delete(slot.id);
+    await interaction.reply({ content: `🗑️ Слот **${slot.title ?? slot.id.slice(0, 8)}** удалён.`, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (action === "deleteAll") {
+    const ownerId = parts[2];
+    if (userId !== ownerId) {
+      await interaction.reply({ content: "Это чужая кнопка.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const count = await runtime.promptSlots.deleteAllForUser(guildId, userId);
+    await interaction.reply({ content: `🗑️ Удалено ${count} слотов.`, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  await interaction.reply({ content: "Неизвестное действие.", flags: MessageFlags.Ephemeral });
+}
+
 async function handlePromptCardEditButton(runtime: BotRuntime, interaction: ButtonInteraction) {
   if (!interaction.guildId) {
     await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
@@ -2020,6 +2187,16 @@ async function handlePromptCardEditButton(runtime: BotRuntime, interaction: Butt
     where: { guildId_userId_key: { guildId: interaction.guildId, userId: interaction.user.id, key: "_prompt_card" } },
     select: { value: true }
   }).catch(() => null);
+  const existingSlots = await runtime.promptSlots.listForOwner(interaction.guildId, interaction.user.id).catch(() => []);
+  const legacySlot = existingSlots.find((slot) => slot.channelId === null && slot.title === "Мои инструкции");
+
+  if (!legacySlot && !existing?.value?.trim()) {
+    await interaction.reply({
+      content: "Личные карточки заменены prompt-слотами. Используй «хори запомни» и «хори вспомни».",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
 
   const modal = new ModalBuilder()
     .setCustomId(`PROMPT_CARD_MODAL:${interaction.user.id}`)
@@ -2033,12 +2210,75 @@ async function handlePromptCardEditButton(runtime: BotRuntime, interaction: Butt
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(false)
         .setMaxLength(1000)
-        .setValue(existing?.value ?? "")
+        .setValue(legacySlot?.content ?? existing?.value ?? "")
         .setPlaceholder("Например:\nГовори со мной без мата\nЯ предпочитаю краткие ответы\nСейчас я в роли модератора")
     )
   );
 
   await interaction.showModal(modal);
+}
+
+/** Создать prompt-слот из модала (кнопка "➕ Создать слот"). */
+async function handleSlotCreateModalSubmit(runtime: BotRuntime, interaction: ModalSubmitInteraction) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const userId = interaction.user.id;
+  const ownerId = interaction.customId.split(":")[2];
+  if (userId !== ownerId) {
+    await interaction.reply({ content: "Это чужой модал.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const guildId = interaction.guildId;
+  const content = interaction.fields.getTextInputValue("content").trim();
+  if (!content) {
+    await interaction.reply({ content: "Контекст не может быть пустым.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const title = interaction.fields.getTextInputValue("title").trim() || null;
+  const trigger = interaction.fields.getTextInputValue("trigger").trim().toLowerCase() || null;
+  const scope = interaction.fields.getTextInputValue("scope").trim().toLowerCase();
+  const isGlobal = scope === "global";
+  const channelId = isGlobal ? null : interaction.channelId;
+
+  const relLevel = await runtime.relationshipService.getLevel(guildId, userId).catch(() => 0);
+  const canCreate = await runtime.promptSlots.canCreate(guildId, userId, relLevel);
+  if (!canCreate) {
+    const limit = runtime.promptSlots.getLimit(relLevel);
+    await interaction.reply({ content: `⚠️ Лимит слотов (${limit}) исчерпан. Удали старый слот и попробуй снова.`, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const slot = await runtime.promptSlots.create({
+    guildId,
+    channelId,
+    ownerUserId: userId,
+    ownerLevel: relLevel,
+    title,
+    content,
+    trigger
+  });
+
+  try {
+    await runtime.promptSlots.activate(slot.id, { initiatorLevel: relLevel });
+    await interaction.reply({
+      content: [
+        `🎟️ Слот создан и активирован на 10 минут.`,
+        title ? `**${title}**` : null,
+        trigger ? `🔑 Ключ: \`${trigger}\`` : null,
+        `Область: ${isGlobal ? "весь сервер" : "этот канал"}`
+      ].filter(Boolean).join("\n"),
+      flags: MessageFlags.Ephemeral
+    });
+  } catch {
+    await interaction.reply({
+      content: `🎟️ Слот создан, но не удалось сразу активировать (возможно, конфликт уровней). Активируй через «хори вспомни».`,
+      flags: MessageFlags.Ephemeral
+    });
+  }
 }
 
 /** Сохранить личные инструкции из модала. */
@@ -2050,26 +2290,48 @@ async function handlePromptCardModalSubmit(runtime: BotRuntime, interaction: Mod
   const content = interaction.fields.getTextInputValue("content").trim();
   const guildId = interaction.guildId;
   const userId = interaction.user.id;
+  const relLevel = await runtime.relationshipService.getLevel(guildId, userId).catch(() => 0);
+  const existingSlots = await runtime.promptSlots.listForOwner(guildId, userId).catch(() => []);
+  const legacySlot = existingSlots.find((slot) => slot.channelId === null && slot.title === "Мои инструкции");
 
   if (!content) {
-    // Пустое значение — удаляем карточку.
     await runtime.prisma.userMemoryNote.deleteMany({
       where: { guildId, userId, key: "_prompt_card" }
     });
-    await interaction.reply({ content: "🗑️ Инструкции удалены.", flags: MessageFlags.Ephemeral });
+    if (legacySlot) {
+      await runtime.promptSlots.delete(legacySlot.id).catch(() => undefined);
+    }
+    await interaction.reply({ content: "🗑️ Инструкции удалены. Используй prompt-слоты для нового контекста.", flags: MessageFlags.Ephemeral });
     return;
   }
 
-  await runtime.prisma.userMemoryNote.upsert({
-    where: { guildId_userId_key: { guildId, userId, key: "_prompt_card" } },
-    create: { guildId, userId, key: "_prompt_card", value: content, source: "user_prompt_card", active: true },
-    update: { value: content, active: true }
-  });
+  if (legacySlot) {
+    await runtime.promptSlots.updateContent(legacySlot.id, content, "Мои инструкции");
+  } else {
+    await runtime.promptSlots.create({
+      guildId,
+      channelId: null,
+      ownerUserId: userId,
+      ownerLevel: relLevel,
+      title: "Мои инструкции",
+      content,
+      trigger: null
+    });
+  }
+  await runtime.prisma.userMemoryNote.deleteMany({ where: { guildId, userId, key: "_prompt_card" } }).catch(() => undefined);
 
-  await interaction.reply({ content: `✅ Инструкции сохранены (${content.split("\n").filter(Boolean).length} строк).`, flags: MessageFlags.Ephemeral });
+  await interaction.reply({
+    content: `✅ Инструкции перенесены в prompt-слот «Мои инструкции» (${content.split("\n").filter(Boolean).length} строк). Активируй через «хори вспомни».`,
+    flags: MessageFlags.Ephemeral
+  });
 }
 
 async function routeButtonInteraction(runtime: BotRuntime, interaction: ButtonInteraction, isOwner: boolean) {
+  if (interaction.customId.startsWith("SLOT:")) {
+    await handleSlotButtonInteraction(runtime, interaction);
+    return;
+  }
+
   if (interaction.customId.startsWith("PROMPT_CARD:edit:")) {
     await handlePromptCardEditButton(runtime, interaction);
     return;
@@ -2183,6 +2445,19 @@ async function handleHoriPanelAction(
   }
 
   const action = interaction.customId.slice(`${HORI_ACTION_PREFIX}:`.length);
+
+  if (action.startsWith("channels_set:")) {
+    const [, channelId, rawMode] = action.split(":");
+    if (!channelId || (rawMode !== "full" && rawMode !== "silent" && rawMode !== "off")) {
+      await interaction.reply({ content: "Неизвестный режим канала.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await runtime.runtimeConfig.setChannelAccess(interaction.guildId, channelId, rawMode);
+    await interaction.update(
+      await buildChannelMatrixDetailResponse(runtime, interaction.guildId, channelId, isOwner, isModerator)
+    );
+    return;
+  }
 
   if (action === "state_panel") {
     if (!isOwner) {
@@ -2423,6 +2698,22 @@ async function handleHoriPanelAction(
     return;
   }
 
+  if (action === "channels_matrix") {
+    await interaction.update(
+      await buildChannelMatrixDetailResponse(runtime, interaction.guildId, interaction.channelId, isOwner, isModerator)
+    );
+    return;
+  }
+
+  if (action === "cores_override") {
+    if (!isOwner && !isModerator) {
+      await interaction.reply({ content: "Mood override только для модеров.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.showModal(buildCoreOverrideModal());
+    return;
+  }
+
   const content = await resolveHoriActionContent(runtime, interaction, action, isOwner, isModerator);
   const tab = inferTabForHoriAction(action);
   await interaction.update(buildHoriPanelDetailResponse(tab, isOwner, isModerator, horiActionTitle(action), content));
@@ -2639,28 +2930,13 @@ async function resolveHoriActionContent(
       return buildChannelMatrix(runtime, guildId);
     case "channels_set_full":
       if (!isModerator && !isOwner) return "Это только для модеров.";
-      return runtime.slashAdmin.channelConfig(guildId, interaction.channelId, {
-        allowBotReplies: true,
-        allowInterjections: true,
-        isMuted: false,
-        topicInterestTags: null
-      });
+      return runtime.runtimeConfig.setChannelAccess(guildId, interaction.channelId, "full");
     case "channels_set_silent":
       if (!isModerator && !isOwner) return "Это только для модеров.";
-      return runtime.slashAdmin.channelConfig(guildId, interaction.channelId, {
-        allowBotReplies: false,
-        allowInterjections: false,
-        isMuted: true,
-        topicInterestTags: null
-      });
+      return runtime.runtimeConfig.setChannelAccess(guildId, interaction.channelId, "silent");
     case "channels_set_off":
       if (!isModerator && !isOwner) return "Это только для модеров.";
-      return runtime.slashAdmin.channelConfig(guildId, interaction.channelId, {
-        allowBotReplies: false,
-        allowInterjections: false,
-        isMuted: false,
-        topicInterestTags: null
-      });
+      return runtime.runtimeConfig.setChannelAccess(guildId, interaction.channelId, "off");
     case "queue_phrase_pools":
       return buildV6QueueStatus(runtime);
     case "queue_reset_pools":
@@ -2693,6 +2969,10 @@ async function resolveHoriActionContent(
     case "audit_slots":
       if (!isModerator && !isOwner) return "Аудит слотов только для модеров.";
       return buildV6RecallStatus(runtime, guildId, interaction.channelId);
+    case "cores_overrides_list": {
+      if (!isOwner && !isModerator) return "Список override только для модеров.";
+      return buildCoreOverridesList(runtime, guildId);
+    }
     default:
       return "Неизвестная кнопка панели.";
   }
@@ -2893,6 +3173,8 @@ function horiActionTitle(action: string) {
     cores_evaluator: "Evaluator",
     cores_aggression_checker: "Aggression checker",
     cores_open_panel: "Редактор кор",
+    cores_override: "Mood override",
+    cores_overrides_list: "Список overrides",
     people_self: "Моё отношение",
     people_lookup: "Найти пользователя",
     people_set_state: "Поставить уровень",
@@ -3728,6 +4010,7 @@ async function buildChannelPolicyStatus(runtime: BotRuntime, guildId: string, ch
   return [
     `📡 **Channel policy** · <#${channelId}>`,
     "",
+    `🧭 Access mode: **${policy.accessMode ?? "full"}**`,
     `${policy.allowBotReplies ? "🟢" : "🔴"} Ответы бота: **${policy.allowBotReplies ? "да" : "нет"}**`,
     `${policy.allowInterjections ? "🟢" : "🔴"} Интерджекции: **${policy.allowInterjections ? "да" : "нет"}**`,
     `${policy.isMuted ? "🔇" : "🔊"} Muted: **${policy.isMuted ? "да" : "нет"}**`,
@@ -3736,22 +4019,155 @@ async function buildChannelPolicyStatus(runtime: BotRuntime, guildId: string, ch
   ].join("\n");
 }
 
+function resolveStoredChannelMatrixMode(config?: {
+  accessMode?: string | null;
+  allowBotReplies: boolean;
+  isMuted: boolean;
+} | null): "full" | "silent" | "off" {
+  if (config?.accessMode === "full" || config?.accessMode === "silent" || config?.accessMode === "off") {
+    return config.accessMode;
+  }
+  if (config?.isMuted) {
+    return "silent";
+  }
+  if (config && !config.allowBotReplies) {
+    return "silent";
+  }
+  return "full";
+}
+
+async function loadChannelMatrixEntries(runtime: BotRuntime, guildId: string) {
+  const configs = await runtime.prisma.channelConfig.findMany({
+    where: { guildId },
+    orderBy: [{ channelName: "asc" }, { channelId: "asc" }]
+  }).catch(() => [] as Array<{
+    channelId: string;
+    channelName: string | null;
+    accessMode?: string | null;
+    allowBotReplies: boolean;
+    isMuted: boolean;
+  }>);
+
+  const configsById = new Map(configs.map((cfg) => [cfg.channelId, cfg]));
+  const guild = await runtime.client.guilds.fetch(guildId).catch(() => null);
+  const fetchedChannels = guild ? await guild.channels.fetch().catch(() => null) : null;
+  const entries: Array<{ channelId: string; channelName: string | null; mode: "full" | "silent" | "off" }> = [];
+
+  for (const channel of fetchedChannels?.values() ?? []) {
+    if (!channel) continue;
+    const maybeChannel = channel as unknown as {
+      id: string;
+      name?: string;
+      isTextBased?: () => boolean;
+      isThread?: () => boolean;
+    };
+    const isTextBased = typeof maybeChannel.isTextBased === "function" && maybeChannel.isTextBased();
+    const isThread = typeof maybeChannel.isThread === "function" && maybeChannel.isThread();
+    if (!isTextBased || isThread) continue;
+
+    const stored = configsById.get(maybeChannel.id) ?? null;
+    entries.push({
+      channelId: maybeChannel.id,
+      channelName: maybeChannel.name?.trim() || stored?.channelName || null,
+      mode: resolveStoredChannelMatrixMode(stored)
+    });
+    configsById.delete(maybeChannel.id);
+  }
+
+  for (const stored of configsById.values()) {
+    entries.push({
+      channelId: stored.channelId,
+      channelName: stored.channelName,
+      mode: resolveStoredChannelMatrixMode(stored)
+    });
+  }
+
+  return entries.sort((left, right) => {
+    const leftKey = (left.channelName || left.channelId).toLowerCase();
+    const rightKey = (right.channelName || right.channelId).toLowerCase();
+    return leftKey.localeCompare(rightKey, "ru");
+  });
+}
+
 async function buildChannelMatrix(runtime: BotRuntime, guildId: string) {
   try {
-    const configs = await runtime.prisma.channelConfig.findMany({
-      where: { guildId },
-      orderBy: { channelId: "asc" },
-      take: 20
+    const entries = await loadChannelMatrixEntries(runtime, guildId);
+    if (!entries.length) return "📡 **Channel matrix** — нет доступных каналов сервера.";
+    const lines = entries.map((entry) => {
+      const label = entry.mode === "full" ? "🟢 full" : entry.mode === "silent" ? "🟡 silent" : "🔴 off";
+      const name = entry.channelName?.trim() ? `#${entry.channelName}` : `<#${entry.channelId}>`;
+      return `${name} ${label}`;
     });
-    if (!configs.length) return "📡 **Channel matrix** — нет сохранённых настроек каналов.";
-    const lines = configs.map((cfg) => {
-      const mode = !cfg.allowBotReplies ? "🔴 off" : cfg.isMuted ? "🟡 silent" : "🟢 full";
-      return `<#${cfg.channelId}> ${mode}`;
-    });
-    return [`📡 **Channel matrix** (${configs.length} каналов)`, ...lines].join("\n");
+    return [`📡 **Channel matrix** (${entries.length} каналов)`, ...lines].join("\n");
   } catch (error) {
     return `Не удалось получить матрицу каналов: ${asErrorMessage(error)}`;
   }
+}
+
+async function buildChannelMatrixDetailResponse(
+  runtime: BotRuntime,
+  guildId: string,
+  preferredChannelId: string,
+  isOwner: boolean,
+  isModerator: boolean
+) {
+  const entries = await loadChannelMatrixEntries(runtime, guildId);
+
+  const base = buildHoriPanelDetailResponse("channels", isOwner, isModerator, "Матрица каналов", await buildChannelMatrix(runtime, guildId));
+  if (!entries.length) {
+    return base;
+  }
+
+  const selectableEntries = entries.slice(0, 25);
+  const selected = selectableEntries.find((entry) => entry.channelId === preferredChannelId)
+    ?? entries.find((entry) => entry.channelId === preferredChannelId)
+    ?? selectableEntries[0];
+  if (!selected) {
+    return base;
+  }
+
+  const selectedPolicy = await runtime.runtimeConfig.getChannelPolicy(guildId, selected.channelId);
+  const selectedLabel = selected.channelName?.trim() ? `#${selected.channelName}` : `<#${selected.channelId}>`;
+  const selectRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`${HORI_ACTION_PREFIX}:channels_pick`)
+      .setPlaceholder("Выбери канал")
+      .addOptions(
+        ...selectableEntries.map((entry) => ({
+          label: (entry.channelName?.trim() || entry.channelId).slice(0, 100),
+          value: entry.channelId,
+          description: entry.mode === "full" ? "full" : entry.mode === "silent" ? "silent" : "off",
+          default: entry.channelId === selected.channelId
+        }))
+      )
+  );
+  const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${HORI_ACTION_PREFIX}:channels_set:${selected.channelId}:full`)
+      .setLabel("Full")
+      .setEmoji("🟢")
+      .setStyle(selectedPolicy.accessMode === "full" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`${HORI_ACTION_PREFIX}:channels_set:${selected.channelId}:silent`)
+      .setLabel("Silent")
+      .setEmoji("🟡")
+      .setStyle(selectedPolicy.accessMode === "silent" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`${HORI_ACTION_PREFIX}:channels_set:${selected.channelId}:off`)
+      .setLabel("Off")
+      .setEmoji("🔴")
+      .setStyle(selectedPolicy.accessMode === "off" ? ButtonStyle.Danger : ButtonStyle.Secondary)
+  );
+
+  return {
+    ...base,
+    embeds: base.embeds.map((embed, index) => index === 0
+      ? EmbedBuilder.from(embed).setDescription(
+          `${embed.data.description ?? ""}\n\n**Выбран канал:** ${selectedLabel}\n**Режим:** ${selectedPolicy.accessMode ?? "full"}`
+        )
+      : embed),
+    components: [...base.components, selectRow, buttons]
+  };
 }
 
 async function buildStyleStatus(runtime: BotRuntime, guildId: string) {
@@ -4308,6 +4724,62 @@ async function buildV6RecallStatus(runtime: BotRuntime, guildId: string, channel
   } catch (error) {
     return `Не удалось получить recall: ${asErrorMessage(error)}`;
   }
+}
+
+function buildCoreOverrideModal(): ModalBuilder {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:core-override`)
+    .setTitle("Mood Override — подмена кора");
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("userId")
+        .setLabel("Discord User ID")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(30)
+        .setPlaceholder("123456789012345678")
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("coreId")
+        .setLabel("Core ID")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(30)
+        .setPlaceholder("core_annoyed | core_base | core_warm | core_close | core_teasing | core_sweet | core_serious")
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("duration")
+        .setLabel("Длительность: 1h / 6h / 24h / forever")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setMaxLength(10)
+        .setPlaceholder("24h")
+        .setValue("24h")
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("reason")
+        .setLabel("Причина (необязательно)")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setMaxLength(200)
+    )
+  );
+  return modal;
+}
+
+async function buildCoreOverridesList(runtime: BotRuntime, guildId: string): Promise<string> {
+  const overrides = await runtime.runtimeConfig.listCoreOverrides(guildId).catch(() => []);
+  if (!overrides.length) return "**Mood overrides** — нет активных.";
+  const lines = [`**Mood Overrides (${overrides.length})**:`];
+  for (const o of overrides) {
+    const exp = o.expiresAt ? `до ${o.expiresAt.toISOString().slice(0, 16)} UTC` : "бессрочно";
+    lines.push(`• <@${o.userId}> → \`${o.coreId}\` ${exp}${o.reason ? ` — ${o.reason}` : ""}`);
+  }
+  return lines.join("\n");
 }
 
 async function buildV6SigilsStatus(runtime: BotRuntime) {

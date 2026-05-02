@@ -17,7 +17,8 @@ const defaultBehaviorFeatureFlags: FeatureFlags = {
   linkUnderstandingEnabled: true,
   naturalMessageSplittingEnabled: true,
   selectiveEngagementEnabled: true,
-  selfReflectionLessonsEnabled: true
+  selfReflectionLessonsEnabled: true,
+  mediaReactionsEnabled: true
 };
 
 const fallbackMessage: MessageEnvelope = {

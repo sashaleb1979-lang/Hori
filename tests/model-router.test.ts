@@ -8,7 +8,8 @@ describe("ModelRouter", () => {
     const env = loadEnv({
       DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
       REDIS_URL: "redis://localhost:6379",
-      OLLAMA_BASE_URL: "http://localhost:11434"
+      OLLAMA_BASE_URL: "http://localhost:11434",
+      LLM_PROVIDER: "ollama"
     });
     const router = new ModelRouter(env);
 
@@ -20,7 +21,8 @@ describe("ModelRouter", () => {
     const env = loadEnv({
       DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
       REDIS_URL: "redis://localhost:6379",
-      OLLAMA_BASE_URL: "http://localhost:11434"
+      OLLAMA_BASE_URL: "http://localhost:11434",
+      LLM_PROVIDER: "ollama"
     });
     const router = new ModelRouter(env);
     const fastProfile = router.pickProfile("chat");

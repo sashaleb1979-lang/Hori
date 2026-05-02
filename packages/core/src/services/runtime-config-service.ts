@@ -44,7 +44,8 @@ export const FEATURE_KEY_MAP = {
   link_understanding_enabled: "linkUnderstandingEnabled",
   natural_message_splitting_enabled: "naturalMessageSplittingEnabled",
   selective_engagement_enabled: "selectiveEngagementEnabled",
-  self_reflection_lessons_enabled: "selfReflectionLessonsEnabled"
+  self_reflection_lessons_enabled: "selfReflectionLessonsEnabled",
+  media_reactions_enabled: "mediaReactionsEnabled"
 } as const satisfies Record<string, keyof FeatureFlags>;
 
 export const POWER_PROFILE_SETTING_KEY = "power.profile";
@@ -156,6 +157,27 @@ const RUNTIME_OVERRIDE_DEFINITIONS: Record<string, { field: keyof Omit<Effective
 };
 
 export type ChannelAccessMode = "full" | "silent" | "off";
+
+function isChannelAccessMode(value: unknown): value is ChannelAccessMode {
+  return value === "full" || value === "silent" || value === "off";
+}
+
+function resolveChannelAccessMode(config: {
+  accessMode?: string | null;
+  isMuted?: boolean | null;
+  allowBotReplies?: boolean | null;
+} | null | undefined): ChannelAccessMode {
+  if (isChannelAccessMode(config?.accessMode)) {
+    return config.accessMode;
+  }
+  if (config?.isMuted) {
+    return "silent";
+  }
+  if (config && config.allowBotReplies === false) {
+    return "silent";
+  }
+  return "full";
+}
 
 export interface EffectiveChannelPolicy {
   allowBotReplies: boolean;
@@ -828,6 +850,41 @@ export class RuntimeConfigService {
     return [];
   }
 
+  async setChannelAccess(guildId: string, channelId: string, mode: ChannelAccessMode) {
+    const allowBotReplies = mode === "full";
+    const allowInterjections = mode === "full";
+    const isMuted = mode === "off";
+
+    await this.prisma.channelConfig.upsert({
+      where: {
+        guildId_channelId: { guildId, channelId }
+      },
+      update: {
+        accessMode: mode,
+        allowBotReplies,
+        allowInterjections,
+        isMuted
+      },
+      create: {
+        guildId,
+        channelId,
+        accessMode: mode,
+        allowBotReplies,
+        allowInterjections,
+        isMuted
+      }
+    });
+
+    this.invalidate(guildId, channelId);
+    return [
+      `Настройки канала ${channelId} обновлены.`,
+      `accessMode=${mode}`,
+      `allowBotReplies=${allowBotReplies}`,
+      `allowInterjections=${allowInterjections}`,
+      `isMuted=${isMuted}`
+    ].join("\n");
+  }
+
   async getGuildSettings(guildId: string): Promise<PersonaSettings> {
     const guild = await this.prisma.guild.findUnique({
       where: { id: guildId }
@@ -979,6 +1036,58 @@ export class RuntimeConfigService {
     });
   }
 
+  // ─── Mood Override (CoreId override per user) ───────────────────────────────
+
+  private get coreOverrides() {
+    return (this.prisma as unknown as {
+      horiCoreOverride: {
+        findUnique(args: unknown): Promise<{ id: string; guildId: string; userId: string; coreId: string; expiresAt: Date | null; reason: string | null; by: string } | null>;
+        upsert(args: unknown): Promise<{ id: string; guildId: string; userId: string; coreId: string; expiresAt: Date | null; reason: string | null; by: string }>;
+        delete(args: unknown): Promise<unknown>;
+        findMany(args: unknown): Promise<Array<{ id: string; guildId: string; userId: string; coreId: string; expiresAt: Date | null; reason: string | null; by: string; createdAt: Date }>>;
+      };
+    }).horiCoreOverride;
+  }
+
+  /** Получить активный core override для пользователя (null если нет или истёк). */
+  async getCoreOverride(guildId: string, userId: string): Promise<{ coreId: string; expiresAt: Date | null } | null> {
+    const row = await this.coreOverrides.findUnique({ where: { guildId_userId: { guildId, userId } } }).catch(() => null);
+    if (!row) return null;
+    if (row.expiresAt && row.expiresAt < new Date()) {
+      // Истёк — удаляем без ожидания
+      void this.coreOverrides.delete({ where: { guildId_userId: { guildId, userId } } }).catch(() => undefined);
+      return null;
+    }
+    return { coreId: row.coreId, expiresAt: row.expiresAt };
+  }
+
+  /** Выставить или обновить core override для пользователя. */
+  async setCoreOverride(guildId: string, userId: string, coreId: string, durationMs: number | null, reason: string | null, by: string): Promise<void> {
+    const expiresAt = durationMs != null ? new Date(Date.now() + durationMs) : null;
+    await this.prisma.user.upsert({
+      where: { id: userId },
+      update: {},
+      create: { id: userId, username: null, globalName: null, isBot: false }
+    }).catch(() => undefined);
+    await this.coreOverrides.upsert({
+      where: { guildId_userId: { guildId, userId } },
+      update: { coreId, expiresAt, reason, by },
+      create: { guildId, userId, coreId, expiresAt, reason: reason ?? null, by }
+    });
+  }
+
+  /** Удалить core override для пользователя. */
+  async clearCoreOverride(guildId: string, userId: string): Promise<void> {
+    await this.coreOverrides.delete({ where: { guildId_userId: { guildId, userId } } }).catch(() => undefined);
+  }
+
+  /** Список всех активных core overrides на сервере. */
+  async listCoreOverrides(guildId: string): Promise<Array<{ userId: string; coreId: string; expiresAt: Date | null; reason: string | null; by: string; createdAt: Date }>> {
+    const now = new Date();
+    const rows = await this.coreOverrides.findMany({ where: { guildId } }).catch(() => [] as never[]);
+    return rows.filter((r) => !r.expiresAt || r.expiresAt > now);
+  }
+
   private async recordRuntimeSettingAudit(entry: {
     key: string;
     guildId: string | null;
@@ -1019,18 +1128,7 @@ export class RuntimeConfigService {
       }
     });
 
-    // V5.1 Phase C: резолвим accessMode из явного поля, или из legacy-флагов.
-    const rawAccessMode = (config as { accessMode?: string | null } | null)?.accessMode ?? null;
-    let accessMode: ChannelAccessMode;
-    if (rawAccessMode === "full" || rawAccessMode === "silent" || rawAccessMode === "off") {
-      accessMode = rawAccessMode;
-    } else if (config?.isMuted) {
-      accessMode = "off";
-    } else if (config && !config.allowBotReplies) {
-      accessMode = "silent";
-    } else {
-      accessMode = "full";
-    }
+    const accessMode = resolveChannelAccessMode(config);
 
     return {
       allowBotReplies: accessMode === "full" && (config?.allowBotReplies ?? true),

@@ -9,6 +9,7 @@ import type { BotRuntime } from "../bootstrap";
 import { enqueueBackgroundJobs } from "./background-jobs";
 import { getOwnerLockdownState, isBotOwner } from "./owner-lockdown";
 import { sendReply } from "../responders/message-responder";
+import { loadMemeIndexer } from "../runtime/flash-trolling-scheduler";
 
 const intentRouter = new IntentRouter();
 const inboundDebouncers = new Map<string, ReturnType<typeof createChannelDebouncer<PendingInvocation>>>();
@@ -361,9 +362,52 @@ async function tryActivateSlotByKeyword(
   );
 }
 
+const LEGACY_PROMPT_SLOT_TITLE = "Мои инструкции";
+
+async function listOwnerSlotsWithLegacyMigration(
+  runtime: BotRuntime,
+  guildId: string,
+  userId: string,
+  ownerLevel: number
+) {
+  const slots = await runtime.promptSlots.listForOwner(guildId, userId);
+  const legacyNote = await runtime.prisma.userMemoryNote.findUnique({
+    where: { guildId_userId_key: { guildId, userId, key: "_prompt_card" } },
+    select: { value: true }
+  }).catch(() => null);
+  const legacyValue = legacyNote?.value?.trim();
+  const hasLegacySlot = slots.some((slot) => slot.channelId === null && slot.title === LEGACY_PROMPT_SLOT_TITLE);
+
+  if (!legacyValue) {
+    return slots;
+  }
+
+  if (hasLegacySlot) {
+    await runtime.prisma.userMemoryNote.deleteMany({ where: { guildId, userId, key: "_prompt_card" } }).catch(() => undefined);
+    return slots;
+  }
+
+  try {
+    await runtime.promptSlots.create({
+      guildId,
+      channelId: null,
+      ownerUserId: userId,
+      ownerLevel,
+      title: LEGACY_PROMPT_SLOT_TITLE,
+      content: legacyValue,
+      trigger: null
+    });
+    await runtime.prisma.userMemoryNote.deleteMany({ where: { guildId, userId, key: "_prompt_card" } }).catch(() => undefined);
+    return runtime.promptSlots.listForOwner(guildId, userId);
+  } catch (error) {
+    runtime.logger.warn({ guildId, userId, error }, "failed to migrate legacy prompt card into prompt slot");
+    return slots;
+  }
+}
+
 /**
- * Перехватывает "хори запомни" / "хори вспомни" — отправляет кнопку редактора
- * личной карточки инструкций. Возвращает true если обработал.
+ * Обрабатывает "хори запомни" / "хори вспомни" / "хори забудь" через PromptSlotService.
+ * Возвращает true если обработал.
  */
 async function tryHandlePromptCardCommand(
   runtime: BotRuntime,
@@ -371,29 +415,123 @@ async function tryHandlePromptCardCommand(
 ): Promise<boolean> {
   if (!message.inGuild()) return false;
   const text = message.content.trim();
-  if (!/^(?:хори\s+)?(запомни|вспомни)\b/i.test(text)) return false;
+  const match = /^(?:хори\s+)?(запомни|вспомни|забудь)(.*)/i.exec(text);
+  if (!match) return false;
 
-  const existing = await runtime.prisma.userMemoryNote.findUnique({
-    where: { guildId_userId_key: { guildId: message.guildId, userId: message.author.id, key: "_prompt_card" } },
-    select: { value: true }
-  }).catch(() => null);
+  const cmd = match[1].toLowerCase() as "запомни" | "вспомни" | "забудь";
+  const rest = match[2].trim().toLowerCase();
+  const guildId = message.guildId;
+  const userId = message.author.id;
+  const relLevel = await runtime.relationshipService.getLevel(guildId, userId).catch(() => 0);
+  const mySlots = await listOwnerSlotsWithLegacyMigration(runtime, guildId, userId, relLevel);
 
-  const hasCard = Boolean(existing?.value?.trim());
-  const label = hasCard ? "✏️ Редактировать инструкции" : "✏️ Добавить инструкции";
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`PROMPT_CARD:edit:${message.author.id}`)
-      .setLabel(label)
-      .setStyle(ButtonStyle.Secondary)
-  );
+  if (cmd === "запомни") {
+    const limit = runtime.promptSlots.getLimit(relLevel);
+    const rows: ActionRowBuilder<ButtonBuilder>[] = [];
 
-  await message.reply({
-    content: hasCard
-      ? `📋 Твои инструкции сохранены. Нажми чтобы изменить.`
-      : `📋 У тебя нет личных инструкций. Нажми чтобы добавить.`,
-    components: [row]
-  });
-  return true;
+    if (mySlots.length > 0) {
+      const lines = [`🎟️ **Твои слоты (${mySlots.length}/${limit}):**`];
+      for (const s of mySlots.slice(0, 5)) {
+        const now = new Date();
+        const st = s.active
+          ? "✅ активен"
+          : s.cooldownUntil && s.cooldownUntil > now
+          ? `⏳ до ${s.cooldownUntil.toISOString().slice(11, 16)} UTC`
+          : "▾ простаивает";
+        lines.push(`• **${s.title ?? "(без названия)"}** — ${st}`);
+      }
+      if (mySlots.length < limit) {
+        rows.push(
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`SLOT:create:${userId}`)
+              .setLabel("➕ Создать новый слот")
+              .setStyle(ButtonStyle.Primary)
+          )
+        );
+      } else {
+        lines.push(`\n⚠️ Лимит ${limit} слотов исчерпан. Удали слот через «хори забудь» чтобы освободить место.`);
+      }
+      await message.reply({ content: lines.join("\n"), components: rows });
+    } else {
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`SLOT:create:${userId}`)
+          .setLabel("➕ Создать слот")
+          .setStyle(ButtonStyle.Primary)
+      );
+      await message.reply({
+        content: `🎟️ У тебя нет слотов. Создай первый (лимит: ${limit}).`,
+        components: [row]
+      });
+    }
+    return true;
+  }
+
+  if (cmd === "вспомни") {
+    if (!mySlots.length) {
+      await message.reply({ content: "🎟️ У тебя нет слотов. Создай через «хори запомни»." });
+      return true;
+    }
+    const now = new Date();
+    const lines = ["🎟️ **Выбери слот для активации:**"];
+    const buttons: ButtonBuilder[] = [];
+    for (const s of mySlots.slice(0, 5)) {
+      if (s.active) {
+        lines.push(`✅ **${s.title ?? s.id.slice(0, 8)}** — уже активен`);
+      } else if (s.cooldownUntil && s.cooldownUntil > now) {
+        lines.push(`⏳ **${s.title ?? s.id.slice(0, 8)}** — кулдаун до ${s.cooldownUntil.toISOString().slice(11, 16)} UTC`);
+      } else {
+        buttons.push(
+          new ButtonBuilder()
+            .setCustomId(`SLOT:activate:${s.id}`)
+            .setLabel(`▶️ ${(s.title ?? s.id.slice(0, 8)).slice(0, 25)}`)
+            .setStyle(ButtonStyle.Success)
+        );
+      }
+    }
+    const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+    if (buttons.length) {
+      rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...buttons.slice(0, 5)));
+    }
+    await message.reply({ content: lines.join("\n"), components: rows });
+    return true;
+  }
+
+  if (cmd === "забудь") {
+    if (rest === "всё" || rest === "все") {
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`SLOT:deleteAll:${userId}`)
+          .setLabel("🗑️ Удалить все мои слоты")
+          .setStyle(ButtonStyle.Danger)
+      );
+      await message.reply({
+        content: "⚠️ Удалить **все** твои слоты? Это необратимо.",
+        components: [row]
+      });
+      return true;
+    }
+    if (!mySlots.length) {
+      await message.reply({ content: "🎟️ У тебя нет слотов для удаления." });
+      return true;
+    }
+    const lines = ["🗑️ **Выбери слот для удаления:**"];
+    const buttons: ButtonBuilder[] = [];
+    for (const s of mySlots.slice(0, 5)) {
+      buttons.push(
+        new ButtonBuilder()
+          .setCustomId(`SLOT:delete:${s.id}`)
+          .setLabel(`🗑️ ${(s.title ?? s.id.slice(0, 8)).slice(0, 25)}`)
+          .setStyle(ButtonStyle.Danger)
+      );
+    }
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(...buttons.slice(0, 5));
+    await message.reply({ content: lines.join("\n"), components: [row] });
+    return true;
+  }
+
+  return false;
 }
 
 export async function routeMessage(runtime: BotRuntime, message: Message) {
@@ -409,6 +547,12 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
   }
 
   const routingConfig = await runtime.runtimeConfig.getRoutingConfig(message.guildId, message.channelId);
+
+  // Off-gate: канал полностью выключен — ранний возврат без ingest/log.
+  if (routingConfig.channelPolicy.accessMode === "off") {
+    return;
+  }
+
   const botName = routingConfig.guildSettings.botName;
   const botId = runtime.client.user.id;
   const member = message.member ?? (await message.guild.members.fetch(message.author.id));
@@ -636,7 +780,29 @@ async function processInvocation(
     }
 
     const replyText = typeof replyToSend === "string" ? replyToSend : replyToSend.text;
-    const hasMedia = typeof replyToSend !== "string" && Boolean(replyToSend.media);
+    let hasMedia = typeof replyToSend !== "string" && Boolean(replyToSend.media);
+
+    // Volna 7: media reactions — 5% шанс прикрепить мем когда флаг включён и score >= 2.
+    let finalReply: string | BotReplyPayload = replyToSend;
+    if (
+      !hasMedia &&
+      routingConfig.featureFlags.mediaReactionsEnabled &&
+      Math.random() < 0.05
+    ) {
+      const relScore = await runtime.relationshipService
+        .getRelationship(envelope.guildId, envelope.userId)
+        .then((r) => r?.relationshipScore ?? 0)
+        .catch(() => 0);
+      if (relScore >= 2) {
+        const indexer = await loadMemeIndexer().catch(() => null);
+        const meme = indexer?.pickRandom?.() ?? null;
+        if (meme) {
+          finalReply = { text: replyText, media: { filePath: meme.filePath, mediaId: meme.mediaId, type: meme.type } };
+          hasMedia = true;
+        }
+      }
+    }
+
     const microSplitChunks = result.trace.microReaction?.splitChunks;
     const splitPlan = hasMedia
       ? null
@@ -664,7 +830,7 @@ async function processInvocation(
       naturalSplitCooldownByChannel.set(message.channelId, Date.now());
     }
 
-    const deliveredReplies = await sendReply(message, replyToSend, {
+    const deliveredReplies = await sendReply(message, finalReply, {
       naturalChunks: splitPlan?.chunks,
       naturalDelayMs: splitPlan?.delayMs
     });

@@ -76,7 +76,9 @@ export class ChatOrchestrator {
   constructor(private readonly deps: OrchestratorDeps) {}
 
   private relationshipsHardDisabled() {
-    return true;
+    // V7 Phase 2: relationships pipeline включён. Hard-disable снят (план 2026-05 Volna 1).
+    // При необходимости временно отключить — поменять на `return true`.
+    return false;
   }
 
   private getLlmSettings(
@@ -228,11 +230,13 @@ export class ChatOrchestrator {
     // V7: auto-interject confidence gate удалён (context-scoring выпилен).
 
     const corePromptTemplates = await this.deps.runtimeConfig.getCorePromptTemplates(message.guildId);
+    // Волна 5: mood override — ручная подмена кора для юзера.
+    const coreOverride = await this.deps.runtimeConfig.getCoreOverride(message.guildId, message.userId).catch(() => null);
     // Активный prompt-слот для канала, если есть.
     const activePromptSlot = this.deps.promptSlots
       ? await this.deps.promptSlots
           .getActiveSlot(message.guildId, message.channelId)
-          .then((slot) => (slot ? { title: slot.title, content: slot.content } : null))
+          .then((slot) => (slot ? { title: slot.title, content: slot.content, strength: (slot as { strength?: number }).strength ?? 1 } : null))
           .catch(() => null)
       : null;
     const behavior = this.persona.composeBehavior({
@@ -259,19 +263,20 @@ export class ChatOrchestrator {
       isReplyToBot: message.triggerSource === "reply",
       isSelfInitiated: message.triggerSource === "auto_interject",
       contour: contour.contour,
-      sigil: intent.sigil ?? null
+      sigil: intent.sigil ?? null,
+      manualCoreOverride: coreOverride?.coreId ?? null
     });
     const restoredContext = intent.intent === "chat" ? await this.getActiveRestoredContext(message) : null;
     // V7: ACTIVE_CORE — единственный системный prompt. Никаких dynamic guidance блоков.
     const corePrompt = behavior.prompt;
-    // Личные инструкции пользователя (карточка, редактируется через "хори запомни").
-    const userCard = await this.deps.prisma.userMemoryNote.findUnique({
-      where: { guildId_userId_key: { guildId: message.guildId, userId: message.userId, key: "_prompt_card" } },
-      select: { value: true, active: true }
-    }).catch(() => null);
-    const systemPrompt = (userCard?.active && userCard.value.trim())
-      ? `${corePrompt}\n\n[Персональные инструкции от ${message.displayName ?? message.username}]\n${userCard.value}`
-      : corePrompt;
+    // Активный prompt-слот подмешивается после кор-промта (если есть).
+    let systemPrompt = corePrompt;
+    if (activePromptSlot?.content.trim()) {
+      const strength = activePromptSlot.strength ?? 1;
+      const prefix = strength === 2 ? "🎯 Главный фокус: " : strength === 0 ? "(слабая подсказка) " : "";
+      const label = activePromptSlot.title ? `[${activePromptSlot.title}]` : "[Слот]";
+      systemPrompt = `${corePrompt}\n\n${label}\n${prefix}${activePromptSlot.content}`;
+    }
 
     const trace: BotTrace = {
       triggerSource: message.triggerSource,

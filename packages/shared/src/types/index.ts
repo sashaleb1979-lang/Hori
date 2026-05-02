@@ -153,6 +153,7 @@ export interface FeatureFlags {
   naturalMessageSplittingEnabled: boolean;
   selectiveEngagementEnabled: boolean;
   selfReflectionLessonsEnabled: boolean;
+  mediaReactionsEnabled: boolean;
 }
 
 export interface PersonaSettings {

@@ -270,6 +270,8 @@ export interface ComposeBehaviorPromptInput {
   debugOverrides?: PersonaDebugOverrides;
   isDirectMessage?: boolean;
   contour?: "A" | "B" | "C";
+  /** Volna 5: ручная подмена кора (mood override от модератора). CoreId из HoriCoreOverride. */
+  manualCoreOverride?: string | null;
 }
 
 export interface ComposeBehaviorPromptOutput {

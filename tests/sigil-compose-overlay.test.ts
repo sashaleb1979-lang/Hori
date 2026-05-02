@@ -17,7 +17,8 @@ const featureFlags: FeatureFlags = {
   linkUnderstandingEnabled: true,
   naturalMessageSplittingEnabled: true,
   selectiveEngagementEnabled: true,
-  selfReflectionLessonsEnabled: true
+  selfReflectionLessonsEnabled: true,
+  mediaReactionsEnabled: true
 };
 
 const guildSettings: PersonaSettings = {

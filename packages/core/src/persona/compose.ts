@@ -17,6 +17,14 @@ import { coreText, USER_PROMPT_FRAMING, type CoreId } from "./cores";
 import { pickCore } from "./relationship-mapping";
 import type { ComposeBehaviorPromptInput, ComposeBehaviorPromptOutput } from "./types";
 
+const VALID_CORE_IDS: ReadonlyArray<string> = [
+  "core_annoyed", "core_base", "core_warm", "core_close", "core_teasing", "core_sweet", "core_serious"
+];
+
+function isValidCoreId(v: string): boolean {
+  return VALID_CORE_IDS.includes(v);
+}
+
 const DEFAULT_LIMITS: PersonaResponseLimits = {
   maxSentences: 6,
   maxParagraphs: 2,
@@ -113,7 +121,9 @@ function buildTraceStub(
 export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): ComposeBehaviorPromptOutput {
   const value = resolveRelationshipValue(input);
   const moderatorContext = Boolean(input.moderatorOverlay && input.message?.isModerator);
-  const coreId = pickCore(value, { moderatorContext });
+  const coreId: CoreId = (input.manualCoreOverride && isValidCoreId(input.manualCoreOverride))
+    ? input.manualCoreOverride as CoreId
+    : pickCore(value, { moderatorContext });
 
   const coreString = coreText(coreId);
   const limits = DEFAULT_LIMITS;

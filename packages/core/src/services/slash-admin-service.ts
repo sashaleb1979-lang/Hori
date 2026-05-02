@@ -384,12 +384,23 @@ export class SlashAdminService {
     }
   ) {
     const responseLengthOverride = normalizeResponseLengthOverride(input.responseLengthOverride);
+    const hasAccessFields = input.allowBotReplies !== undefined || input.allowInterjections !== undefined || input.isMuted !== undefined;
+    const derivedAccessMode = !hasAccessFields
+      ? undefined
+      : input.isMuted === true
+      ? "off"
+      : input.allowBotReplies === false
+      ? "silent"
+      : input.allowBotReplies === true && input.isMuted === false
+      ? "full"
+      : null;
 
     await this.prisma.channelConfig.upsert({
       where: {
         guildId_channelId: { guildId, channelId }
       },
       update: {
+        accessMode: derivedAccessMode,
         allowBotReplies: input.allowBotReplies ?? undefined,
         allowInterjections: input.allowInterjections ?? undefined,
         isMuted: input.isMuted ?? undefined,
@@ -399,6 +410,7 @@ export class SlashAdminService {
       create: {
         guildId,
         channelId,
+        accessMode: derivedAccessMode ?? undefined,
         allowBotReplies: input.allowBotReplies ?? true,
         allowInterjections: input.allowInterjections ?? false,
         isMuted: input.isMuted ?? false,
@@ -410,6 +422,7 @@ export class SlashAdminService {
     this.runtimeConfig?.invalidate(guildId, channelId);
     return [
       `Настройки канала ${channelId} обновлены.`,
+      `accessMode=${derivedAccessMode ?? (hasAccessFields ? "legacy" : "unchanged")}`,
       `allowBotReplies=${formatOptionalBoolean(input.allowBotReplies)}`,
       `allowInterjections=${formatOptionalBoolean(input.allowInterjections)}`,
       `isMuted=${formatOptionalBoolean(input.isMuted)}`,

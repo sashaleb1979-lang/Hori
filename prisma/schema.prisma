@@ -50,6 +50,7 @@ model Guild {
   restoredContexts   HoriRestoredContext[]
   knowledgeClusters  KnowledgeCluster[]
   promptSlots        HoriPromptSlot[]
+  coreOverrides      HoriCoreOverride[]
 }
 
 model ChannelConfig {
@@ -92,6 +93,7 @@ model User {
   userMemoryCards  HoriUserMemoryCard[]
   restoredContexts HoriRestoredContext[]
   promptSlots      HoriPromptSlot[]
+  coreOverrides    HoriCoreOverride[]
   userDailyAggregates UserDailyAggregate[]
 }
 
@@ -818,25 +820,44 @@ model KnowledgeChunk {
 // ownerLevel — снэпшот уровня отношений владельца (-1..4), используется
 // для разрешения конфликтов между слотами разных пользователей.
 model HoriPromptSlot {
-  id             String    @id @default(cuid())
-  guildId        String
-  channelId      String?   // null = глобальный (на сервер); не-null = только в одном канале
-  ownerUserId    String
-  ownerLevel     Int       @default(0)
-  title          String?
-  content        String    @db.Text
-  trigger        String?   // кодовое слово для авто-активации из чата
-  activatedAt    DateTime?
-  cooldownUntil  DateTime?
-  active         Boolean   @default(false)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  guild          Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
-  owner          User      @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  id                  String    @id @default(cuid())
+  guildId             String
+  channelId           String?   // null = глобальный (на сервер); не-null = только в одном канале
+  ownerUserId         String
+  ownerLevel          Int       @default(0)
+  title               String?
+  content             String    @db.Text
+  trigger             String?   // кодовое слово для авто-активации из чата
+  activatedAt         DateTime?
+  cooldownUntil       DateTime?
+  active              Boolean   @default(false)
+  strength            Int       @default(1)  // 0=слабый, 1=обычный, 2=жёсткий
+  lastDeactivatedAt   DateTime?              // для аудита
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  guild               Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  owner               User      @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
 
   @@index([guildId, channelId, active, activatedAt])
   @@index([guildId, ownerUserId])
   @@index([guildId, trigger])
 }
 
+// Volna 5: Mood override — принудительная подмена кора для конкретного пользователя.
+model HoriCoreOverride {
+  id         String    @id @default(cuid())
+  guildId    String
+  userId     String
+  coreId     String    // CoreId: core_annoyed | core_base | core_warm | core_close | core_teasing | core_sweet | core_serious
+  expiresAt  DateTime? // null = бессрочно
+  reason     String?
+  by         String    // Discord userId того, кто выставил override
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  guild      Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, userId])
+  @@index([guildId, expiresAt])
+}
 

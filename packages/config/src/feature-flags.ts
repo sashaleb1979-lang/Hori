@@ -17,7 +17,8 @@ export function buildFeatureFlags(env: AppEnv): FeatureFlags {
     linkUnderstandingEnabled: env.FEATURE_LINK_UNDERSTANDING_ENABLED,
     naturalMessageSplittingEnabled: env.FEATURE_NATURAL_MESSAGE_SPLITTING_ENABLED,
     selectiveEngagementEnabled: env.FEATURE_SELECTIVE_ENGAGEMENT_ENABLED,
-    selfReflectionLessonsEnabled: env.FEATURE_SELF_REFLECTION_LESSONS_ENABLED
+    selfReflectionLessonsEnabled: env.FEATURE_SELF_REFLECTION_LESSONS_ENABLED,
+    mediaReactionsEnabled: env.FEATURE_MEDIA_REACTIONS_ENABLED ?? true
   };
 }
 

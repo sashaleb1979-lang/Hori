@@ -14,11 +14,11 @@ describe("V6 Item 16: queue phrase pool sizes", () => {
   it("followup.warm has at least 30 phrases", () => {
     expect(DEFAULT_QUEUE_PHRASE_POOLS.followup.warm.length).toBeGreaterThanOrEqual(30);
   });
-  it("followup.neutral has at least 15 phrases", () => {
-    expect(DEFAULT_QUEUE_PHRASE_POOLS.followup.neutral.length).toBeGreaterThanOrEqual(15);
+  it("followup.neutral has at least 30 phrases", () => {
+    expect(DEFAULT_QUEUE_PHRASE_POOLS.followup.neutral.length).toBeGreaterThanOrEqual(30);
   });
-  it("followup.cold has at least 8 phrases", () => {
-    expect(DEFAULT_QUEUE_PHRASE_POOLS.followup.cold.length).toBeGreaterThanOrEqual(8);
+  it("followup.cold has at least 30 phrases", () => {
+    expect(DEFAULT_QUEUE_PHRASE_POOLS.followup.cold.length).toBeGreaterThanOrEqual(30);
   });
   it("no duplicate phrases inside any pool", () => {
     for (const tier of [DEFAULT_QUEUE_PHRASE_POOLS.initial, DEFAULT_QUEUE_PHRASE_POOLS.followup]) {

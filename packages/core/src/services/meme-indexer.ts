@@ -102,4 +102,9 @@ export class MemeIndexer {
       messageKind: collect("messageKindTags")
     };
   }
+
+  /** Случайный мем из всего каталога (без фильтров). */
+  pickRandom(): MemeCatalogItem | null {
+    return this.pick({});
+  }
 }

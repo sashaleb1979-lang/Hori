@@ -121,4 +121,77 @@ describe("V6 Phase H: RuntimeConfigService channel access persistence", () => {
       where: { key: CHANNEL_ACCESS_SETTING_KEY }
     }));
   });
+
+  it("setChannelAccess persists explicit full/silent/off modes", async () => {
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      runtimeSetting: { findMany: vi.fn().mockResolvedValue([]) },
+      channelConfig: {
+        upsert,
+        findUnique: vi.fn()
+      }
+    } as unknown as AppPrismaClient;
+    const svc = new RuntimeConfigService(prisma, makeEnv());
+
+    await svc.setChannelAccess("guild-1", "channel-1", "silent");
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { guildId_channelId: { guildId: "guild-1", channelId: "channel-1" } },
+      update: expect.objectContaining({
+        accessMode: "silent",
+        allowBotReplies: false,
+        allowInterjections: false,
+        isMuted: false
+      })
+    }));
+  });
+
+  it("getChannelPolicy respects explicit accessMode semantics", async () => {
+    const prisma = {
+      runtimeSetting: { findMany: vi.fn().mockResolvedValue([]) },
+      channelConfig: {
+        findUnique: vi.fn().mockResolvedValue({
+          guildId: "guild-1",
+          channelId: "channel-1",
+          accessMode: "off",
+          allowBotReplies: true,
+          allowInterjections: true,
+          isMuted: false,
+          topicInterestTags: []
+        })
+      }
+    } as unknown as AppPrismaClient;
+    const svc = new RuntimeConfigService(prisma, makeEnv());
+
+    await expect(svc.getChannelPolicy("guild-1", "channel-1")).resolves.toEqual(expect.objectContaining({
+      accessMode: "off",
+      allowBotReplies: false,
+      allowInterjections: false,
+      isMuted: true
+    }));
+  });
+
+  it("legacy isMuted rows are treated as silent, not off", async () => {
+    const prisma = {
+      runtimeSetting: { findMany: vi.fn().mockResolvedValue([]) },
+      channelConfig: {
+        findUnique: vi.fn().mockResolvedValue({
+          guildId: "guild-1",
+          channelId: "channel-1",
+          accessMode: null,
+          allowBotReplies: true,
+          allowInterjections: false,
+          isMuted: true,
+          topicInterestTags: []
+        })
+      }
+    } as unknown as AppPrismaClient;
+    const svc = new RuntimeConfigService(prisma, makeEnv());
+
+    await expect(svc.getChannelPolicy("guild-1", "channel-1")).resolves.toEqual(expect.objectContaining({
+      accessMode: "silent",
+      allowBotReplies: false,
+      allowInterjections: false,
+      isMuted: true
+    }));
+  });
 });
