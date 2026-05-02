@@ -131,8 +131,6 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
   const prompt = coreString;
   const staticPrefix = coreString;
 
-  const turnInstruction = "Ответь коротко и прямо. Держись контекста последних сообщений.";
-
   return {
     prompt,
     staticPrefix,
@@ -141,8 +139,6 @@ export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): Compos
     assembly: {
       commonCore: coreString,
       sigilOverlayBlock: "",
-      relationshipTail: "",
-      turnInstruction,
       relationshipState: relationshipStateFromCore(coreId)
     }
   };

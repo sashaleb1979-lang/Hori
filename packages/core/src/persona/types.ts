@@ -283,8 +283,6 @@ export interface ComposeBehaviorPromptOutput {
     commonCore: string;
     /** V6 Item 12: sigil-overlay (?/!/*), вставляется между common core и relationship tail. */
     sigilOverlayBlock: string;
-    relationshipTail: string;
-    turnInstruction: string;
     relationshipState: RelationshipState;
   };
 }

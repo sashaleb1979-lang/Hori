@@ -52,8 +52,8 @@
 3. `/hori power`
 4. `/hori ai-url`
 5. `/hori lockdown`
-6. `/hori dossier`
-7. `/hori import`
+6. `/hori profile user:@user dossier:true`
+7. `/hori import mode:history|knowledge`
 
 ## Как Открыть Панель
 

@@ -475,12 +475,11 @@ export class ChatOrchestrator {
     behavior: ReturnType<PersonaService["composeBehavior"]>,
     restoredContext?: string | null
   ) {
+    const stablePrefix = behavior.staticPrefix.trim() || behavior.assembly.commonCore;
+
     return [
-      behavior.assembly.commonCore,
-      behavior.assembly.relationshipTail,
-      restoredContext?.trim() ? restoredContext.trim() : null,
-      `Turn instruction:\n${behavior.assembly.turnInstruction}`,
-      "Сейчас идёт лента сообщений из Discord-чата. Ответь на последнее сообщение пользователя."
+      stablePrefix,
+      restoredContext?.trim() ? restoredContext.trim() : null
     ]
       .filter(Boolean)
       .join("\n\n");

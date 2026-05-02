@@ -37,9 +37,8 @@ export class SlashAdminService {
     return [
       "Owner master panel: `/hori panel`.",
       "Частые ветки: `/hori profile`, `/hori search`, `/hori memory`, `/hori channel`, `/hori mood`, `/hori queue`, `/hori album`.",
-      "Owner: `/hori state`, `/hori ai-status`, `/hori relationship`, `/hori power`, `/hori lockdown`, `/hori ai-url`, `/hori import`.",
-      "Owner: `/hori state`, `/hori ai-status`, `/hori relationship`, `/hori runtime`, `/hori aggression`, `/hori power`, `/hori lockdown`, `/hori ai-url`, `/hori import`.",
-      "Admin: `/hori memory-cards` для просмотра и удаления user memory cards.",
+      "Owner: `/hori state`, `/hori ai-status`, `/hori relationship`, `/hori runtime`, `/hori aggression`, `/hori power`, `/hori lockdown`, `/hori ai-url`, `/hori import mode:history|knowledge`.",
+      "Admin/mod: `/hori memory-cards` и `/hori knowledge` для memory cards и knowledge clusters.",
       "Legacy `/bot-*` команды скрыты из регистрации по умолчанию; их можно вернуть флагом `DISCORD_REGISTER_LEGACY_COMMANDS=true`."
     ].join("\n");
   }

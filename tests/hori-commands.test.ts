@@ -23,15 +23,18 @@ describe("hori command registration", () => {
   it("marks /hori panel as owner-only and exposes channel response-length override", () => {
     const definitions = getSlashCommandDefinitions();
     const horiCommand = definitions[0];
-    const dossier = horiCommand?.options?.find((option) => option.name === "dossier");
     const panel = horiCommand?.options?.find((option) => option.name === "panel");
     const channel = horiCommand?.options?.find((option) => option.name === "channel");
+    const profile = horiCommand?.options?.find((option) => option.name === "profile");
+    const dossierOption = profile && "options" in profile
+      ? profile.options?.find((option) => option.name === "dossier")
+      : null;
     const responseLength = channel && "options" in channel
       ? channel.options?.find((option) => option.name === "response-length")
       : null;
 
     expect(panel?.description).toContain("Owner");
-    expect(dossier?.description).toContain("Owner");
+    expect(dossierOption?.description).toContain("Owner");
     expect(responseLength && "choices" in responseLength ? responseLength.choices?.map((choice) => choice.value) : []).toEqual([
       "short",
       "medium",
@@ -43,6 +46,7 @@ describe("hori command registration", () => {
   it("registers the V5 admin subcommands and manual relationship state control", () => {
     const definitions = getSlashCommandDefinitions();
     const horiCommand = definitions[0];
+    const importCommand = horiCommand?.options?.find((option) => option.name === "import");
     const runtime = horiCommand?.options?.find((option) => option.name === "runtime");
     const aggression = horiCommand?.options?.find((option) => option.name === "aggression");
     const memoryCards = horiCommand?.options?.find((option) => option.name === "memory-cards");
@@ -50,10 +54,14 @@ describe("hori command registration", () => {
     const relationshipState = relationship && "options" in relationship
       ? relationship.options?.find((option) => option.name === "relationship-state")
       : null;
+    const importMode = importCommand && "options" in importCommand
+      ? importCommand.options?.find((option) => option.name === "mode")
+      : null;
 
     expect(runtime?.description).toContain("V5");
     expect(aggression?.description).toContain("aggression");
     expect(memoryCards?.description).toContain("memory cards");
     expect(relationshipState && "choices" in relationshipState ? relationshipState.choices?.map((choice) => choice.value) : []).toContain("sweet");
+    expect(importMode && "choices" in importMode ? importMode.choices?.map((choice) => choice.value) : []).toEqual(["history", "knowledge"]);
   });
 });

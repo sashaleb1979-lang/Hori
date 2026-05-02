@@ -16,6 +16,7 @@ export * from "./services/runtime-config-service";
 export * from "./services/slash-admin-service";
 export * from "./services/knowledge-service";
 export * from "./services/channel-access-service";
+export * from "./knowledge/import-format";
 
 // --- Brain (V7: emotion/conflict/response-budget pipeline удалён) ---
 export * from "./brain/activation-policy";

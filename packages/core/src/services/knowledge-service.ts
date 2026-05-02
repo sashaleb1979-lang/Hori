@@ -95,6 +95,7 @@ export class KnowledgeService {
   }): Promise<KnowledgeClusterDescriptor> {
     const trigger = normalizeTrigger(input.trigger ?? "?");
     const code = normalizeCode(input.code);
+    await this.assertEnabledTriggerAvailable(input.guildId, trigger);
     const row = await this.deps.prisma.knowledgeCluster.create({
       data: {
         guildId: input.guildId,
@@ -114,10 +115,17 @@ export class KnowledgeService {
     code: string,
     patch: Partial<Pick<KnowledgeClusterDescriptor, "title" | "description" | "trigger" | "enabled" | "answerModel">>
   ): Promise<KnowledgeClusterDescriptor> {
+    const current = await this.requireCluster(guildId, code);
+    const nextTrigger = patch.trigger !== undefined ? normalizeTrigger(patch.trigger) : current.trigger;
+    const nextEnabled = patch.enabled !== undefined ? patch.enabled : current.enabled;
+    if (nextEnabled) {
+      await this.assertEnabledTriggerAvailable(guildId, nextTrigger, current.id);
+    }
+
     const data: Record<string, unknown> = {};
     if (patch.title !== undefined) data.title = patch.title.trim();
     if (patch.description !== undefined) data.description = patch.description?.trim() || null;
-    if (patch.trigger !== undefined) data.trigger = normalizeTrigger(patch.trigger);
+    if (patch.trigger !== undefined) data.trigger = nextTrigger;
     if (patch.enabled !== undefined) data.enabled = patch.enabled;
     if (patch.answerModel !== undefined) data.answerModel = patch.answerModel?.trim() || null;
     const row = await this.deps.prisma.knowledgeCluster.update({
@@ -271,24 +279,31 @@ export class KnowledgeService {
     let vectorRows: KnowledgeChunkRow[] = [];
     try {
       const { vector, dimensions } = await this.deps.embed(trimmed);
-      const literal = toVectorLiteral(vector);
-      vectorRows = await this.deps.prisma.$queryRawUnsafe<KnowledgeChunkRow[]>(
-        `
-          SELECT c.id, c."articleId", c."chunkIndex", c.content, a.title,
-                 (c.embedding <=> $1::vector) AS "sortScore"
-          FROM "KnowledgeChunk" c
-          JOIN "KnowledgeArticle" a ON a.id = c."articleId"
-          WHERE c."clusterId" = $2
-            AND c.embedding IS NOT NULL
-            AND (c.dimensions = $3 OR (c.dimensions IS NULL AND vector_dims(c.embedding) = $3))
-          ORDER BY c.embedding <=> $1::vector
-          LIMIT $4
-        `,
-        literal,
-        cluster.id,
-        dimensions,
-        VECTOR_TOP_K
-      );
+      if (cluster.dimensions !== null && cluster.dimensions !== dimensions) {
+        this.deps.logger?.warn?.(
+          { clusterId: cluster.id, clusterDimensions: cluster.dimensions, queryDimensions: dimensions },
+          "knowledge vector retrieval skipped due to embedding dimension mismatch"
+        );
+      } else {
+        const literal = toVectorLiteral(vector);
+        vectorRows = await this.deps.prisma.$queryRawUnsafe<KnowledgeChunkRow[]>(
+          `
+            SELECT c.id, c."articleId", c."chunkIndex", c.content, a.title,
+                   (c.embedding <=> $1::vector) AS "sortScore"
+            FROM "KnowledgeChunk" c
+            JOIN "KnowledgeArticle" a ON a.id = c."articleId"
+            WHERE c."clusterId" = $2
+              AND c.embedding IS NOT NULL
+              AND (c.dimensions = $3 OR (c.dimensions IS NULL AND vector_dims(c.embedding) = $3))
+            ORDER BY c.embedding <=> $1::vector
+            LIMIT $4
+          `,
+          literal,
+          cluster.id,
+          dimensions,
+          VECTOR_TOP_K
+        );
+      }
     } catch (error) {
       this.deps.logger?.warn?.(
         { clusterId: cluster.id, error: (error as Error).message },
@@ -365,6 +380,28 @@ export class KnowledgeService {
       throw new Error(`Knowledge cluster "${code}" not found for guild ${guildId}`);
     }
     return cluster;
+  }
+
+  private async assertEnabledTriggerAvailable(guildId: string, trigger: string, excludeClusterId?: string): Promise<void> {
+    const existing = await this.deps.prisma.knowledgeCluster.findFirst({
+      where: {
+        guildId,
+        enabled: true,
+        trigger,
+        ...(excludeClusterId ? { id: { not: excludeClusterId } } : {})
+      },
+      select: {
+        id: true,
+        code: true,
+        title: true
+      }
+    });
+
+    if (!existing) {
+      return;
+    }
+
+    throw new Error(`Knowledge trigger "${trigger}" is already used by cluster "${existing.code}" in guild ${guildId}`);
   }
 
   private async lexicalSearch(clusterId: string, question: string, limit: number): Promise<KnowledgeChunkRow[]> {

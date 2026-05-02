@@ -217,9 +217,10 @@ class FlashTrollingScheduler {
 ### 2.8 Knowledge Import (П.28)
 
 В самом конце. Скрипты `scripts/guild-import.ts`, `scripts/import-knowledge.ts` уже есть.
-- Проверить, что они работают.
-- Добавить `/hori import` slash для аплоада JSON через Discord (приложение).
-- Сохранять в `KnowledgeChunk` с эмбеддингами (через `EmbeddingAdapter`).
+- Проверено: `scripts/guild-import.ts` и `scripts/import-knowledge.ts` без текущих type/error проблем.
+- `/hori import` теперь поддерживает `mode=history|knowledge`; knowledge-mode грузит markdown/txt attachment прямо через Discord.
+- Для операторского UX также есть `/hori knowledge import` как короткий путь рядом с CRUD/list/stats.
+- Сохраняется в `KnowledgeChunk` с эмбеддингами через существующий `KnowledgeService` + `EmbeddingAdapter`.
 - Доступ через `*` sigil — отложено.
 
 ---
@@ -338,6 +339,6 @@ class FlashTrollingScheduler {
 - [x] Volna 5: cores editor + mood override + overrides list.
 - [x] Volna 6: channels matrix + off-gate.
 - [x] Volna 7: media reactions on.
-- [ ] Volna 8: knowledge import работает.
+- [x] Volna 8: knowledge import работает.
 
 После каждой волны: `pnpm test` + ручной smoke в dev-сервере + audit-log запись.

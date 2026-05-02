@@ -400,6 +400,14 @@ export class AiRouterClient implements LlmClient {
       reason: "default_chat_primary"
     });
 
+    if (!isComplex) {
+      attempts.push({
+        providerName: "openai",
+        model: this.env.OPENAI_MODEL,
+        reason: "deepseek_unavailable_simple_request"
+      });
+    }
+
     if (isComplex) {
       attempts.push({
         providerName: "gemini",
@@ -431,11 +439,13 @@ export class AiRouterClient implements LlmClient {
       });
     }
 
-    attempts.push({
-      providerName: "openai",
-      model: this.env.OPENAI_MODEL,
-      reason: "final_paid_fallback"
-    });
+    if (isComplex) {
+      attempts.push({
+        providerName: "openai",
+        model: this.env.OPENAI_MODEL,
+        reason: "final_paid_fallback"
+      });
+    }
 
     if (preferred && preferred !== "auto") {
       return reorderAttemptsForPreferredProvider(attempts, preferred);
@@ -488,6 +498,7 @@ export class AiRouterClient implements LlmClient {
   private describeActiveOrder(preferred?: PreferredChatProviderValue) {
     const baseOrder = [
       `deepseek:${this.env.DEEPSEEK_MODEL}`,
+      `openai:${this.env.OPENAI_MODEL} (simple fallback)`,
       `gemini:${this.env.GEMINI_PRO_MODEL} (complex only)`,
       `gemini:${this.env.GEMINI_FLASH_MODEL}`,
       `cloudflare:${this.env.CF_MODEL}`,

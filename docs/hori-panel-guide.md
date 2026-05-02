@@ -75,7 +75,7 @@
 
 1. `/hori panel`
 2. `/hori state`
-3. `/hori dossier`
+3. `/hori profile user:@user dossier:true`
 4. Полный relationship editor
 5. `/hori power`
 6. `/hori ai-url`
@@ -774,21 +774,13 @@
 Опции:
 
 1. `user` - необязательный пользователь
+2. `dossier` - необязательный owner-only флаг для полного досье
 
 Правила:
 
 1. без `user` показывает тебя
 2. чужой профиль может смотреть только owner/moderator
-
-## `/hori dossier`
-
-Назначение: собрать развёрнутое досье по человеку.
-
-Опции:
-
-1. `user` - обязательный пользователь
-
-Доступ: только owner.
+3. `dossier:true` переключает `/hori profile` в режим полного owner-only досье
 
 ## `/hori relationship`
 
@@ -856,6 +848,24 @@
 ## `/hori stats`
 
 Назначение: недельная статистика сервера.
+
+Доступ: moderator или owner.
+
+## `/hori knowledge`
+
+Назначение: операторское управление knowledge clusters.
+
+Опции:
+
+1. `action=list|stats|create|update|import|clear|delete`
+2. `code` - код кластера для `stats`, `import`, `update`, `clear`, `delete`
+3. `title` - название для `create` или `update`
+4. `trigger` - символ-триггер для `create` или `update`
+5. `description` - описание; `clear` очищает
+6. `answer-model` - модель ответа; `default` сбрасывает на дефолт
+7. `enabled` - включить или выключить кластер при `update`
+8. `file` - markdown/txt файл для `import`
+9. `replace` - перед import очистить текущие статьи
 
 Доступ: moderator или owner.
 
@@ -983,17 +993,21 @@
 
 ## `/hori import`
 
-Назначение: импортировать историю чата из JSON.
+Назначение: импортировать историю чата или knowledge-файл.
 
 Опции:
 
-1. `file`
+1. `mode=history|knowledge`
+2. `file`
+3. `code` - код knowledge cluster для `mode=knowledge`
+4. `replace` - очистить текущие knowledge articles перед import
 
 Ограничения:
 
-1. только `.json`
-2. максимум 50 МБ
-3. максимум 50 000 сообщений за один импорт
+1. `mode=history`: только `.json`
+2. `mode=history`: максимум 50 МБ и 50 000 сообщений за один импорт
+3. `mode=knowledge`: `.md`, `.markdown` или `.txt`
+4. `mode=knowledge`: максимум 5 МБ на файл
 
 Доступ: только owner.
 

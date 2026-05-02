@@ -133,9 +133,9 @@ describe("AiRouterClient", () => {
         message: "Gemini rate limited"
       });
     });
+    const openai = createFailingProvider("openai", "provider_unavailable");
     const cloudflare = createMockProvider("cloudflare", async (request) => successResponse("cloudflare", request.model, "cf ok"));
     const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh ok"));
-    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa ok"));
 
     const client = createRouter({ gemini, cloudflare, github, openai });
     const response = await client.chat({
@@ -145,10 +145,10 @@ describe("AiRouterClient", () => {
     });
 
     expect(response.routing?.provider).toBe("cloudflare");
+    expect(openai.send).toHaveBeenCalledTimes(2);
     expect(gemini.send).toHaveBeenCalledTimes(1);
     expect(cloudflare.send).toHaveBeenCalledTimes(1);
     expect(github.send).not.toHaveBeenCalled();
-    expect(openai.send).not.toHaveBeenCalled();
   });
 
   it("falls back from Cloudflare network error to GitHub", async () => {
@@ -160,6 +160,7 @@ describe("AiRouterClient", () => {
         message: "Gemini quota exhausted"
       });
     });
+    const openai = createFailingProvider("openai", "provider_unavailable");
     const cloudflare = createMockProvider("cloudflare", async () => {
       throw new ProviderRequestError({
         provider: "cloudflare",
@@ -167,7 +168,6 @@ describe("AiRouterClient", () => {
       });
     });
     const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh ok"));
-    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa ok"));
 
     const client = createRouter({ gemini, cloudflare, github, openai });
     const response = await client.chat({
@@ -177,12 +177,13 @@ describe("AiRouterClient", () => {
     });
 
     expect(response.routing?.provider).toBe("github");
+    expect(openai.send).toHaveBeenCalledTimes(2);
     expect(github.send).toHaveBeenCalledTimes(1);
-    expect(openai.send).not.toHaveBeenCalled();
   });
 
   it("falls back on plain 500 responses instead of aborting the chain", async () => {
     const gemini = createFailingProvider("gemini", "quota_exhausted");
+    const openai = createFailingProvider("openai", "provider_unavailable");
     const cloudflare = createMockProvider("cloudflare", async () => {
       throw new ProviderRequestError({
         provider: "cloudflare",
@@ -192,7 +193,6 @@ describe("AiRouterClient", () => {
       });
     });
     const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh ok"));
-    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa ok"));
 
     const client = createRouter({ gemini, cloudflare, github, openai });
     const response = await client.chat({
@@ -202,17 +202,18 @@ describe("AiRouterClient", () => {
     });
 
     expect(response.routing?.provider).toBe("github");
+    expect(openai.send).toHaveBeenCalledTimes(2);
     expect(cloudflare.send).toHaveBeenCalledTimes(2);
     expect(github.send).toHaveBeenCalledTimes(1);
   });
 
   it("falls back on unknown provider errors instead of aborting the chain", async () => {
     const gemini = createFailingProvider("gemini", "quota_exhausted");
+    const openai = createFailingProvider("openai", "provider_unavailable");
     const cloudflare = createMockProvider("cloudflare", async () => {
       throw new Error("unexpected serialization blowup");
     });
     const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh ok"));
-    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa ok"));
 
     const client = createRouter({ gemini, cloudflare, github, openai });
     const response = await client.chat({
@@ -222,11 +223,12 @@ describe("AiRouterClient", () => {
     });
 
     expect(response.routing?.provider).toBe("github");
+    expect(openai.send).toHaveBeenCalledTimes(2);
     expect(cloudflare.send).toHaveBeenCalledTimes(1);
     expect(github.send).toHaveBeenCalledTimes(1);
   });
 
-  it("uses OpenAI when all free providers fail", async () => {
+  it("uses OpenAI as the immediate paid fallback for simple chat", async () => {
     const gemini = createFailingProvider("gemini", "quota_exhausted");
     const cloudflare = createFailingProvider("cloudflare", "provider_unavailable");
     const github = createFailingProvider("github", "rate_limited");
@@ -241,20 +243,28 @@ describe("AiRouterClient", () => {
 
     expect(response.routing?.provider).toBe("openai");
     expect(openai.send).toHaveBeenCalledTimes(1);
+    expect(gemini.send).not.toHaveBeenCalled();
+    expect(cloudflare.send).not.toHaveBeenCalled();
+    expect(github.send).not.toHaveBeenCalled();
   });
 
-  it("does not crash when GitHub auth is invalid and OpenAI fallback is available", async () => {
-    const gemini = createFailingProvider("gemini", "quota_exhausted");
-    const cloudflare = createFailingProvider("cloudflare", "network_error");
-    const github = createMockProvider("github", async () => {
-      throw new ProviderRequestError({
-        provider: "github",
-        status: 401,
-        bodyText: "bad credentials",
-        message: "Invalid GitHub token"
-      });
+  it("retries the early OpenAI simple fallback once before moving deeper in the chain", async () => {
+    const gemini = createMockProvider("gemini", async (request) => successResponse("gemini", request.model, "flash ok"));
+    const cloudflare = createMockProvider("cloudflare", async (request) => successResponse("cloudflare", request.model, "cf ok"));
+    const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh ok"));
+    let openAiAttempts = 0;
+    const openai = createMockProvider("openai", async (request) => {
+      openAiAttempts += 1;
+      if (openAiAttempts === 1) {
+        throw new ProviderRequestError({
+          provider: "openai",
+          status: 503,
+          bodyText: "temporarily unavailable",
+          message: "OpenAI temporarily unavailable"
+        });
+      }
+      return successResponse("openai", request.model, "oa ok");
     });
-    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa ok"));
 
     const client = createRouter({ gemini, cloudflare, github, openai });
     const response = await client.chat({
@@ -264,8 +274,10 @@ describe("AiRouterClient", () => {
     });
 
     expect(response.routing?.provider).toBe("openai");
-    expect(github.send).toHaveBeenCalledTimes(3);
-    expect(openai.send).toHaveBeenCalledTimes(1);
+    expect(openai.send).toHaveBeenCalledTimes(2);
+    expect(gemini.send).not.toHaveBeenCalled();
+    expect(cloudflare.send).not.toHaveBeenCalled();
+    expect(github.send).not.toHaveBeenCalled();
   });
 
   it("reports recent routes and fallback counts in status snapshot", async () => {
@@ -277,9 +289,9 @@ describe("AiRouterClient", () => {
         message: "Gemini rate limited"
       });
     });
+    const openai = createFailingProvider("openai", "provider_unavailable");
     const cloudflare = createMockProvider("cloudflare", async (request) => successResponse("cloudflare", request.model, "cf ok"));
     const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh ok"));
-    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa ok"));
 
     const client = createRouter({ gemini, cloudflare, github, openai });
     await client.chat({
@@ -469,7 +481,6 @@ describe("AiRouterClient skipped providers", () => {
   it("does not count disabled providers as real fallback depth or fallback totals", async () => {
     const cloudflare = createMockProvider("cloudflare", async (request) => successResponse("cloudflare", request.model, "cf ok"));
     const github = createMockProvider("github", async (request) => successResponse("github", request.model, "gh ok"));
-    const openai = createMockProvider("openai", async (request) => successResponse("openai", request.model, "oa ok"));
 
     const client = createRouterWithEnv({
       DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/hori",
@@ -477,12 +488,10 @@ describe("AiRouterClient skipped providers", () => {
       AI_PROVIDER: "router",
       CF_ACCOUNT_ID: "cf-account",
       CF_API_TOKEN: "cf-token",
-      GITHUB_TOKEN: "gh-token",
-      OPENAI_API_KEY: "openai-key"
+      GITHUB_TOKEN: "gh-token"
     }, {
       cloudflare,
-      github,
-      openai
+      github
     });
 
     const response = await client.chat({
@@ -495,7 +504,7 @@ describe("AiRouterClient skipped providers", () => {
 
     expect(response.routing?.provider).toBe("cloudflare");
     expect(response.routing?.fallbackDepth).toBe(0);
-    expect(response.routing?.routedFrom).toEqual(["deepseek:deepseek-v4-flash", "gemini:gemini-2.5-flash"]);
+    expect(response.routing?.routedFrom).toEqual(["deepseek:deepseek-v4-flash", "openai:gpt-5-nano", "gemini:gemini-2.5-flash"]);
     expect(snapshot.fallbackCounts.cloudflare).toBe(0);
     expect(snapshot.recentRoutes.find((entry) => entry.requestId === "req-skip-1" && entry.success)?.fallbackDepth).toBe(0);
   });

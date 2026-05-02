@@ -104,6 +104,53 @@ describe("KnowledgeService.matchTrigger", () => {
   });
 });
 
+describe("KnowledgeService cluster trigger guards", () => {
+  const baseRow = {
+    id: "c1",
+    guildId: "g1",
+    code: "jjs",
+    title: "JJS Wiki",
+    description: null,
+    trigger: "?",
+    enabled: true,
+    answerModel: null,
+    embedModel: null,
+    dimensions: 768
+  };
+
+  it("rejects createCluster when another enabled cluster already uses the trigger", async () => {
+    const prisma = makePrismaStub({ knowledgeCluster: { id: "c2", code: "other", title: "Other" } });
+    const service = new KnowledgeService({
+      prisma,
+      logger: undefined,
+      defaultAnswerModel: "gpt-5-nano",
+      embed: vi.fn(),
+      chat: vi.fn()
+    });
+
+    await expect(service.createCluster({ guildId: "g1", code: "new", title: "New", trigger: "?" }))
+      .rejects.toThrow(/already used by cluster "other"/i);
+    expect(prisma.knowledgeCluster.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects updateCluster when enabling a trigger that is already owned by another enabled cluster", async () => {
+    const prisma = makePrismaStub({ knowledgeCluster: { id: "c2", code: "other", title: "Other" } });
+    (prisma.knowledgeCluster.findUnique as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(baseRow);
+
+    const service = new KnowledgeService({
+      prisma,
+      logger: undefined,
+      defaultAnswerModel: "gpt-5-nano",
+      embed: vi.fn(),
+      chat: vi.fn()
+    });
+
+    await expect(service.updateCluster("g1", "jjs", { trigger: "$" }))
+      .rejects.toThrow(/already used by cluster "other"/i);
+    expect(prisma.knowledgeCluster.update).not.toHaveBeenCalled();
+  });
+});
+
 describe("KnowledgeService.answer", () => {
   const cluster = {
     id: "c1",
@@ -162,5 +209,43 @@ describe("KnowledgeService.answer", () => {
     expect(callArg.messages[1]).toEqual({ role: "user", content: "что такое домен" });
     expect(answer.answer).toBe("Домен — техника");
     expect(answer.fallback).toBe(false);
+  });
+
+  it("skips vector retrieval and falls back to lexical search on embedding dimension mismatch", async () => {
+    const prisma = makePrismaStub({ knowledgeCluster: cluster });
+    const rawQuery = prisma.$queryRawUnsafe as unknown as ReturnType<typeof vi.fn>;
+    rawQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("ts_rank_cd")) {
+        return [
+          { id: "ck1", articleId: "a1", chunkIndex: 0, content: "Домен это техника", title: "Домены", sortScore: 0.2 }
+        ];
+      }
+      return [
+        { id: "ck-vector", articleId: "a2", chunkIndex: 1, content: "Векторный результат", title: "Вектор", sortScore: 0.01 }
+      ];
+    });
+    const logger = { warn: vi.fn(), debug: vi.fn() };
+    const embed = vi.fn().mockResolvedValue({ vector: [0.1, 0.2], model: "emb", dimensions: 1536 });
+    const chat = vi.fn();
+
+    const service = new KnowledgeService({
+      prisma,
+      logger: logger as never,
+      defaultAnswerModel: "gpt-5-nano",
+      embed,
+      chat
+    });
+
+    const rows = await service.query(cluster, "что такое домен");
+
+    expect(rows).toEqual([
+      { id: "ck1", articleId: "a1", chunkIndex: 0, content: "Домен это техника", title: "Домены", sortScore: expect.any(Number) }
+    ]);
+    expect(rawQuery).toHaveBeenCalledTimes(1);
+    expect(String(rawQuery.mock.calls[0]?.[0])).toContain("ts_rank_cd");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ clusterId: cluster.id, clusterDimensions: 768, queryDimensions: 1536 }),
+      "knowledge vector retrieval skipped due to embedding dimension mismatch"
+    );
   });
 });

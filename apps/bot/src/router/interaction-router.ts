@@ -33,6 +33,7 @@ import {
   CORE_PROMPT_DEFINITIONS,
   CORE_PROMPT_KEYS,
   getCorePromptDefaultContent,
+  parseKnowledgeImportDocuments,
   isCorePromptKey,
   type CorePromptKey
 } from "@hori/core";
@@ -74,6 +75,9 @@ import { BotStateService, HORI_STATE_TABS, horiStateTabLabel, parseHoriStateTab,
 
 const PUBLIC_COMMANDS = new Set(["hori", "bot-help", "bot-album"]);
 const OWNER_COMMANDS = new Set(["bot-ai-url", "bot-import", "bot-lockdown", "bot-power"]);
+const KNOWLEDGE_IMPORT_MAX_BYTES = 5 * 1024 * 1024;
+const KNOWLEDGE_IMPORT_ALLOWED_EXTENSIONS = new Set([".md", ".markdown", ".txt"]);
+const KNOWLEDGE_IMPORT_BATCH_SIZE = 5;
 
 function ensureModerator(interaction: ChatInputCommandInteraction | ContextMenuCommandInteraction | ModalSubmitInteraction) {
   return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
@@ -628,7 +632,28 @@ async function handleHoriCommand(
   }
 
   if (subcommand === "profile") {
-    const target = interaction.options.getUser("user")?.id ?? interaction.user.id;
+    const explicitUser = interaction.options.getUser("user");
+    const target = explicitUser?.id ?? interaction.user.id;
+    const showDossier = interaction.options.getBoolean("dossier") ?? false;
+
+    if (showDossier) {
+      if (!isOwner) {
+        await interaction.reply({ content: "Досье доступно только владельцу.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      if (!explicitUser) {
+        await interaction.reply({ content: "Для dossier через `/hori profile` нужно указать user.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      await interaction.reply({
+        content: await runtime.slashAdmin.personDossier(interaction.guildId, target),
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
     if (target !== interaction.user.id && !isOwner && !isModerator) {
       await interaction.reply({ content: "Чужой профиль видит только модер/владелец.", flags: MessageFlags.Ephemeral });
       return;
@@ -636,19 +661,6 @@ async function handleHoriCommand(
 
     await interaction.reply({
       content: await runtime.slashAdmin.personalMemory(interaction.guildId, target, isOwner || isModerator),
-      flags: MessageFlags.Ephemeral
-    });
-    return;
-  }
-
-  if (subcommand === "dossier") {
-    if (!isOwner) {
-      await interaction.reply({ content: "Досье доступно только владельцу.", flags: MessageFlags.Ephemeral });
-      return;
-    }
-
-    await interaction.reply({
-      content: await runtime.slashAdmin.personDossier(interaction.guildId, interaction.options.getUser("user", true).id),
       flags: MessageFlags.Ephemeral
     });
     return;
@@ -856,6 +868,11 @@ async function handleHoriCommand(
     return;
   }
 
+  if (subcommand === "knowledge") {
+    await handleHoriKnowledgeCommand(runtime, interaction, isOwner, isModerator);
+    return;
+  }
+
   if (subcommand === "topic") {
     if (!isOwner && !isModerator) {
       await interaction.reply({ content: "Темы канала только для модеров.", flags: MessageFlags.Ephemeral });
@@ -1058,6 +1075,280 @@ async function handleHoriSearchCommand(
   });
 }
 
+async function handleHoriKnowledgeCommand(
+  runtime: BotRuntime,
+  interaction: ChatInputCommandInteraction,
+  isOwner: boolean,
+  isModerator: boolean
+) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (!isOwner && !isModerator) {
+    await interaction.reply({ content: "Knowledge clusters доступны только модерам.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const action = interaction.options.getString("action", true);
+
+  if (action === "import") {
+    await handleHoriKnowledgeImportCommand(runtime, interaction);
+    return;
+  }
+
+  try {
+    if (action === "list") {
+      const clusters = await runtime.knowledge.listClusters(interaction.guildId);
+      const content = clusters.length
+        ? clusters.map((cluster) => formatKnowledgeClusterCompact(cluster, runtime.env.OPENAI_MODEL)).join("\n")
+        : "Knowledge clusters пока не созданы.";
+      await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const code = interaction.options.getString("code")?.trim();
+
+    if (action === "create") {
+      const title = interaction.options.getString("title")?.trim();
+      if (!code || !title) {
+        await interaction.reply({ content: "Для `knowledge create` нужны code и title.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const created = await runtime.knowledge.createCluster({
+        guildId: interaction.guildId,
+        code,
+        title,
+        trigger: interaction.options.getString("trigger") ?? undefined,
+        description: normalizeKnowledgeOptionalText(interaction.options.getString("description")),
+        answerModel: normalizeKnowledgeAnswerModel(interaction.options.getString("answer-model"))
+      });
+      await interaction.reply({
+        content: `Knowledge cluster создан.\n${formatKnowledgeClusterDetail(created, runtime.env.OPENAI_MODEL)}`,
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    if (!code) {
+      await interaction.reply({ content: `Для \`knowledge ${action}\` нужен code кластера.`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    if (action === "update") {
+      const title = interaction.options.getString("title");
+      const trigger = interaction.options.getString("trigger");
+      const description = interaction.options.getString("description");
+      const answerModel = interaction.options.getString("answer-model");
+      const enabled = interaction.options.getBoolean("enabled");
+
+      if (title === null && trigger === null && description === null && answerModel === null && enabled === null) {
+        await interaction.reply({ content: "Для `knowledge update` передай хотя бы одно поле для изменения.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const updated = await runtime.knowledge.updateCluster(interaction.guildId, code, {
+        ...(title !== null ? { title } : {}),
+        ...(trigger !== null ? { trigger } : {}),
+        ...(description !== null ? { description: normalizeKnowledgeOptionalText(description) } : {}),
+        ...(answerModel !== null ? { answerModel: normalizeKnowledgeAnswerModel(answerModel) } : {}),
+        ...(enabled !== null ? { enabled } : {})
+      });
+      await interaction.reply({
+        content: `Knowledge cluster обновлён.\n${formatKnowledgeClusterDetail(updated, runtime.env.OPENAI_MODEL)}`,
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    if (action === "clear") {
+      const result = await runtime.knowledge.clearArticles(interaction.guildId, code);
+      await interaction.reply({
+        content: `Knowledge cluster \`${code}\` очищен. Удалено статей: ${result.deletedArticles}.`,
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    if (action === "delete") {
+      await runtime.knowledge.deleteCluster(interaction.guildId, code);
+      await interaction.reply({
+        content: `Knowledge cluster \`${code}\` удалён.`,
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    const cluster = await runtime.knowledge.getCluster(interaction.guildId, code);
+    if (!cluster) {
+      await interaction.reply({ content: `Knowledge cluster \`${code}\` не найден.`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const stats = await runtime.knowledge.getStats(interaction.guildId, cluster.code);
+    const content = [
+      formatKnowledgeClusterDetail(cluster, runtime.env.OPENAI_MODEL),
+      `Articles: ${stats.articles}`,
+      `Chunks: ${stats.chunks}`
+    ].join("\n");
+
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+  } catch (error) {
+    await interaction.reply({
+      content: `Knowledge action failed: ${asErrorMessage(error)}`,
+      flags: MessageFlags.Ephemeral
+    });
+  }
+}
+
+async function handleHoriKnowledgeImportCommand(
+  runtime: BotRuntime,
+  interaction: ChatInputCommandInteraction
+) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const code = interaction.options.getString("code")?.trim();
+  const attachment = interaction.options.getAttachment("file");
+
+  if (!code || !attachment) {
+    await interaction.reply({ content: "Для `knowledge import` нужны code и file.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  try {
+    await interaction.editReply({
+      content: await importKnowledgeFromAttachment(runtime, interaction.guildId, code, attachment, interaction.options.getBoolean("replace") ?? false)
+    });
+  } catch (error) {
+    await interaction.editReply({ content: `Knowledge import failed: ${asErrorMessage(error)}` });
+  }
+}
+
+async function importKnowledgeFromAttachment(
+  runtime: BotRuntime,
+  guildId: string,
+  code: string,
+  attachment: { name: string; size: number; url: string },
+  replace: boolean
+): Promise<string> {
+  const extensionMatch = /\.[^.]+$/.exec(attachment.name.toLowerCase());
+  const extension = extensionMatch?.[0] ?? "";
+  if (!KNOWLEDGE_IMPORT_ALLOWED_EXTENSIONS.has(extension)) {
+    throw new Error("Knowledge import принимает только .md, .markdown или .txt файлы.");
+  }
+
+  if (attachment.size > KNOWLEDGE_IMPORT_MAX_BYTES) {
+    throw new Error(`Файл слишком большой (макс ${Math.floor(KNOWLEDGE_IMPORT_MAX_BYTES / (1024 * 1024))} МБ).`);
+  }
+
+  const response = await fetch(attachment.url);
+  if (!response.ok) {
+    throw new Error(`Не удалось скачать knowledge файл: ${response.status}`);
+  }
+
+  const raw = await response.text();
+  const fallbackTitle = attachment.name.replace(/\.[^.]+$/, "") || code;
+  const parsedDocuments = parseKnowledgeImportDocuments(raw, fallbackTitle);
+  const articles = parsedDocuments.map((parsed) => ({
+    title: parsed.title,
+    content: parsed.content,
+    sourceUrl: parsed.sourceUrl
+  }));
+
+  if (!articles.length) {
+    throw new Error("Файл не дал ни одной knowledge статьи для импорта.");
+  }
+
+  const cleared = replace ? await runtime.knowledge.clearArticles(guildId, code) : null;
+  let totals = { articlesUpserted: 0, chunksCreated: 0, chunksSkipped: 0 };
+
+  for (let index = 0; index < articles.length; index += KNOWLEDGE_IMPORT_BATCH_SIZE) {
+    const batch = articles.slice(index, index + KNOWLEDGE_IMPORT_BATCH_SIZE);
+    const result = await runtime.knowledge.ingestArticles(guildId, code, batch);
+    totals = {
+      articlesUpserted: totals.articlesUpserted + result.articlesUpserted,
+      chunksCreated: totals.chunksCreated + result.chunksCreated,
+      chunksSkipped: totals.chunksSkipped + result.chunksSkipped
+    };
+  }
+
+  const stats = await runtime.knowledge.getStats(guildId, code);
+  return [
+    `Knowledge import завершён для \`${code}\`.`,
+    `File: ${attachment.name}`,
+    `Documents parsed: ${articles.length}`,
+    cleared ? `Existing articles cleared: ${cleared.deletedArticles}` : null,
+    `Articles upserted: ${totals.articlesUpserted}`,
+    `Chunks created: ${totals.chunksCreated}`,
+    `Chunks skipped: ${totals.chunksSkipped}`,
+    `Cluster stats: articles=${stats.articles}, chunks=${stats.chunks}`
+  ].filter(Boolean).join("\n");
+}
+
+function formatKnowledgeClusterCompact(
+  cluster: {
+    code: string;
+    trigger: string;
+    title: string;
+    description: string | null;
+    enabled: boolean;
+    answerModel: string | null;
+    dimensions: number | null;
+  },
+  defaultAnswerModel: string
+): string {
+  return [
+    `${cluster.enabled ? "🟢" : "⚫"} \`${cluster.code}\` ${cluster.trigger} ${cluster.title}`,
+    cluster.description ? `   ${cluster.description}` : null,
+    `   model=${cluster.answerModel ?? defaultAnswerModel}, dims=${cluster.dimensions ?? "?"}`
+  ].filter(Boolean).join("\n");
+}
+
+function formatKnowledgeClusterDetail(
+  cluster: {
+    code: string;
+    trigger: string;
+    title: string;
+    description: string | null;
+    enabled: boolean;
+    answerModel: string | null;
+    dimensions: number | null;
+  },
+  defaultAnswerModel: string
+): string {
+  return [
+    `📚 ${cluster.title} (\`${cluster.code}\`)`,
+    `Trigger: ${cluster.trigger}`,
+    `Status: ${cluster.enabled ? "on" : "off"}`,
+    `Answer model: ${cluster.answerModel ?? defaultAnswerModel}`,
+    `Dimensions: ${cluster.dimensions ?? "?"}`,
+    cluster.description ? `Description: ${cluster.description}` : null
+  ].filter(Boolean).join("\n");
+}
+
+function normalizeKnowledgeOptionalText(value: string | null): string | null | undefined {
+  if (value === null) {
+    return undefined;
+  }
+
+  return value.trim().toLowerCase() === "clear" ? null : value;
+}
+
+function normalizeKnowledgeAnswerModel(value: string | null): string | null | undefined {
+  if (value === null) {
+    return undefined;
+  }
+
+  return value.trim().toLowerCase() === "default" ? null : value;
+}
+
 async function executeHoriSearch(
   runtime: BotRuntime,
   input: {
@@ -1195,9 +1486,29 @@ async function handleHoriImportCommand(
     return;
   }
 
+  const mode = interaction.options.getString("mode", true);
   const attachment = interaction.options.getAttachment("file", true);
+
+  if (mode === "knowledge") {
+    const code = interaction.options.getString("code")?.trim();
+    if (!code) {
+      await interaction.reply({ content: "Для knowledge import через `/hori import` нужен code кластера.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      await interaction.editReply({
+        content: await importKnowledgeFromAttachment(runtime, interaction.guildId, code, attachment, interaction.options.getBoolean("replace") ?? false)
+      });
+    } catch (error) {
+      await interaction.editReply({ content: `Knowledge import failed: ${asErrorMessage(error)}` });
+    }
+    return;
+  }
+
   if (!attachment.name.endsWith(".json")) {
-    await interaction.reply({ content: "Нужен .json файл.", flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: "Для history import нужен .json файл.", flags: MessageFlags.Ephemeral });
     return;
   }
 

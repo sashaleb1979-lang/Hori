@@ -31,7 +31,7 @@ describe("SlashAdminService aiStatus", () => {
     await client.chat({
       model: "ignored",
       messages: [{ role: "user", content: "коротко ответь" }],
-      metadata: { requestId: "req-ai-status", userKey: "u:123", complexityHint: "simple" }
+      metadata: { requestId: "req-ai-status", userKey: "u:123", complexityHint: "complex" }
     });
 
     const service = new SlashAdminService(
@@ -58,11 +58,11 @@ describe("SlashAdminService aiStatus", () => {
     expect(result).toContain("cloudflare:on");
     expect(result).toContain("Embeddings: openai:on text-embedding-3-small dim=768");
     expect(result).toContain("Cooldowns: ");
-    expect(result).toContain("gemini/gemini-2.5-flash");
+    expect(result).toContain("gemini:gemini-2.5-flash");
     expect(result).toContain("Gemini: flash 0/250, pro 0/100");
     expect(result).toContain("Fallbacks: gemini=0 | cloudflare=1");
     expect(result).toContain("Recent routes:");
-    expect(result).toContain("ok cloudflare/@cf/zai-org/glm-4.7-flash d1");
+    expect(result).toContain("ok cloudflare/@cf/zai-org/glm-4.7-flash");
   });
 
   it("does not report skipped providers as real fallback in the owner status", async () => {
@@ -106,7 +106,7 @@ describe("SlashAdminService aiStatus", () => {
     expect(result).toContain("deepseek:off(missing:DEEPSEEK_API_KEY)");
     expect(result).toContain("gemini:off(missing:GOOGLE_API_KEY)");
     expect(result).toContain("Fallbacks: cloudflare=0");
-    expect(result).toContain("ok cloudflare/@cf/zai-org/glm-4.7-flash d0");
+    expect(result).toContain("ok openai/gpt-5-nano d0");
   });
 });
 

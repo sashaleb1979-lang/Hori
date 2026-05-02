@@ -132,12 +132,7 @@ const horiCommandDefinition = new SlashCommandBuilder()
       .setName("profile")
       .setDescription("Показать краткий профиль/память")
       .addUserOption((option) => option.setName("user").setDescription("Пользователь"))
-  )
-  .addSubcommand((subcommand) =>
-    subcommand
-      .setName("dossier")
-      .setDescription("Owner: собрать развёрнутое досье по человеку")
-      .addUserOption((option) => option.setName("user").setDescription("Пользователь").setRequired(true))
+      .addBooleanOption((option) => option.setName("dossier").setDescription("Owner: вместо профиля показать полное досье"))
   )
   .addSubcommand((subcommand) =>
     subcommand
@@ -291,6 +286,71 @@ const horiCommandDefinition = new SlashCommandBuilder()
   .addSubcommand((subcommand) => subcommand.setName("stats").setDescription("Показать недельную статистику"))
   .addSubcommand((subcommand) =>
     subcommand
+      .setName("knowledge")
+      .setDescription("Модер: knowledge clusters и их статус")
+      .addStringOption((option) =>
+        option
+          .setName("action")
+          .setDescription("Действие")
+          .setRequired(true)
+          .addChoices(
+            { name: "list", value: "list" },
+            { name: "stats", value: "stats" },
+            { name: "create", value: "create" },
+            { name: "update", value: "update" },
+            { name: "import", value: "import" },
+            { name: "clear", value: "clear" },
+            { name: "delete", value: "delete" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("code")
+          .setDescription("Код knowledge cluster (для stats/import/update/clear/delete)")
+          .setMaxLength(32)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("title")
+          .setDescription("Название cluster (для create/update)")
+          .setMaxLength(120)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("trigger")
+          .setDescription("Триггер-символ (для create/update)")
+          .setMaxLength(4)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("description")
+          .setDescription("Описание cluster; 'clear' очищает")
+          .setMaxLength(400)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("answer-model")
+          .setDescription("Модель ответа; 'default' сбрасывает на дефолт")
+          .setMaxLength(120)
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("enabled")
+          .setDescription("Включить/выключить cluster (для update)")
+      )
+      .addAttachmentOption((option) =>
+        option
+          .setName("file")
+          .setDescription("Markdown/txt файл для import")
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("replace")
+          .setDescription("Перед import очистить текущие статьи")
+      )
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
       .setName("topic")
       .setDescription("Посмотреть или сбросить активную тему")
       .addStringOption((option) =>
@@ -441,8 +501,20 @@ const horiCommandDefinition = new SlashCommandBuilder()
   .addSubcommand((subcommand) =>
     subcommand
       .setName("import")
-      .setDescription("Owner: импортировать историю чата из JSON файла")
-      .addAttachmentOption((option) => option.setName("file").setDescription(".json файл с историей чата").setRequired(true))
+      .setDescription("Owner: импорт истории чата или knowledge файлов")
+      .addStringOption((option) =>
+        option
+          .setName("mode")
+          .setDescription("Что импортировать")
+          .setRequired(true)
+          .addChoices(
+            { name: "history", value: "history" },
+            { name: "knowledge", value: "knowledge" }
+          )
+      )
+      .addAttachmentOption((option) => option.setName("file").setDescription("JSON для history или markdown/txt для knowledge").setRequired(true))
+      .addStringOption((option) => option.setName("code").setDescription("Код knowledge cluster для mode=knowledge").setMaxLength(32))
+      .addBooleanOption((option) => option.setName("replace").setDescription("Очистить articles перед knowledge import"))
   );
 
 const legacySlashCommandBuilders = [

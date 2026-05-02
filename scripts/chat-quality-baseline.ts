@@ -176,13 +176,7 @@ function buildChatMessages(
   return [
     {
       role: "system" as const,
-      content: [
-        behavior.assembly.commonCore,
-        behavior.assembly.relationshipTail,
-        `Turn instruction:\n${behavior.assembly.turnInstruction}`
-      ]
-        .filter(Boolean)
-        .join("\n\n")
+      content: behavior.staticPrefix.trim() || behavior.assembly.commonCore
     },
     ...history.slice(-8).map((entry) => ({
       role: entry.role,
