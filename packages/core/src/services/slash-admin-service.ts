@@ -35,11 +35,35 @@ export class SlashAdminService {
 
   async handleHelp() {
     return [
-      "Owner master panel: `/hori panel`.",
-      "Частые ветки: `/hori profile`, `/hori search`, `/hori memory`, `/hori channel`, `/hori mood`, `/hori queue`, `/hori album`.",
-      "Owner: `/hori state`, `/hori ai-status`, `/hori relationship`, `/hori runtime`, `/hori aggression`, `/hori power`, `/hori lockdown`, `/hori ai-url`, `/hori import mode:history|knowledge`.",
-      "Admin/mod: `/hori memory-cards` и `/hori knowledge` для memory cards и knowledge clusters.",
-      "Legacy `/bot-*` команды скрыты из регистрации по умолчанию; их можно вернуть флагом `DISCORD_REGISTER_LEGACY_COMMANDS=true`."
+      "Что умеет Хори:",
+      "",
+      "Чат и кодовые слова:",
+      "- `Хори, ...` или ответ на сообщение Хори: обычный чат.",
+      "- `? запрос` или `/hori search`: поиск в интернете.",
+      "- `запомни ...`, `вспомни`, `забудь`: личная память прямо из чата.",
+      "- `перескажи за день`, `перескажи последнюю активность`, `обнови пересказ ...`: пересказ канала.",
+      "",
+      "Личные инструменты:",
+      "- `/hori profile`: краткий профиль пользователя; owner может включить dossier.",
+      "- `/hori slot`: создать, включить, выключить и удалить prompt-слоты с кодовым словом.",
+      "- `/hori memory`: ручная долгая память по ключу.",
+      "- `/hori album`: личный альбом сохранённых моментов.",
+      "",
+      "Канал и сервер:",
+      "- `/hori channel`: ответы, автовмешательства, длина ответа, теги канала.",
+      "- `/hori summary`, `/hori stats`, `/hori topic`: summaries, статистика и текущая тема канала.",
+      "- `/hori knowledge`: knowledge-кластеры, статьи, импорт markdown/txt.",
+      "- `/hori memory-cards`: просмотр и удаление memory cards.",
+      "",
+      "Контекстные действия по сообщению:",
+      "- `Хори: объясни`, `Хори: кратко`, `Хори: оценить тон`, `Хори: запомнить момент`.",
+      "",
+      "Owner / модерация и диагностика:",
+      "- `/hori panel`, `/hori state`, `/hori ai-status`, `/hori debug`.",
+      "- `/hori relationship`, `/hori runtime`, `/hori aggression`, `/hori feature`.",
+      "- `/hori mood`, `/hori queue`, `/hori media`, `/hori power`, `/hori lockdown`, `/hori import`.",
+      "",
+      "Legacy `/bot-*` команды скрыты по умолчанию; их можно вернуть флагом `DISCORD_REGISTER_LEGACY_COMMANDS=true`."
     ].join("\n");
   }
 

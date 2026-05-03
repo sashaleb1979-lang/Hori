@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../apps/bot/src/router/background-jobs", () => ({
   enqueueBackgroundJobs: vi.fn(async () => undefined)
@@ -10,6 +10,37 @@ vi.mock("../apps/bot/src/router/owner-lockdown", () => ({
 }));
 
 import { EMPTY_REPLY_FALLBACK, prepareReplyForDelivery, resolveModerationReplyForDelivery, routeMessage } from "../apps/bot/src/router/message-router";
+
+function openAiResponse(content: string, promptTokens = 120, completionTokens = 40) {
+  return new Response(JSON.stringify({
+    id: "chatcmpl-test",
+    choices: [
+      {
+        index: 0,
+        finish_reason: "stop",
+        message: {
+          role: "assistant",
+          content
+        }
+      }
+    ],
+    usage: {
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: promptTokens + completionTokens
+    }
+  }), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json"
+    }
+  });
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("prepareReplyForDelivery", () => {
   it("replaces blank string replies with a fallback", () => {
@@ -347,5 +378,341 @@ describe("prepareReplyForDelivery", () => {
     expect(createLog).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ routeReason: "channel replies disabled" })
     }));
+  });
+
+  it("sends the shared help text on empty explicit invocation", async () => {
+    const ingestMessage = vi.fn().mockResolvedValue({ deduplicated: false });
+    const createLog = vi.fn().mockResolvedValue(undefined);
+    const helpText = "Что умеет Хори:\n- test";
+    const sentReply = {
+      id: "bot-help-1",
+      inGuild: () => true,
+      guildId: "guild-1",
+      channelId: "channel-1",
+      author: {
+        id: "bot-1",
+        username: "Hori",
+        globalName: "Hori"
+      },
+      member: {
+        displayName: "Hori"
+      },
+      content: helpText,
+      createdAt: new Date("2026-05-01T10:00:01.000Z"),
+      reference: {
+        messageId: "user-msg-help"
+      },
+      mentions: {
+        has: () => false,
+        users: new Map()
+      },
+      guild: {
+        name: "Guild 1"
+      },
+      channel: {
+        name: "general"
+      }
+    };
+    const message = {
+      id: "user-msg-help",
+      guildId: "guild-1",
+      channelId: "channel-1",
+      content: "<@1234567890>",
+      createdAt: new Date("2026-05-01T10:00:00.000Z"),
+      author: {
+        id: "user-1",
+        username: "Gnom",
+        bot: false
+      },
+      member: {
+        displayName: "Гном",
+        permissions: {
+          has: () => false
+        }
+      },
+      guild: {
+        name: "Guild 1",
+        members: {
+          fetch: vi.fn(),
+          fetchMe: vi.fn(),
+          me: null
+        }
+      },
+      channel: {
+        name: "general",
+        send: vi.fn()
+      },
+      mentions: {
+        has: (id: string) => id === "1234567890",
+        users: new Map([["1234567890", { id: "1234567890" }]])
+      },
+      attachments: {
+        size: 0
+      },
+      reference: null,
+      inGuild: () => true,
+      reply: vi.fn().mockResolvedValue(sentReply)
+    };
+    const runtime = {
+      client: {
+        user: {
+          id: "1234567890",
+          username: "Hori"
+        }
+      },
+      env: {
+        DISCORD_OWNER_IDS: [],
+        AUTOINTERJECT_CHANNEL_ALLOWLIST: [],
+        NATURAL_SPLIT_COOLDOWN_SEC: 60,
+        NATURAL_SPLIT_CHANCE: 0.01
+      },
+      prisma: {
+        botEventLog: {
+          create: createLog
+        },
+        interjectionLog: {
+          create: vi.fn()
+        }
+      },
+      runtimeConfig: {
+        getRoutingConfig: vi.fn().mockResolvedValue({
+          guildSettings: {
+            botName: "Хори",
+            interjectTendency: 0,
+            forbiddenWords: []
+          },
+          featureFlags: {
+            autoInterject: false,
+            replyQueueEnabled: false,
+            naturalMessageSplittingEnabled: false
+          },
+          channelPolicy: {
+            accessMode: "on",
+            isMuted: false,
+            allowBotReplies: true,
+            allowInterjections: false,
+            topicInterestTags: []
+          }
+        })
+      },
+      ingestService: {
+        ingestMessage
+      },
+      knowledge: {
+        matchTrigger: vi.fn()
+      },
+      slashAdmin: {
+        handleHelp: vi.fn().mockResolvedValue(helpText)
+      },
+      orchestrator: {
+        handleMessage: vi.fn()
+      },
+      logger: {
+        error: vi.fn(),
+        warn: vi.fn()
+      },
+      replyQueue: {},
+      queuePhrasePool: {},
+      relationshipService: {}
+    };
+
+    await routeMessage(runtime as never, message as never);
+
+    expect(runtime.slashAdmin.handleHelp).toHaveBeenCalledTimes(1);
+    expect(runtime.orchestrator.handleMessage).not.toHaveBeenCalled();
+    expect(message.reply).toHaveBeenCalledWith(helpText);
+    expect(createLog).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        intent: "help",
+        routeReason: "empty_invocation_help"
+      })
+    }));
+    expect(ingestMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("handles recap codewords without a mention and bypasses the orchestrator", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(openAiResponse("Что было: обсуждали recap flow.\nГлавное:\n- команда работает без mention\n- ответ идёт через Flex"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ingestMessage = vi.fn().mockResolvedValue({ deduplicated: false });
+    const createLog = vi.fn().mockResolvedValue(undefined);
+    const sentReply = {
+      id: "bot-msg-9",
+      inGuild: () => true,
+      guildId: "guild-1",
+      channelId: "channel-1",
+      author: {
+        id: "bot-1",
+        username: "Hori",
+        globalName: "Hori"
+      },
+      member: {
+        displayName: "Hori"
+      },
+      content: "Что было: обсуждали recap flow.",
+      createdAt: new Date("2026-05-01T10:00:01.000Z"),
+      reference: {
+        messageId: "user-msg-9"
+      },
+      mentions: {
+        has: () => false,
+        users: new Map()
+      },
+      guild: {
+        name: "Guild 1"
+      },
+      channel: {
+        name: "general"
+      }
+    };
+    const message = {
+      id: "user-msg-9",
+      guildId: "guild-1",
+      channelId: "channel-1",
+      content: "перескажи за день",
+      createdAt: new Date("2026-05-01T10:00:00.000Z"),
+      author: {
+        id: "user-1",
+        username: "Gnom",
+        bot: false
+      },
+      member: {
+        displayName: "Гном",
+        permissions: {
+          has: () => false
+        }
+      },
+      guild: {
+        name: "Guild 1",
+        members: {
+          fetch: vi.fn(),
+          fetchMe: vi.fn(),
+          me: null
+        }
+      },
+      channel: {
+        name: "general",
+        send: vi.fn()
+      },
+      mentions: {
+        has: () => false,
+        users: new Map()
+      },
+      attachments: {
+        size: 0
+      },
+      reference: null,
+      inGuild: () => true,
+      reply: vi.fn().mockResolvedValue(sentReply)
+    };
+    const runtime = {
+      client: {
+        user: {
+          id: "bot-1",
+          username: "Hori"
+        }
+      },
+      env: {
+        OPENAI_API_KEY: "sk-test",
+        OLLAMA_TIMEOUT_MS: 1000,
+        OLLAMA_LOG_TRAFFIC: false,
+        OLLAMA_LOG_PROMPTS: false,
+        OLLAMA_LOG_RESPONSES: false,
+        OLLAMA_LOG_MAX_CHARS: 2000,
+        DISCORD_OWNER_IDS: [],
+        AUTOINTERJECT_CHANNEL_ALLOWLIST: [],
+        NATURAL_SPLIT_COOLDOWN_SEC: 60,
+        NATURAL_SPLIT_CHANCE: 0.01
+      },
+      prisma: {
+        botEventLog: {
+          create: createLog,
+          findFirst: vi.fn().mockResolvedValue(null),
+          findMany: vi.fn().mockResolvedValue([])
+        },
+        channelSummary: {
+          findMany: vi.fn().mockResolvedValue([])
+        },
+        message: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              id: "msg-1",
+              userId: "user-2",
+              content: "Надо сделать пересказ кодовыми словами.",
+              createdAt: new Date("2026-05-01T09:30:00.000Z"),
+              user: {
+                username: "user-2",
+                globalName: "User 2",
+                isBot: false
+              }
+            },
+            {
+              id: "msg-2",
+              userId: "user-3",
+              content: "И повторный запрос не должен пересобирать всё.",
+              createdAt: new Date("2026-05-01T09:35:00.000Z"),
+              user: {
+                username: "user-3",
+                globalName: "User 3",
+                isBot: false
+              }
+            }
+          ])
+        },
+        interjectionLog: {
+          create: vi.fn()
+        }
+      },
+      runtimeConfig: {
+        getRoutingConfig: vi.fn().mockResolvedValue({
+          guildSettings: {
+            botName: "Хори",
+            interjectTendency: 0,
+            forbiddenWords: []
+          },
+          featureFlags: {
+            autoInterject: false,
+            replyQueueEnabled: false,
+            naturalMessageSplittingEnabled: false
+          },
+          channelPolicy: {
+            accessMode: "on",
+            isMuted: false,
+            allowBotReplies: true,
+            allowInterjections: false,
+            topicInterestTags: []
+          }
+        })
+      },
+      ingestService: {
+        ingestMessage
+      },
+      knowledge: {
+        matchTrigger: vi.fn()
+      },
+      orchestrator: {
+        handleMessage: vi.fn()
+      },
+      logger: {
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn()
+      },
+      replyQueue: {},
+      queuePhrasePool: {},
+      relationshipService: {}
+    };
+
+    await routeMessage(runtime as never, message as never);
+
+    expect(runtime.orchestrator.handleMessage).not.toHaveBeenCalled();
+    expect(message.reply).toHaveBeenCalledTimes(1);
+    expect(createLog).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        eventType: "chat_recap_day",
+        routeReason: "chat_recap_codeword"
+      })
+    }));
+    expect(ingestMessage).toHaveBeenCalledTimes(2);
   });
 });

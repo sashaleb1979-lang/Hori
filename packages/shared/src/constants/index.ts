@@ -1,5 +1,6 @@
 export const QUEUE_NAMES = {
   summary: "summary.generate",
+  sessionCompaction: "session.compact",
   profile: "profile.refresh",
   embedding: "embedding.generate",
   topic: "topic.update",

@@ -1,5 +1,7 @@
 import type { LlmChatMessage } from "@hori/shared";
 
+export type LlmServiceTier = "auto" | "flex";
+
 /* ------------------------------------------------------------------ */
 /*  Provider-agnostic types                                           */
 /*  Когда меняешь провайдер — реализуй LlmClient, остальное не трогай */
@@ -68,6 +70,7 @@ export interface LlmChatOptions {
   messages: LlmChatMessage[];
   tools?: LlmToolDefinition[];
   format?: "json";
+  serviceTier?: LlmServiceTier;
   temperature?: number;
   topP?: number;
   maxTokens?: number;

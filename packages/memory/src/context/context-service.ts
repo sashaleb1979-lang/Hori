@@ -2,12 +2,14 @@ import type { AppPrismaClient, BotIntent, ContextBundleV2, MessageEnvelope } fro
 import type { AppRedisClient } from "@hori/shared";
 
 import { ActiveMemoryService } from "../active/active-memory-service";
+import { SessionBufferService } from "../session/session-buffer-service";
 
 export class ContextService {
   constructor(
     private readonly prisma: AppPrismaClient,
     private readonly activeMemory?: ActiveMemoryService,
-    private readonly redis?: AppRedisClient
+    private readonly redis?: AppRedisClient,
+    private readonly sessionBuffer?: SessionBufferService
   ) {}
 
   async buildContext(options: {
@@ -19,16 +21,30 @@ export class ContextService {
     message?: MessageEnvelope;
     intent?: BotIntent;
   }): Promise<ContextBundleV2> {
+    const recentMessagesPromise = options.intent === "chat" && options.message && this.sessionBuffer
+      ? this.sessionBuffer.getCompactedSessionMessages(options.guildId, options.userId, options.channelId)
+      : this.prisma.message.findMany({
+          where: {
+            guildId: options.guildId,
+            channelId: options.channelId
+          },
+          orderBy: { createdAt: "desc" },
+          take: options.limit,
+          include: { user: true }
+        }).then((recentMessages) => recentMessages
+          .reverse()
+          .map((message) => ({
+            id: message.id,
+            author: message.user.globalName || message.user.username || message.userId,
+            userId: message.userId,
+            isBot: message.user.isBot,
+            content: message.content,
+            createdAt: message.createdAt,
+            replyToMessageId: message.replyToMessageId
+          })));
+
     const [recentMessages, activeMemory] = await Promise.all([
-      this.prisma.message.findMany({
-        where: {
-          guildId: options.guildId,
-          channelId: options.channelId
-        },
-        orderBy: { createdAt: "desc" },
-        take: options.limit,
-        include: { user: true }
-      }),
+      recentMessagesPromise,
       this.activeMemory?.buildActiveMemory({
         guildId: options.guildId,
         channelId: options.channelId,
@@ -41,17 +57,7 @@ export class ContextService {
 
     return {
       version: "v2",
-      recentMessages: recentMessages
-        .reverse()
-        .map((message) => ({
-          id: message.id,
-          author: message.user.globalName || message.user.username || message.userId,
-          userId: message.userId,
-          isBot: message.user.isBot,
-          content: message.content,
-          createdAt: message.createdAt,
-          replyToMessageId: message.replyToMessageId
-        })),
+      recentMessages,
       relationship: null,
       repliedMessageId: options.message?.replyToMessageId ?? null,
       activeMemory

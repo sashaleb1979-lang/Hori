@@ -3,7 +3,7 @@ import { assertEnvForRole, loadEnv } from "@hori/config";
 import { createRuntimeLlmClient, RuntimeConfigService } from "@hori/core";
 import { EmbeddingAdapter, ModelRouter } from "@hori/llm";
 import type { LlmClient } from "@hori/llm";
-import { ProfileService, RelationshipService, RetrievalService, SummaryService, TopicService } from "@hori/memory";
+import { ProfileService, RelationshipService, RetrievalService, SessionBufferService, SummaryService, TopicService } from "@hori/memory";
 import { SearchCacheService } from "@hori/search";
 import {
   createAppQueues,
@@ -21,6 +21,7 @@ import { createEmbeddingJob } from "./jobs/embeddings";
 import { createMemoryFormationJob } from "./jobs/memory-formation";
 import { createProfileJob } from "./jobs/profiles";
 import { createSearchCacheCleanupJob } from "./jobs/search-cache";
+import { createSessionCompactionJob } from "./jobs/session-compaction";
 import { createSessionJob } from "./jobs/session-evaluator";
 import { createSummaryJob } from "./jobs/summaries";
 import { createTopicJob } from "./jobs/topics";
@@ -33,6 +34,7 @@ export interface WorkerRuntime {
   queues: ReturnType<typeof createAppQueues>;
   analytics: AnalyticsQueryService;
   summaryService: SummaryService;
+  sessionBuffer: SessionBufferService;
   profileService: ProfileService;
   retrievalService: RetrievalService;
   relationshipService: RelationshipService;
@@ -64,6 +66,7 @@ async function main() {
   const queues = createAppQueues(env.REDIS_URL, env.JOB_QUEUE_PREFIX);
   const analytics = new AnalyticsQueryService(prisma);
   const summaryService = new SummaryService(prisma);
+  const sessionBuffer = new SessionBufferService(prisma, redis);
   const profileService = new ProfileService(prisma, env);
   const relationshipService = new RelationshipService(prisma);
   const retrievalService = new RetrievalService(prisma, logger);
@@ -87,6 +90,7 @@ async function main() {
     queues,
     analytics,
     summaryService,
+    sessionBuffer,
     profileService,
     retrievalService,
     relationshipService,
@@ -100,6 +104,7 @@ async function main() {
 
   const workers = [
     createWorker(QUEUE_NAMES.summary, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSummaryJob(runtime), env.JOB_CONCURRENCY_SUMMARIES),
+    createWorker(QUEUE_NAMES.sessionCompaction, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createSessionCompactionJob(runtime), 1),
     createWorker(QUEUE_NAMES.profile, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createProfileJob(runtime), env.JOB_CONCURRENCY_PROFILES),
     createWorker(QUEUE_NAMES.embedding, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createEmbeddingJob(runtime), env.JOB_CONCURRENCY_EMBEDDINGS),
     createWorker(QUEUE_NAMES.topic, env.REDIS_URL, env.JOB_QUEUE_PREFIX, createTopicJob(runtime), 1),

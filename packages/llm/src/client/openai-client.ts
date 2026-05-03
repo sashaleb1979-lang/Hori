@@ -108,6 +108,10 @@ export class OpenAIClient implements LlmClient {
       messages
     };
 
+    if (options.serviceTier) {
+      body.service_tier = options.serviceTier;
+    }
+
     if (usesMaxCompletionTokens(options.model)) {
       if (options.maxTokens !== undefined) {
         body.max_completion_tokens = options.maxTokens;

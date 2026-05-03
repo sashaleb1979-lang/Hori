@@ -504,6 +504,7 @@ export interface AnalyticsOverview {
 
 export interface QueueJobNames {
   summary: "summary.generate";
+  sessionCompaction: "session.compact";
   profile: "profile.refresh";
   embedding: "embedding.generate";
   topic: "topic.update";
@@ -516,6 +517,12 @@ export interface QueueJobNames {
 export interface SummaryJobPayload {
   guildId: string;
   channelId: string;
+}
+
+export interface SessionCompactionJobPayload {
+  guildId: string;
+  channelId: string;
+  userId: string;
 }
 
 export interface ProfileJobPayload {

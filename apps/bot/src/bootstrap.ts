@@ -19,6 +19,7 @@ interface BotQueueHandle {
 
 interface BotQueues {
   summary: BotQueueHandle;
+  sessionCompaction: BotQueueHandle;
   profile: BotQueueHandle;
   embedding: BotQueueHandle;
   topic: BotQueueHandle;
@@ -72,6 +73,7 @@ function createNoopQueues(logger: ReturnType<typeof createLogger>, prefix: strin
 
   return {
     summary: createNoopQueue("summary"),
+    sessionCompaction: createNoopQueue("sessionCompaction"),
     profile: createNoopQueue("profile"),
     embedding: createNoopQueue("embedding"),
     topic: createNoopQueue("topic"),
@@ -122,7 +124,7 @@ export async function bootstrapBot() {
   const flashTrollingService = new FlashTrollingService();
   const promptSlotService = new PromptSlotService(prisma);
   const sessionBufferService = redisReady ? new SessionBufferService(prisma, redis) : new SessionBufferService(prisma);
-  const contextService = new ContextService(prisma, activeMemoryService, redisReady ? redis : undefined);
+  const contextService = new ContextService(prisma, activeMemoryService, redisReady ? redis : undefined, sessionBufferService);
 
   const { client: llmClient } = createRuntimeLlmClient(env, logger, runtimeConfig, "bot");
 

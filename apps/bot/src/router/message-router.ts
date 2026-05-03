@@ -7,6 +7,7 @@ import { type BotReplyPayload, type MessageEnvelope, type ReplyQueueTrace, type 
 
 import type { BotRuntime } from "../bootstrap";
 import { enqueueBackgroundJobs } from "./background-jobs";
+import { handleChatRecapCommand, isChatRecapCodeword } from "./chat-recap";
 import { getOwnerLockdownState, isBotOwner } from "./owner-lockdown";
 import { sendReply } from "../responders/message-responder";
 import { loadMemeIndexer } from "../runtime/flash-trolling-scheduler";
@@ -572,8 +573,8 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
       requireMention: true,
       allowedImplicitMentionKinds: ["reply_to_bot", "name_in_text"],
       allowTextCommands: true,
-      hasControlCommand: /^(запомни|вспомни|забудь)\b/i.test(message.content.trim()),
-      commandAuthorized: member.permissions.has(PermissionFlagsBits.ManageGuild),
+      hasControlCommand: /^(запомни|вспомни|забудь)\b/i.test(message.content.trim()) || isChatRecapCodeword(message.content),
+      commandAuthorized: isChatRecapCodeword(message.content) || member.permissions.has(PermissionFlagsBits.ManageGuild),
     }
   );
   const triggerSource = triggerContext.triggerSource ?? (activation.shouldBypassMention ? "name" : undefined);
@@ -644,7 +645,8 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
     return;
   }
 
-  const allowDebounce = explicitInvocation && (triggerSource === "reply" || triggerSource === "name");
+  const recapCodeword = isChatRecapCodeword(message.content);
+  const allowDebounce = explicitInvocation && !recapCodeword && (triggerSource === "reply" || triggerSource === "name");
   if (shouldDebounce({ text: message.content, hasMedia: message.attachments.size > 0, allowDebounce })) {
     const debouncer = getOrCreateInboundDebouncer(message.channelId);
     await debouncer.enqueue({ runtime, message, routingConfig, triggerSource });
@@ -706,7 +708,9 @@ async function processInvocation(
   const member = message.member ?? (await message.guild.members.fetch(message.author.id));
   const botName = routingConfig.guildSettings.botName;
   const botId = runtime.client.user.id;
-  const explicitInvocation = Boolean(triggerSource) || /^(запомни|вспомни|забудь)\b/i.test((contentOverride ?? message.content).trim());
+  const explicitInvocation = Boolean(triggerSource)
+    || /^(запомни|вспомни|забудь)\b/i.test((contentOverride ?? message.content).trim())
+    || isChatRecapCodeword(contentOverride ?? message.content);
   const envelope = buildEnvelope(message, member, botName, botId, triggerSource, explicitInvocation, autoInterject, contentOverride);
   const preliminaryIntent = intentRouter.route(envelope, botName);
   const queueMessageKind = detectMessageKind({
@@ -755,7 +759,69 @@ async function processInvocation(
 
   let replyDelivered = false;
 
+  const sessionCompactionJobId = `session-compact-${envelope.guildId}-${envelope.userId}-${envelope.channelId}`.replace(/[:\s]+/g, "-");
+
   try {
+    if (explicitInvocation && preliminaryIntent.intent === "chat" && !preliminaryIntent.cleanedContent.length) {
+      const helpText = await runtime.slashAdmin.handleHelp();
+      const deliveredReplies = await sendReply(message, helpText);
+      await ingestDeliveredBotReplies(runtime, deliveredReplies);
+      replyDelivered = true;
+
+      await runtime.prisma.botEventLog.create({
+        data: {
+          guildId: envelope.guildId,
+          channelId: envelope.channelId,
+          messageId: envelope.messageId,
+          userId: envelope.userId,
+          eventType: "reply",
+          intent: "help",
+          routeReason: "empty_invocation_help",
+          usedSearch: false,
+          relationshipApplied: false,
+          debugTrace: {
+            triggerSource: envelope.triggerSource,
+            explicitInvocation,
+            cleanedContent: preliminaryIntent.cleanedContent
+          } as never
+        }
+      });
+
+      return;
+    }
+
+    const recapResult = explicitInvocation && preliminaryIntent.intent === "chat"
+      ? await handleChatRecapCommand(runtime, envelope, preliminaryIntent.cleanedContent)
+      : null;
+    if (recapResult) {
+      const deliveredReplies = await sendReply(message, recapResult.reply);
+      await ingestDeliveredBotReplies(runtime, deliveredReplies);
+      replyDelivered = true;
+
+      if (recapResult.logEvent) {
+        await runtime.prisma.botEventLog.create({
+          data: {
+            guildId: envelope.guildId,
+            channelId: envelope.channelId,
+            messageId: deliveredReplies[0]?.id ?? null,
+            userId: envelope.userId,
+            eventType: recapResult.logEvent.eventType,
+            intent: "summary",
+            routeReason: "chat_recap_codeword",
+            modelUsed: recapResult.logEvent.modelUsed,
+            usedSearch: false,
+            promptTokens: recapResult.logEvent.promptTokens,
+            completionTokens: recapResult.logEvent.completionTokens,
+            totalTokens: recapResult.logEvent.totalTokens,
+            relationshipApplied: false,
+            debugTrace: recapResult.logEvent.debugTrace as never
+          }
+        });
+      }
+
+      return;
+    }
+
     const result = await runtime.orchestrator.handleMessage(envelope, routingConfig, queueTrace);
 
     if (!result.trace.responded) {
@@ -836,6 +902,16 @@ async function processInvocation(
     });
     await ingestDeliveredBotReplies(runtime, deliveredReplies);
     replyDelivered = true;
+    void runtime.queues.sessionCompaction.add(
+      "session-compaction",
+      { guildId: envelope.guildId, channelId: envelope.channelId, userId: envelope.userId },
+      { jobId: sessionCompactionJobId, removeOnComplete: 20, removeOnFail: 50 }
+    ).catch((error) => {
+      runtime.logger.warn(
+        { guildId: envelope.guildId, channelId: envelope.channelId, userId: envelope.userId, error },
+        "session compaction enqueue failed"
+      );
+    });
 
     if (autoInterject) {
       await runtime.prisma.interjectionLog.create({

@@ -81,6 +81,37 @@ describe("OpenAIClient", () => {
     });
   });
 
+  it("passes flex service tier through to OpenAI chat completions", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+
+      expect(payload).toMatchObject({
+        model: "gpt-5-nano",
+        service_tier: "flex"
+      });
+
+      return new Response(
+        JSON.stringify({
+          choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 }
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createClient();
+
+    await expect(client.chat({
+      model: "gpt-5-nano",
+      messages: [{ role: "user", content: "ping" }],
+      serviceTier: "flex"
+    })).resolves.toMatchObject({
+      message: { content: "ok" }
+    });
+  });
+
   it("retries on 429 then succeeds", async () => {
     let calls = 0;
     const fetchMock = vi.fn(async () => {

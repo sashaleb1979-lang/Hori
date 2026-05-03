@@ -27,6 +27,7 @@ export function createWorker<T>(
 export function createAppQueues(redisUrl: string, prefix: string) {
   return {
     summary: createQueue(QUEUE_NAMES.summary, redisUrl, prefix, { removeOnComplete: 50, removeOnFail: 100 }),
+    sessionCompaction: createQueue(QUEUE_NAMES.sessionCompaction, redisUrl, prefix, { removeOnComplete: 50, removeOnFail: 100 }),
     profile: createQueue(QUEUE_NAMES.profile, redisUrl, prefix, { removeOnComplete: 50, removeOnFail: 100 }),
     embedding: createQueue(QUEUE_NAMES.embedding, redisUrl, prefix, { removeOnComplete: 100, removeOnFail: 100 }),
     topic: createQueue(QUEUE_NAMES.topic, redisUrl, prefix, { removeOnComplete: 100, removeOnFail: 100 }),

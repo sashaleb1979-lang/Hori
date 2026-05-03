@@ -489,10 +489,13 @@ export class ChatOrchestrator {
     message: MessageEnvelope,
     contextBundle: Awaited<ReturnType<ContextService["buildContext"]>>
   ): LlmChatMessage[] {
-    return contextBundle.recentMessages
+    const filtered = contextBundle.recentMessages
       .filter((entry) => entry.id !== message.messageId)
-      .filter((entry) => normalizeWhitespace(entry.content).length > 0)
-      .slice(-8)
+      .filter((entry) => normalizeWhitespace(entry.content).length > 0);
+    const summaryEntries = filtered.filter((entry) => entry.userId === "session-summary");
+    const liveEntries = filtered.filter((entry) => entry.userId !== "session-summary").slice(-8);
+
+    return [...summaryEntries, ...liveEntries]
       .map((entry) => {
         if (entry.isBot) {
           return { role: "assistant" as const, content: entry.content };
