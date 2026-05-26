@@ -36,7 +36,9 @@ export async function enqueueBackgroundJobs(runtime: QueueRuntime, envelope: {
   userId: string;
   messageId: string;
   content: string;
-}) {
+}, options: {
+  suppressSessionLifecycle?: boolean;
+} = {}) {
   const jobs = [
     {
       queue: "summary",
@@ -73,43 +75,53 @@ export async function enqueueBackgroundJobs(runtime: QueueRuntime, envelope: {
         { jobId: buildJobId("topic", envelope.messageId) }
       )
     },
-    {
-      queue: "conversationAnalysis",
-      task: (async () => {
-        // Remove existing delayed job so delay resets from the latest message
-        const jobId = buildJobId("conv-analysis", envelope.guildId, envelope.userId);
-        try {
-          const existing = await runtime.queues.conversationAnalysis.getJob?.(jobId);
-          if (existing && (await existing.isDelayed())) await existing.remove();
-        } catch { /* job doesn't exist or already processed */ }
-        return runtime.queues.conversationAnalysis.add(
-          "conversation-analysis",
-          {
-            guildId: envelope.guildId,
-            userId: envelope.userId,
-            channelId: envelope.channelId,
-            lastMessageAt: new Date().toISOString()
-          },
-          {
-            jobId,
-            delay: 60 * 60 * 1000,
-            removeOnComplete: 20,
-            removeOnFail: 50
-          }
-        );
-      })()
-    },
-    {
-      queue: "session",
-      task: runtime.queues.session.add(
-        "session",
-        { guildId: envelope.guildId, channelId: envelope.channelId, userId: envelope.userId },
-        {
-          jobId: buildJobId("session", envelope.guildId, envelope.userId, envelope.channelId),
-          delay: 10 * 60 * 1000
-        }
-      )
-    }
+    ...(!options.suppressSessionLifecycle ? [
+      {
+        queue: "conversationAnalysis",
+        task: (async () => {
+          const jobId = buildJobId("conv-analysis", envelope.guildId, envelope.userId);
+          try {
+            const existing = await runtime.queues.conversationAnalysis.getJob?.(jobId);
+            if (existing && (await existing.isDelayed())) await existing.remove();
+          } catch { /* job doesn't exist or already processed */ }
+          return runtime.queues.conversationAnalysis.add(
+            "conversation-analysis",
+            {
+              guildId: envelope.guildId,
+              userId: envelope.userId,
+              channelId: envelope.channelId,
+              lastMessageAt: new Date().toISOString()
+            },
+            {
+              jobId,
+              delay: 60 * 60 * 1000,
+              removeOnComplete: 20,
+              removeOnFail: 50
+            }
+          );
+        })()
+      },
+      {
+        queue: "session",
+        task: (async () => {
+          const jobId = buildJobId("session", envelope.guildId, envelope.channelId);
+          try {
+            const existing = await runtime.queues.session.getJob?.(jobId);
+            if (existing && (await existing.isDelayed())) await existing.remove();
+          } catch { /* job doesn't exist or already processed */ }
+          return runtime.queues.session.add(
+            "session",
+            { guildId: envelope.guildId, channelId: envelope.channelId, userId: envelope.userId },
+            {
+              jobId,
+              delay: 10 * 60 * 1000,
+              removeOnComplete: 20,
+              removeOnFail: 50
+            }
+          );
+        })()
+      }
+    ] : [])
   ];
 
   const results = await Promise.allSettled(jobs.map((job) => job.task));

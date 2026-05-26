@@ -193,6 +193,16 @@ export interface RelationshipOverlay {
   characteristicUpdatedAt?: Date | null;
 }
 
+export interface RelationshipHook {
+  id: string;
+  label: string;
+  detail: string;
+  useTag?: string | null;
+  avoidTag?: string | null;
+  confidence: number;
+  freshness?: "fresh" | "steady" | "stale";
+}
+
 export interface MessageEnvelope {
   messageId: string;
   guildId: string;
@@ -371,6 +381,8 @@ export interface ContextMessage {
   content: string;
   createdAt: Date;
   replyToMessageId?: string | null;
+  targetUserId?: string | null;
+  targetMessageId?: string | null;
 }
 
 export interface ActiveTopicContext {

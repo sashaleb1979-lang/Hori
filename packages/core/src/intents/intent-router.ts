@@ -5,17 +5,17 @@ import type { BotIntent, IntentResult, MessageEnvelope } from "@hori/shared";
  *
  * Только два режима:
  *  1. **chat** — всё остальное.
- *  2. **сигил/русское кодовое слово** — отдельные intent-ветки.
+ *  2. **сигил** — отдельные intent-ветки.
  *
  * Активны сейчас:
  *  - `?` (sigil) → search
- *  - `хори запомни X` → memory_write
- *  - `хори вспомни X` → memory_recall
- *  - `хори забудь X` → memory_forget
  *
  * Зарезервированы (panel может включить позже):
  *  - `*` (sigil) → отложен (knowledge-base поиск по тегам)
  *  - `!` (sigil) → reserved
+ *
+ * Русские команды `запомни/вспомни/забудь` теперь живут в bot-layer slot UX
+ * и не входят в core routing contract.
  *
  * Все V6 intents (analytics/summary/profile/rewrite/help/moderation_style_request)
  * больше не маршрутизируются — они сначала становятся chat, а соответствующее
@@ -81,29 +81,6 @@ function buildActiveSigils(options: IntentRouterOptions | undefined): SigilDefin
   const allowed = new Set(options.enabledSigils);
   return SIGIL_REGISTRY.filter((entry) => allowed.has(entry.char));
 }
-
-const PATTERNS: Array<{
-  intent: Exclude<BotIntent, "chat" | "ignore">;
-  requiresSearch?: boolean;
-  regex: RegExp;
-  reason: string;
-}> = [
-  {
-    intent: "memory_write",
-    regex: /^запомни\b/i,
-    reason: "memory write: хори запомни …"
-  },
-  {
-    intent: "memory_recall",
-    regex: /^вспомни\b/i,
-    reason: "memory recall: хори вспомни …"
-  },
-  {
-    intent: "memory_forget",
-    regex: /^забудь\b/i,
-    reason: "memory forget: хори забудь …"
-  }
-];
 
 function stripBotName(content: string, botName: string) {
   const normalized = content.trim();
@@ -173,20 +150,6 @@ export class IntentRouter {
         sigil: sigil.char
       };
     }
-
-    // Русские кодовые слова после имени бота.
-    for (const entry of PATTERNS) {
-      if (entry.regex.test(cleanedContent)) {
-        return {
-          intent: entry.intent,
-          confidence: 0.95,
-          reason: entry.reason,
-          cleanedContent,
-          requiresSearch: entry.requiresSearch ?? false
-        };
-      }
-    }
-
     // Фолбэк — chat.
     return {
       intent: "chat",

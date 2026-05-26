@@ -273,14 +273,6 @@ const compactConfigSchema = z
       })
       .partial()
       .optional(),
-    media: z
-      .object({
-        autoGlobalCooldownSec: z.number().int().nonnegative().optional(),
-        autoMinConfidence: z.number().min(0).max(1).optional(),
-        autoMinIntensity: z.number().min(0).max(1).optional()
-      })
-      .partial()
-      .optional(),
     jobs: z
       .object({
         prefix: z.string().optional(),
@@ -349,9 +341,6 @@ const legacyAdvancedSchema = z
     NATURAL_SPLIT_CHANCE: floatish.optional(),
     NATURAL_SPLIT_COOLDOWN_SEC: intish.optional(),
     SELECTIVE_ENGAGEMENT_MIN_SCORE: floatish.optional(),
-    MEDIA_AUTO_GLOBAL_COOLDOWN_SEC: intish.optional(),
-    MEDIA_AUTO_MIN_CONFIDENCE: floatish.optional(),
-    MEDIA_AUTO_MIN_INTENSITY: floatish.optional(),
     DISCORD_REGISTER_LEGACY_COMMANDS: boolish.optional(),
     JOB_QUEUE_PREFIX: z.string().optional(),
     JOB_CONCURRENCY_SUMMARIES: intish.optional(),
@@ -595,9 +584,6 @@ function parseCompactConfig(cfg?: string): Partial<RuntimeTuning> {
     NATURAL_SPLIT_CHANCE: parsed.chat?.naturalSplitChance,
     NATURAL_SPLIT_COOLDOWN_SEC: parsed.chat?.naturalSplitCooldownSec,
     SELECTIVE_ENGAGEMENT_MIN_SCORE: parsed.chat?.selectiveEngagementMinScore,
-    MEDIA_AUTO_GLOBAL_COOLDOWN_SEC: parsed.media?.autoGlobalCooldownSec,
-    MEDIA_AUTO_MIN_CONFIDENCE: parsed.media?.autoMinConfidence,
-    MEDIA_AUTO_MIN_INTENSITY: parsed.media?.autoMinIntensity,
     DISCORD_REGISTER_LEGACY_COMMANDS: undefined,
     JOB_QUEUE_PREFIX: parsed.jobs?.prefix,
     JOB_CONCURRENCY_SUMMARIES: parsed.jobs?.summaries,

@@ -12,9 +12,11 @@ import { createLogger, createPrismaClient, createRedisClient, createAppQueues, e
 import { createDiscordClient } from "./gateway/create-discord-client";
 import { registerEvents } from "./events/register-events";
 import { startFlashTrollingScheduler } from "./runtime/flash-trolling-scheduler";
+import { startSessionSleepSync } from "./runtime/session-sleep-sync";
 
 interface BotQueueHandle {
   add(jobName: string, payload?: unknown, options?: unknown): Promise<unknown>;
+  getJob?(jobId: string): Promise<{ isDelayed(): Promise<boolean>; remove(): Promise<void> } | undefined>;
 }
 
 interface BotQueues {
@@ -52,6 +54,7 @@ export interface BotRuntime {
   relationshipService: RelationshipService;
   promptSlots: PromptSlotService;
   knowledge: KnowledgeService;
+  sessionBuffer: SessionBufferService;
 }
 
 function createNoopQueues(logger: ReturnType<typeof createLogger>, prefix: string): BotQueues {
@@ -121,7 +124,9 @@ export async function bootstrapBot() {
   const runtimeConfig = new RuntimeConfigService(prisma, env);
   const replyQueueService = new ReplyQueueService(prisma, env.REPLY_QUEUE_BUSY_TTL_SEC);
   const queuePhrasePoolService = new QueuePhrasePoolService();
-  const flashTrollingService = new FlashTrollingService();
+  const flashTrollingService = new FlashTrollingService({
+    config: await runtimeConfig.getFlashTrollingConfig()
+  });
   const promptSlotService = new PromptSlotService(prisma);
   const sessionBufferService = redisReady ? new SessionBufferService(prisma, redis) : new SessionBufferService(prisma);
   const contextService = new ContextService(prisma, activeMemoryService, redisReady ? redis : undefined, sessionBufferService);
@@ -164,6 +169,7 @@ export async function bootstrapBot() {
     replyQueueService,
     memoryAlbumService,
     reflectionService,
+    sessionBufferService,
     embeddingAdapter,
     llmClient
   );
@@ -206,7 +212,8 @@ export async function bootstrapBot() {
     flashTrolling: flashTrollingService,
     relationshipService,
     promptSlots: promptSlotService,
-    knowledge: knowledgeService
+    knowledge: knowledgeService,
+    sessionBuffer: sessionBufferService
   };
 
   registerEvents(runtime);
@@ -214,6 +221,7 @@ export async function bootstrapBot() {
 
   // Запустить flash-trolling scheduler (если enabled в конфиге).
   startFlashTrollingScheduler(runtime);
+  startSessionSleepSync(runtime);
 
   return runtime;
 }

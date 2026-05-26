@@ -5,6 +5,7 @@ import {
   SlashCommandBuilder
 } from "discord.js";
 
+import { CORE_EPOCH_FRONT_CHOICES } from "@hori/core";
 import { CONTEXT_ACTIONS } from "@hori/shared";
 
 const panelTabChoices = [
@@ -66,6 +67,14 @@ const relationshipGrowthModeChoices = [
 const stylePresetModeChoices = [
   { name: "manual_only", value: "manual_only" }
 ] as const;
+
+const epochActionChoices = [
+  { name: "status", value: "status" },
+  { name: "rotate", value: "rotate" },
+  { name: "reset", value: "reset" }
+] as const;
+
+const epochFrontChoices = CORE_EPOCH_FRONT_CHOICES.map((value) => ({ name: value, value }));
 
 const replyLengthChoices = [
   { name: "short", value: "short" },
@@ -179,6 +188,18 @@ const horiCommandDefinition = new SlashCommandBuilder()
           .setMinValue(1)
           .setMaxValue(15)
       )
+      .addStringOption((option) =>
+        option
+          .setName("epoch-action")
+          .setDescription("Статус или ручное управление core epoch")
+          .addChoices(...epochActionChoices)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("epoch-front")
+          .setDescription("Какой front включить при rotate")
+          .addChoices(...epochFrontChoices)
+      )
   )
   .addSubcommand((subcommand) =>
     subcommand
@@ -197,24 +218,6 @@ const horiCommandDefinition = new SlashCommandBuilder()
           )
       )
       .addIntegerOption((option) => option.setName("limit").setDescription("Сколько событий показать").setMinValue(1).setMaxValue(20))
-  )
-  .addSubcommand((subcommand) =>
-    subcommand
-      .setName("memory-cards")
-      .setDescription("Owner/mod: list или remove user memory cards")
-      .addUserOption((option) => option.setName("user").setDescription("Пользователь").setRequired(true))
-      .addStringOption((option) =>
-        option
-          .setName("action")
-          .setDescription("Действие")
-          .setRequired(true)
-          .addChoices(
-            { name: "list", value: "list" },
-            { name: "remove", value: "remove" }
-          )
-      )
-      .addIntegerOption((option) => option.setName("limit").setDescription("Сколько показать").setMinValue(1).setMaxValue(20))
-      .addStringOption((option) => option.setName("id").setDescription("ID memory card для remove"))
   )
   .addSubcommand((subcommand) =>
     subcommand

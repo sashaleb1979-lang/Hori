@@ -9,7 +9,13 @@ vi.mock("../apps/bot/src/router/owner-lockdown", () => ({
   isBotOwner: vi.fn(() => false)
 }));
 
-import { EMPTY_REPLY_FALLBACK, prepareReplyForDelivery, resolveModerationReplyForDelivery, routeMessage } from "../apps/bot/src/router/message-router";
+const loadMemeIndexerMock = vi.fn(async () => null);
+
+vi.mock("../apps/bot/src/runtime/flash-trolling-scheduler", () => ({
+  loadMemeIndexer: loadMemeIndexerMock
+}));
+
+import { EMPTY_REPLY_FALLBACK, prepareReplyForDelivery, resetMediaReactionStateForTests, resolveModerationReplyForDelivery, routeMessage } from "../apps/bot/src/router/message-router";
 
 function openAiResponse(content: string, promptTokens = 120, completionTokens = 40) {
   return new Response(JSON.stringify({
@@ -40,6 +46,9 @@ function openAiResponse(content: string, promptTokens = 120, completionTokens = 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  loadMemeIndexerMock.mockReset();
+  loadMemeIndexerMock.mockResolvedValue(null);
+  resetMediaReactionStateForTests();
 });
 
 describe("prepareReplyForDelivery", () => {
@@ -242,6 +251,11 @@ describe("prepareReplyForDelivery", () => {
             allowInterjections: false,
             topicInterestTags: []
           }
+        }),
+        getMediaReactionConfig: vi.fn().mockResolvedValue({
+          chance: 1,
+          minRelationshipScore: 2,
+          cooldownSec: 0
         })
       },
       ingestService: {
@@ -714,5 +728,276 @@ describe("prepareReplyForDelivery", () => {
       })
     }));
     expect(ingestMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("attaches a meme when media reactions are enabled and the relationship is warm enough", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.01);
+    loadMemeIndexerMock.mockResolvedValue({
+      pickRandom: vi.fn().mockReturnValue({
+        filePath: "assets/memes/test.png",
+        mediaId: "meme-1",
+        type: "image"
+      })
+    });
+
+    const ingestMessage = vi.fn().mockResolvedValue({ deduplicated: false });
+    const sentReply = {
+      id: "bot-media-1",
+      inGuild: () => true,
+      guildId: "guild-1",
+      channelId: "channel-1",
+      author: {
+        id: "bot-1",
+        username: "Hori",
+        globalName: "Hori"
+      },
+      member: {
+        displayName: "Hori"
+      },
+      content: "держи",
+      createdAt: new Date("2026-05-01T10:00:01.000Z"),
+      reference: {
+        messageId: "user-msg-media"
+      },
+      mentions: {
+        has: () => false,
+        users: new Map()
+      },
+      guild: {
+        name: "Guild 1"
+      },
+      channel: {
+        name: "general"
+      }
+    };
+    const message = {
+      id: "user-msg-media",
+      guildId: "guild-1",
+      channelId: "channel-1",
+      content: "<@bot-1> ну давай",
+      createdAt: new Date("2026-05-01T10:00:00.000Z"),
+      author: {
+        id: "user-1",
+        username: "Gnom",
+        bot: false
+      },
+      member: {
+        displayName: "Гном",
+        permissions: {
+          has: () => false
+        }
+      },
+      guild: {
+        name: "Guild 1",
+        members: {
+          fetch: vi.fn(),
+          fetchMe: vi.fn(),
+          me: null
+        }
+      },
+      channel: {
+        name: "general",
+        send: vi.fn()
+      },
+      mentions: {
+        has: (id: string) => id === "bot-1",
+        users: new Map([["bot-1", { id: "bot-1" }]])
+      },
+      attachments: {
+        size: 0
+      },
+      reference: null,
+      inGuild: () => true,
+      reply: vi.fn().mockResolvedValue(sentReply)
+    };
+    const runtime = {
+      client: {
+        user: {
+          id: "bot-1",
+          username: "Hori"
+        }
+      },
+      env: {
+        DISCORD_OWNER_IDS: [],
+        AUTOINTERJECT_CHANNEL_ALLOWLIST: [],
+        NATURAL_SPLIT_COOLDOWN_SEC: 60,
+        NATURAL_SPLIT_CHANCE: 0.01
+      },
+      prisma: {
+        botEventLog: {
+          create: vi.fn()
+        },
+        interjectionLog: {
+          create: vi.fn()
+        }
+      },
+      runtimeConfig: {
+        getRoutingConfig: vi.fn().mockResolvedValue({
+          guildSettings: {
+            botName: "Хори",
+            interjectTendency: 0,
+            forbiddenWords: []
+          },
+          featureFlags: {
+            autoInterject: false,
+            replyQueueEnabled: false,
+            naturalMessageSplittingEnabled: false,
+            mediaReactionsEnabled: true
+          },
+          channelPolicy: {
+            isMuted: false,
+            allowBotReplies: true,
+            allowInterjections: false,
+            topicInterestTags: []
+          }
+        })
+      },
+      ingestService: {
+        ingestMessage
+      },
+      knowledge: {
+        matchTrigger: vi.fn()
+      },
+      orchestrator: {
+        handleMessage: vi.fn().mockResolvedValue({
+          reply: "держи",
+          moderationAction: null,
+          trace: {
+            responded: true,
+            intent: "chat",
+            triggerSource: "mention",
+            behavior: {
+              messageKind: "casual_address"
+            }
+          }
+        })
+      },
+      logger: {
+        error: vi.fn(),
+        warn: vi.fn()
+      },
+      replyQueue: {},
+      queuePhrasePool: {},
+      relationshipService: {
+        getRelationship: vi.fn().mockResolvedValue({ relationshipScore: 2 })
+      }
+    };
+
+    await routeMessage(runtime as never, message as never);
+
+    expect(loadMemeIndexerMock).toHaveBeenCalledTimes(1);
+    expect(runtime.relationshipService.getRelationship).toHaveBeenCalledWith("guild-1", "user-1");
+    expect(message.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: "держи",
+      files: [expect.stringContaining("assets")]
+    }));
+  });
+
+  it("respects media reaction cooldown so back-to-back replies do not both attach memes", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.01);
+    loadMemeIndexerMock.mockResolvedValue({
+      pickRandom: vi.fn().mockReturnValue({
+        filePath: "assets/memes/test.png",
+        mediaId: "meme-2",
+        type: "image"
+      })
+    });
+
+    const ingestMessage = vi.fn().mockResolvedValue({ deduplicated: false });
+    const sentReply = {
+      id: "bot-media-2",
+      inGuild: () => true,
+      guildId: "guild-1",
+      channelId: "channel-1",
+      author: { id: "bot-1", username: "Hori", globalName: "Hori" },
+      member: { displayName: "Hori" },
+      content: "держи",
+      createdAt: new Date("2026-05-01T10:00:01.000Z"),
+      reference: { messageId: "user-msg-media-2" },
+      mentions: { has: () => false, users: new Map() },
+      guild: { name: "Guild 1" },
+      channel: { name: "general" }
+    };
+    const makeMessage = (id: string) => ({
+      id,
+      guildId: "guild-1",
+      channelId: "channel-1",
+      content: "<@bot-1> ну давай",
+      createdAt: new Date("2026-05-01T10:00:00.000Z"),
+      author: { id: "user-1", username: "Gnom", bot: false },
+      member: { displayName: "Гном", permissions: { has: () => false } },
+      guild: { name: "Guild 1", members: { fetch: vi.fn(), fetchMe: vi.fn(), me: null } },
+      channel: { name: "general", send: vi.fn() },
+      mentions: { has: (botId: string) => botId === "bot-1", users: new Map([["bot-1", { id: "bot-1" }]]) },
+      attachments: { size: 0 },
+      reference: null,
+      inGuild: () => true,
+      reply: vi.fn().mockResolvedValue(sentReply)
+    });
+    const runtime = {
+      client: { user: { id: "bot-1", username: "Hori" } },
+      env: {
+        DISCORD_OWNER_IDS: [],
+        AUTOINTERJECT_CHANNEL_ALLOWLIST: [],
+        NATURAL_SPLIT_COOLDOWN_SEC: 60,
+        NATURAL_SPLIT_CHANCE: 0.01
+      },
+      prisma: {
+        botEventLog: { create: vi.fn() },
+        interjectionLog: { create: vi.fn() }
+      },
+      runtimeConfig: {
+        getRoutingConfig: vi.fn().mockResolvedValue({
+          guildSettings: { botName: "Хори", interjectTendency: 0, forbiddenWords: [] },
+          featureFlags: {
+            autoInterject: false,
+            replyQueueEnabled: false,
+            naturalMessageSplittingEnabled: false,
+            mediaReactionsEnabled: true
+          },
+          channelPolicy: {
+            isMuted: false,
+            allowBotReplies: true,
+            allowInterjections: false,
+            topicInterestTags: []
+          }
+        }),
+        getMediaReactionConfig: vi.fn().mockResolvedValue({
+          chance: 1,
+          minRelationshipScore: 2,
+          cooldownSec: 3600
+        })
+      },
+      ingestService: { ingestMessage },
+      knowledge: { matchTrigger: vi.fn() },
+      orchestrator: {
+        handleMessage: vi.fn().mockResolvedValue({
+          reply: "держи",
+          moderationAction: null,
+          trace: {
+            responded: true,
+            intent: "chat",
+            triggerSource: "mention",
+            behavior: { messageKind: "casual_address" }
+          }
+        })
+      },
+      logger: { error: vi.fn(), warn: vi.fn() },
+      replyQueue: {},
+      queuePhrasePool: {},
+      relationshipService: { getRelationship: vi.fn().mockResolvedValue({ relationshipScore: 2 }) }
+    };
+
+    const firstMessage = makeMessage("user-msg-media-2a");
+    const secondMessage = makeMessage("user-msg-media-2b");
+
+    await routeMessage(runtime as never, firstMessage as never);
+    await routeMessage(runtime as never, secondMessage as never);
+
+    expect(firstMessage.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: "держи",
+      files: [expect.stringContaining("assets")]
+    }));
+    expect(secondMessage.reply).toHaveBeenCalledWith("держи");
   });
 });

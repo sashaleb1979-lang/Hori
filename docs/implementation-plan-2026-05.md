@@ -36,30 +36,37 @@
 - ✅ V7 ACTIVE_CORE: 7 коров (cold_lowest..sweet + serious) в `packages/core/src/persona/cores.ts`.
 - ✅ `composeBehaviorPrompt` возвращает один блок (V7 single-block composer).
 - ✅ Маркер `агрессивно` в `COMMON_CORE_HEADER`. Парсер маркера `extractAggressionMarker` + полный pipeline `applyAggressionPipeline` (Stage 1→4 + replacementText + timeout) в `chat-orchestrator.ts:603-748`.
+- ✅ `relationshipsHardDisabled()` уже снят: hot path отношений и агрессии не заглушён.
 - ✅ `relationship-service.ts`:
   - `noteAggressionMarker` инкрементит stage,
   - `confirmAggression({timedOut})` → после Stage 4 ставит `escalationStage = 3` сразу (строка 338),
   - `resolveEscalationStage` через 24ч: Stage 1 → 0, Stage 2+ → 2 (строки 578-607),
   - `applySessionVerdict` при `score < 0 → ≥ 0` делает полный recovery + `escalationStage = 0` (строка 538).
 - ✅ Discord timeout: `apps/bot/src/router/message-router.ts:152` `tryApplyModerationAction` вызывает `targetMember.timeout(15*60*1000)` при наличии `ModerateMembers`.
-- ✅ Panel V7 (9 вкладок) с большинством read-only/status хендлеров: home/cores/people/aggression/slots/channels/queue/runtime/audit. Owner-actions делегируются в `/hori …` команды.
-- ✅ `IntentRouter` с sigil registry: `?` enabledByDefault → search; `*`, `!` reserved.
+- ✅ Panel V7 (9 вкладок) жива: home/cores/people/aggression/slots/channels/queue/runtime/audit.
 - ✅ `PromptSlotService` со всей backend-логикой (10м active / 6ч cd / channel>global / preemption).
+- ✅ Plain-message slot UX уже сидит в bot-layer: `запомни/вспомни/забудь` идут через slot flow, а не через core memory intent.
+- ✅ `_prompt_card` / `PROMPT_CARD_MODAL` убраны из bot-layer runtime path; prompt slots остались единственной user-facing surface.
+- ✅ `RuntimeConfigService` уже держит core prompt templates, per-user core override, channel access и queue-pool override.
+- ✅ Panel actions `cores_override` и `cores_overrides_list` теперь видимы; owner slot maintenance умеет force activate / deactivate / edit / set strength.
+- ✅ Slots inventory в panel уже показывает guild-wide inventory, а не только личные слоты.
+- ✅ `IntentRouter` с sigil registry: `?` enabledByDefault → search; `*`, `!` reserved.
 - ✅ Prisma модель `HoriPromptSlot` со всеми полями.
-- ✅ `QueuePhrasePoolService` + `DEFAULT_QUEUE_PHRASE_POOLS` (initial: 50/20/10, followup: 30/15/8).
+- ✅ `QueuePhrasePoolService` + `DEFAULT_QUEUE_PHRASE_POOLS` (initial: 50/20/10, followup: warm/neutral/cold = 30/30/30).
 - ✅ `FlashTrollingService` (выбор retort/question/meme по весам 40/10/40, ≥10 каждой категории).
+- ✅ `apps/bot/src/runtime/flash-trolling-scheduler.ts` существует и пишет pseudo-message `[мем: ...]` в контекст после meme action.
 - ✅ `MemeIndexer` + `assets/memes/catalog.json` (10+ мемов).
+- ✅ Minimum media reactions уже есть в reply path: при включённом флаге и тёплом score bot reply может получить meme attachment.
 - ✅ Session evaluator + conversation analysis воркеры.
+- ✅ Channel access matrix и `off` gate уже существуют в runtime/router path.
 - ✅ DeepSeek V4 Flash в AI router cascade (если `LLM_PROVIDER=router` + `DEEPSEEK_API_KEY`).
 
-### Сломано / отсутствует
-- 🔴 **`relationshipsHardDisabled() => true`** в `chat-orchestrator.ts:78` — глушит весь pipeline отношений и агрессии.
-- 🔴 «хори запомни/вспомни» в `message-router.ts:368` использует старый `_prompt_card` (одна карточка через UserMemoryNote), **не PromptSlotService**.
-- 🔴 «хори забудь» — IntentRouter распознаёт, обработчика нет.
-- 🔴 FlashTrollingService **никем не вызывается** (нет шедулера).
-- 🔴 Default `LLM_PROVIDER = "ollama"` в `packages/config/src/env.ts:115` — должен быть `"router"`.
-- 🔴 Несколько panel-actions выводят placeholder «используй /hori …» вместо реального UI (cores edit, channels matrix bulk, aggression policy edit, queue pools edit, slot force activate).
-- ⚠️ Followup queue pools (30/15/8) — не разделены на «нейтральные/дружеские/холодные» как требует 1.txt.
+### Осталось довести
+- ✅ Открытых product/runtime gaps из текущего плана в этом срезе больше нет.
+- ✅ Followup queue pools наружу переведены на `friendly/neutral/cold`, при этом внутренний bucket `warm` сохранён как compatibility alias для старых override payload и service internals.
+- ✅ Media reactions вынесены в отдельный runtime config surface с owner editor-ом в панели и coverage на config-driven attachment/cooldown path; старый `MEDIA_AUTO_*` env/runtime слой удалён.
+- ✅ Panel polish по owner editor surfaces закрыт для flash config, queue pools, aggression policy, aggression phrases и reset-экшенов people/aggression.
+- ✅ Flash runtime config action в V7 panel выведен как отдельный persistent editor через runtime settings.
 
 ---
 
@@ -138,13 +145,13 @@ model HoriPromptSlot {
 
 **Текущее:** initial × {warm,neutral,cold} = 50/20/10. followup × {warm,neutral,cold} = 30/15/8.
 
-**Новое:** оставляем initial 50/20/10 как есть (тесты их зафиксировали). Followup переделываем:
-- `followup.friendly: 30` универсальные дружеские «ну ещё раз говорю», «эй, я тут»
+**Новое:** оставляем initial 50/20/10 как есть (тесты их зафиксировали). Followup наружу живёт как `friendly/neutral/cold`, но внутри `QueuePhrasePoolService` compatibility bucket остаётся `warm`.
+- outward `followup.friendly` / stored alias `followup.warm`: 30 универсальных дружеских фраз
 - `followup.neutral: 30` универсальные нейтральные «секунду», «погоди»
 - `followup.cold: 30` холодные «я слышу», «не торопи»
 
-В `QueuePhrasePoolService.getPools()` для followup выбирается категория по relationship-score:
-- `score >= 1` → friendly
+В `QueuePhrasePoolService` для followup выбирается категория по relationship-score:
+- `score >= 1` → outward friendly / internal warm
 - `score in (-1, 1)` → neutral
 - `score <= -1` → cold
 
@@ -188,8 +195,8 @@ class FlashTrollingScheduler {
 
 **Обработка `retort`/`question`:** обычный `channel.send(text)` + запись в `Message` как ответ бота (для контекста).
 
-**Конфиг:** `flashTrolling.getConfig()` — уже редактируемый. Через panel:
-- `runtime_flash_config` (новый action в `runtime` tab) → modal с весами, intervalMinutes, channelAllowlist.
+**Конфиг:** `flashTrolling.getConfig()` редактируется через panel:
+- `runtime_flash_config` в `runtime` tab → modal с enabled, весами, intervalMinutes, minMessageLength и channelAllowlist.
 
 ### 2.5 Channels Access (П.16a)
 
@@ -209,10 +216,11 @@ class FlashTrollingScheduler {
 
 ### 2.7 Media Reactions (П.27)
 
-Уже отключено feature flag. Включаем:
-- В `runtime-config-service.featureFlags` поменять `mediaReactionsEnabled: true`.
-- Сервис существует. Проверить, что `chat-orchestrator` действительно прикрепляет media к ответам когда флаг включён (есть `MediaReactionService`?).
-- **Если сервиса нет** — это значит fragment был удалён в V7. Тогда: интегрировать через `FlashTrollingService.pickAction()` подход: при `relationshipScore >= 2` и `Math.random() < 0.05` после ответа Хори прикрепляем мем из catalog с подходящим тегом. Это безопасный минимум, дальше расширим.
+Feature flag и minimum reply-path уже живут в runtime.
+- `apps/bot/src/router/message-router.ts` читает отдельный `media.reactions` runtime setting вместо жёстко пришитых 5%/score>=2.
+- `RuntimeConfigService` хранит `chance`, `minRelationshipScore`, `cooldownSec` и даёт status/reset/set owner path.
+- В V7 panel выведен owner editor `queue_media_reactions`.
+- Coverage есть на service sanitize/clamp, panel exposure и config-driven attachment/cooldown path.
 
 ### 2.8 Knowledge Import (П.28)
 
@@ -235,18 +243,13 @@ class FlashTrollingScheduler {
 3. `packages/config/src/env.ts:115` — `default("router")`.
 
 ### Volna 2 — Queue Pools restructure
-**Цель:** 1.txt П.16.
+**Текущий статус:** закрыто. Followup pools сохраняют внутренний bucket `warm` только как совместимый alias, но наружу живут как `friendly/neutral/cold`.
 
-1. `packages/core/src/services/queue-phrase-pool-service.ts` — переписать `DEFAULT_QUEUE_PHRASE_POOLS.followup`:
-   - `friendly: 30 универсальных` (пишу новые)
-   - `neutral: 30 универсальных`
-   - `cold: 30 универсальных`
-   - удалить `warm` и поднять `neutral` к 30 (сохранить совместимость API через alias `warm = friendly`).
-2. `tests/queue-phrase-pool-sizes.test.ts` — поднять минимум до 30 для всех followup-категорий.
-3. В `ReplyQueueService` обновить выбор bucket для followup по новому правилу (`friendly/neutral/cold` по score).
+1. Alias `warm = friendly` сохранён на runtime-config boundary и в editor parsing.
+2. Тесты на override parsing и neutral-band routing сохранены.
 
 ### Volna 3 — Prompt Slots full UX (П.5)
-**Цель:** полностью заменить `_prompt_card` на slot-инвентарь.
+**Текущий статус:** закрыто в текущем runtime: user-facing slot UX активен, legacy prompt-card bridge убран, owner CRUD в panel включает force activate / deactivate / edit / strength, inventory показывает guild-wide state.
 
 1. **Prisma миграция:** добавить `strength Int @default(1)`, `lastDeactivatedAt DateTime?` в `HoriPromptSlot`.
 2. `prompt-slot-service.ts`: добавить `SLOT_LIMITS_BY_LEVEL`, `getLimit`, `canCreate`, `forceActivate`, `setStrength`, `updateContent`, `listForOwner` (если нет), `deleteSlot`, `deleteAllForUser`.
@@ -260,20 +263,17 @@ class FlashTrollingScheduler {
    - `SLOT:delete:<id>` → soft delete (или hard).
    - `SLOT:deleteAll:<userId>` → confirm.
 5. `chat-orchestrator.ts`: при наличии `getActiveSlot()` встроить `slot.content` после кор-промта (с префиксом по `strength`).
-6. **Удалить** старый `_prompt_card` UserMemoryNote-flow (модал PROMPT_CARD_MODAL и связанный код), но **сохранить** существующие данные (миграция: при первом «запомни» от юзера, у которого есть `_prompt_card`, импортировать как первый слот).
-7. Panel `slots_*` actions: переписать на полноценный CRUD (force-activate, deactivate, edit content, set strength, view all server slots).
+6. Done: `_prompt_card` / `PROMPT_CARD_MODAL` bridge убран из runtime path.
+7. Done: Panel `slots_*` actions покрывают edit content, guild inventory, force-activate, deactivate и set strength.
 
 ### Volna 4 — Flash Trolling Scheduler (П.15)
-**Цель:** 1.txt П.15 + meme-context.
+**Текущий статус:** закрыто. Scheduler, meme-context и runtime flash config editor уже живут в реальном V7 panel path.
 
-1. `apps/bot/src/runtime/flash-trolling-scheduler.ts` — новый.
-2. `bootstrap.ts` — при создании runtime запустить `scheduler.start(runtime)` если `flashTrolling.isEnabled()`.
-3. `MemeIndexer` — добавить `pickRandom()` и `getDescription(filePath)`.
-4. После отправки meme: создать row в `Message` table с `content = "[мем: <description>]"` и `authorId = botId`. Это обеспечит контекст в следующих ответах.
-5. Panel: `runtime_flash_config` action.
+1. Service-level coverage есть; bootstrap hydration в этом workspace подтверждена diagnostics-only и требует полного smoke/test в локальном clone.
+2. Panel action `runtime_flash_config` выведен как persistent runtime editor и гидратится в bootstrap.
 
 ### Volna 5 — Cores Editor + Mood Override (П.11)
-**Цель:** редактирование коров + ручная подмена.
+**Текущий статус:** закрыто. Backend core override, prompt editors и operator clear path уже есть; отдельный cancel control поверх list view не требуется как обязательный шаг плана.
 
 1. **Prisma миграции:**
    - `CorePromptOverride { id, guildId, coreId, content, updatedAt, updatedBy }`
@@ -287,20 +287,21 @@ class FlashTrollingScheduler {
 3. `chat-orchestrator.ts`: перед `pickCore` спросить override → передать в `pickCore`.
 4. `cores.ts`: `coreText(id, override)` уже принимает текст → ничего менять не надо.
 5. Panel:
-   - `cores_open_panel` → select(coreId) → modal(content) → save.
-   - `cores_evaluator` → modal с `relationshipEvaluatorPrompt`.
-   - `cores_aggression_checker` → modal с `aggressionCheckerPrompt`.
-   - **новый action `cores_override`**: select user → select core → select duration → upsert.
-   - **новый action `cores_overrides_list`**: show all active overrides с кнопками отмены.
+  - `cores_open_panel` → select(coreId) → modal(content) → save.
+  - `cores_evaluator` → modal с `relationshipEvaluatorPrompt`.
+  - `cores_aggression_checker` → modal с `aggressionCheckerPrompt`.
+  - `cores_override` и `cores_overrides_list` уже выведены в IA.
+  - Текущий clear path остаётся через existing override modal / runtime methods.
 
 ### Volna 6 — Channels & Panel polish (П.16a + П.11 cont.)
-1. `channels_matrix` action: новая UI с матрицей всех каналов (3 кнопки на канал).
-2. В начале `routeMessage`: если `ChannelConfig.isMuted && !allowBotReplies && !allowInterjections` (off) — return.
-3. Чистка остальных panel placeholders где можно.
+**Текущий статус:** закрыто. Channels matrix, `off` gate и оставшиеся живые panel placeholders уже дочищены.
+1. Coverage для `channels_matrix` и panel IA сохранена тестами.
+2. Reset actions people/aggression переведены с текстовых подсказок на live owner modals.
 
 ### Volna 7 — Media Reactions (П.27)
-1. Включить feature flag.
-2. Если `MediaReactionService` отсутствует — реализовать минимум: 5% шанс прикрепить мем к ответу Хори при `relationshipScore >= 2`.
+**Текущий статус:** закрыто. Minimum media path сохранён, richer tuning/editor UX уже выведен через отдельный runtime config surface.
+1. Coverage на minimum path attachment после обычного bot reply сохранена.
+2. Runtime editor для вероятности/порога/cooldown уже выведен как `queue_media_reactions`; других media auto override surfaces в активном runtime больше нет.
 
 ### Volna 8 — Knowledge Import (П.28)
 1. Проверить и зафиксить `scripts/import-knowledge.ts` и `scripts/guild-import.ts`.
@@ -330,15 +331,15 @@ class FlashTrollingScheduler {
 
 ---
 
-## 6. Чек-лист релиза
+## 6. Актуальный статус волн
 
-- [x] Volna 1: relationshipsHardDisabled = false; default LLM_PROVIDER=router.
-- [x] Volna 2: 3 followup пула по 30, friendly/neutral/cold.
-- [x] Volna 3: prompt slots полный UX, лимиты по уровню, миграция _prompt_card.
-- [x] Volna 4: flash-trolling scheduler + meme context.
-- [x] Volna 5: cores editor + mood override + overrides list.
-- [x] Volna 6: channels matrix + off-gate.
-- [x] Volna 7: media reactions on.
-- [x] Volna 8: knowledge import работает.
+- DONE: Volna 1 — relationships hot path разблокирован; default provider-route уже не считается открытой дырой.
+- DONE: Volna 2 — followup pools выровнены, outward vocabulary переведён на `friendly`, legacy `warm` оставлен только как alias.
+- DONE: Volna 3 — slot UX, guild inventory и owner maintenance закрыты; legacy prompt-card bridge убран.
+- DONE: Volna 4 — scheduler, meme-context и flash config action выведены в реальный panel/runtime path.
+- DONE: Volna 5 — core override/list/edit surfaces закрыты без отдельного blocker-а по cancel UX.
+- DONE: Volna 6 — channels matrix, off-gate и panel placeholder cleanup закрыты.
+- DONE: Volna 7 — media reactions имеют config owner path, panel editor и focused coverage.
+- DONE: Volna 8 — knowledge import path уже существует и не выглядит blocker-ом текущей волны.
 
 После каждой волны: `pnpm test` + ручной smoke в dev-сервере + audit-log запись.

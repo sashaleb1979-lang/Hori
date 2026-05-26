@@ -49,7 +49,6 @@ describe("hori command registration", () => {
     const importCommand = horiCommand?.options?.find((option) => option.name === "import");
     const runtime = horiCommand?.options?.find((option) => option.name === "runtime");
     const aggression = horiCommand?.options?.find((option) => option.name === "aggression");
-    const memoryCards = horiCommand?.options?.find((option) => option.name === "memory-cards");
     const relationship = horiCommand?.options?.find((option) => option.name === "relationship");
     const relationshipState = relationship && "options" in relationship
       ? relationship.options?.find((option) => option.name === "relationship-state")
@@ -60,7 +59,7 @@ describe("hori command registration", () => {
 
     expect(runtime?.description).toContain("V5");
     expect(aggression?.description).toContain("aggression");
-    expect(memoryCards?.description).toContain("memory cards");
+    expect(horiCommand?.options?.find((option) => option.name === "memory-cards")).toBeUndefined();
     expect(relationshipState && "choices" in relationshipState ? relationshipState.choices?.map((choice) => choice.value) : []).toContain("sweet");
     expect(importMode && "choices" in importMode ? importMode.choices?.map((choice) => choice.value) : []).toEqual(["history", "knowledge"]);
   });

@@ -2,7 +2,7 @@ import type { GuildMember, Message } from "discord.js";
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } from "discord.js";
 
 import { trackIngestedMessage } from "@hori/analytics";
-import { DEFAULT_DEBOUNCE, IntentRouter, createChannelDebouncer, detectMessageKind, evaluateSelectiveEngagement, implicitMentionKindWhen, planNaturalMessageSplit, resolveActivation, shouldDebounce } from "@hori/core";
+import { DEFAULT_DEBOUNCE, DEFAULT_MEDIA_REACTION_CONFIG, IntentRouter, createChannelDebouncer, detectMessageKind, evaluateSelectiveEngagement, implicitMentionKindWhen, planNaturalMessageSplit, resolveActivation, shouldDebounce } from "@hori/core";
 import { type BotReplyPayload, type MessageEnvelope, type ReplyQueueTrace, type TriggerSource } from "@hori/shared";
 
 import type { BotRuntime } from "../bootstrap";
@@ -11,10 +11,16 @@ import { handleChatRecapCommand, isChatRecapCodeword } from "./chat-recap";
 import { getOwnerLockdownState, isBotOwner } from "./owner-lockdown";
 import { sendReply } from "../responders/message-responder";
 import { loadMemeIndexer } from "../runtime/flash-trolling-scheduler";
+import { syncGuildNickname } from "../runtime/session-sleep-sync";
 
 const intentRouter = new IntentRouter();
 const inboundDebouncers = new Map<string, ReturnType<typeof createChannelDebouncer<PendingInvocation>>>();
 const naturalSplitCooldownByChannel = new Map<string, number>();
+let lastMediaReactionAtMs = 0;
+
+export function resetMediaReactionStateForTests() {
+  lastMediaReactionAtMs = 0;
+}
 
 /* Periodic cleanup of idle debouncers and stale cooldown entries to prevent memory leaks */
 const DEBOUNCER_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
@@ -101,10 +107,22 @@ export async function resolveModerationReplyForDelivery(
   return timeoutApplied ? applyModerationReplacement(reply, moderationAction.replacementText) : reply;
 }
 
-async function ingestDeliveredBotReplies(runtime: BotRuntime, deliveredMessages: Message[]) {
+async function ingestDeliveredBotReplies(
+  runtime: BotRuntime,
+  deliveredMessages: Message[],
+  targetContext: { targetUserId?: string | null; targetMessageId?: string | null } = {}
+) {
   if (!runtime.client.user || !deliveredMessages.length) {
     return;
   }
+
+  const firstDelivered = deliveredMessages.find((delivered) => delivered.inGuild()) ?? null;
+  const channelSession = firstDelivered?.guildId
+    ? await runtime.sessionBuffer.getChannelSessionState(firstDelivered.guildId, firstDelivered.channelId).catch(() => null)
+    : null;
+  const sessionId = firstDelivered?.guildId && channelSession
+    ? `${firstDelivered.guildId}:${firstDelivered.channelId}:${channelSession.sessionSince.toISOString()}`
+    : null;
 
   const results = await Promise.allSettled(
     deliveredMessages
@@ -130,7 +148,19 @@ async function ingestDeliveredBotReplies(runtime: BotRuntime, deliveredMessages:
           explicitInvocation: false,
           guildName: delivered.guild?.name,
           channelName: "name" in delivered.channel ? delivered.channel.name : null,
-          isBotUser: true
+          isBotUser: true,
+          sessionId,
+          sendState: "sent",
+          targetUserId: targetContext.targetUserId ?? null,
+          targetMessageId: targetContext.targetMessageId ?? null
+        });
+        await runtime.sessionBuffer.recordChannelActivity({
+          guildId: delivered.guildId!,
+          channelId: delivered.channelId,
+          userId: delivered.author.id,
+          createdAt: delivered.createdAt,
+          isBot: true,
+          targetUserId: targetContext.targetUserId ?? null
         });
       })
   );
@@ -320,7 +350,11 @@ async function tryHandleKnowledgeQuery(
   try {
     const result = await runtime.knowledge.answer(match.cluster, match.question);
     const replyText = result.answer.trim() || "нет такой инфы";
-    await sendReply(message, replyText);
+    const deliveredReplies = await sendReply(message, replyText);
+    await ingestDeliveredBotReplies(runtime, deliveredReplies, {
+      targetUserId: envelope.userId,
+      targetMessageId: envelope.messageId
+    });
     runtime.logger.info(
       {
         guildId: envelope.guildId,
@@ -336,7 +370,11 @@ async function tryHandleKnowledgeQuery(
       { guildId: envelope.guildId, code: match.cluster.code, error },
       "knowledge answer failed"
     );
-    await sendReply(message, "Сек, я споткнулась о вики. Повтори вопрос.");
+    const deliveredReplies = await sendReply(message, "Сек, я споткнулась о вики. Повтори вопрос.");
+    await ingestDeliveredBotReplies(runtime, deliveredReplies, {
+      targetUserId: envelope.userId,
+      targetMessageId: envelope.messageId
+    });
   }
   return true;
 }
@@ -363,49 +401,6 @@ async function tryActivateSlotByKeyword(
   );
 }
 
-const LEGACY_PROMPT_SLOT_TITLE = "Мои инструкции";
-
-async function listOwnerSlotsWithLegacyMigration(
-  runtime: BotRuntime,
-  guildId: string,
-  userId: string,
-  ownerLevel: number
-) {
-  const slots = await runtime.promptSlots.listForOwner(guildId, userId);
-  const legacyNote = await runtime.prisma.userMemoryNote.findUnique({
-    where: { guildId_userId_key: { guildId, userId, key: "_prompt_card" } },
-    select: { value: true }
-  }).catch(() => null);
-  const legacyValue = legacyNote?.value?.trim();
-  const hasLegacySlot = slots.some((slot) => slot.channelId === null && slot.title === LEGACY_PROMPT_SLOT_TITLE);
-
-  if (!legacyValue) {
-    return slots;
-  }
-
-  if (hasLegacySlot) {
-    await runtime.prisma.userMemoryNote.deleteMany({ where: { guildId, userId, key: "_prompt_card" } }).catch(() => undefined);
-    return slots;
-  }
-
-  try {
-    await runtime.promptSlots.create({
-      guildId,
-      channelId: null,
-      ownerUserId: userId,
-      ownerLevel,
-      title: LEGACY_PROMPT_SLOT_TITLE,
-      content: legacyValue,
-      trigger: null
-    });
-    await runtime.prisma.userMemoryNote.deleteMany({ where: { guildId, userId, key: "_prompt_card" } }).catch(() => undefined);
-    return runtime.promptSlots.listForOwner(guildId, userId);
-  } catch (error) {
-    runtime.logger.warn({ guildId, userId, error }, "failed to migrate legacy prompt card into prompt slot");
-    return slots;
-  }
-}
-
 /**
  * Обрабатывает "хори запомни" / "хори вспомни" / "хори забудь" через PromptSlotService.
  * Возвращает true если обработал.
@@ -424,7 +419,7 @@ async function tryHandlePromptCardCommand(
   const guildId = message.guildId;
   const userId = message.author.id;
   const relLevel = await runtime.relationshipService.getLevel(guildId, userId).catch(() => 0);
-  const mySlots = await listOwnerSlotsWithLegacyMigration(runtime, guildId, userId, relLevel);
+  const mySlots = await runtime.promptSlots.listForOwner(guildId, userId);
 
   if (cmd === "запомни") {
     const limit = runtime.promptSlots.getLimit(relLevel);
@@ -598,9 +593,51 @@ export async function routeMessage(runtime: BotRuntime, message: Message) {
   });
   trackIngestedMessage();
 
-  void enqueueBackgroundJobs(runtime, envelope).catch((error) => {
+  const sleepUntil = await runtime.sessionBuffer.getGuildSleepUntil(message.guildId);
+
+  if (!sleepUntil) {
+    await runtime.sessionBuffer.recordChannelActivity({
+      guildId: envelope.guildId,
+      channelId: envelope.channelId,
+      userId: envelope.userId,
+      createdAt: envelope.createdAt
+    });
+  }
+
+  void enqueueBackgroundJobs(runtime, envelope, {
+    suppressSessionLifecycle: Boolean(sleepUntil)
+  }).catch((error) => {
     runtime.logger.warn({ messageId: envelope.messageId, error }, "background job scheduling crashed");
   });
+
+  if (sleepUntil) {
+    void syncGuildNickname(runtime, message.guild, "спит");
+
+    if (explicitInvocation || autoInterject) {
+      await runtime.prisma.botEventLog.create({
+        data: {
+          guildId: envelope.guildId,
+          channelId: envelope.channelId,
+          messageId: envelope.messageId,
+          userId: envelope.userId,
+          eventType: "suppressed",
+          intent: explicitInvocation ? "chat" : "ignore",
+          routeReason: "guild sleep",
+          usedSearch: false,
+          relationshipApplied: false,
+          debugTrace: {
+            triggerSource: envelope.triggerSource,
+            explicitInvocation,
+            sleepUntil: sleepUntil.toISOString()
+          } as never
+        }
+      });
+    }
+
+    return;
+  }
+
+  void syncGuildNickname(runtime, message.guild, botName);
 
   // Авто-активация prompt-слота по кодовому слову в тексте сообщения.
   void tryActivateSlotByKeyword(runtime, message.guildId, message.channelId, message.author.id, message.content).catch(
@@ -721,6 +758,7 @@ async function processInvocation(
 
   let queueItemId: string | null = null;
   let queueTrace: ReplyQueueTrace = { enabled: false, action: "none" };
+  let firstDeliveredReplyId: string | null = null;
   if (routingConfig.featureFlags.replyQueueEnabled) {
     queueTrace = await runtime.replyQueue.claimOrQueue({
       guildId: envelope.guildId,
@@ -765,7 +803,11 @@ async function processInvocation(
     if (explicitInvocation && preliminaryIntent.intent === "chat" && !preliminaryIntent.cleanedContent.length) {
       const helpText = await runtime.slashAdmin.handleHelp();
       const deliveredReplies = await sendReply(message, helpText);
-      await ingestDeliveredBotReplies(runtime, deliveredReplies);
+      firstDeliveredReplyId = deliveredReplies[0]?.id ?? null;
+      await ingestDeliveredBotReplies(runtime, deliveredReplies, {
+        targetUserId: envelope.userId,
+        targetMessageId: envelope.messageId
+      });
       replyDelivered = true;
 
       await runtime.prisma.botEventLog.create({
@@ -795,7 +837,11 @@ async function processInvocation(
       : null;
     if (recapResult) {
       const deliveredReplies = await sendReply(message, recapResult.reply);
-      await ingestDeliveredBotReplies(runtime, deliveredReplies);
+      firstDeliveredReplyId = deliveredReplies[0]?.id ?? null;
+      await ingestDeliveredBotReplies(runtime, deliveredReplies, {
+        targetUserId: envelope.userId,
+        targetMessageId: envelope.messageId
+      });
       replyDelivered = true;
 
       if (recapResult.logEvent) {
@@ -847,24 +893,31 @@ async function processInvocation(
 
     const replyText = typeof replyToSend === "string" ? replyToSend : replyToSend.text;
     let hasMedia = typeof replyToSend !== "string" && Boolean(replyToSend.media);
+    const mediaReactionConfig = await runtime.runtimeConfig.getMediaReactionConfig?.().catch(() => DEFAULT_MEDIA_REACTION_CONFIG)
+      ?? DEFAULT_MEDIA_REACTION_CONFIG;
+    const nowMs = Date.now();
+    const mediaCooldownActive = mediaReactionConfig.cooldownSec > 0
+      && nowMs - lastMediaReactionAtMs < mediaReactionConfig.cooldownSec * 1000;
 
-    // Volna 7: media reactions — 5% шанс прикрепить мем когда флаг включён и score >= 2.
+    // Volna 7: media reactions — configurable meme attachment after a normal bot reply.
     let finalReply: string | BotReplyPayload = replyToSend;
     if (
       !hasMedia &&
       routingConfig.featureFlags.mediaReactionsEnabled &&
-      Math.random() < 0.05
+      !mediaCooldownActive &&
+      Math.random() < mediaReactionConfig.chance
     ) {
       const relScore = await runtime.relationshipService
         .getRelationship(envelope.guildId, envelope.userId)
         .then((r) => r?.relationshipScore ?? 0)
         .catch(() => 0);
-      if (relScore >= 2) {
+      if (relScore >= mediaReactionConfig.minRelationshipScore) {
         const indexer = await loadMemeIndexer().catch(() => null);
         const meme = indexer?.pickRandom?.() ?? null;
         if (meme) {
           finalReply = { text: replyText, media: { filePath: meme.filePath, mediaId: meme.mediaId, type: meme.type } };
           hasMedia = true;
+          lastMediaReactionAtMs = nowMs;
         }
       }
     }
@@ -900,7 +953,11 @@ async function processInvocation(
       naturalChunks: splitPlan?.chunks,
       naturalDelayMs: splitPlan?.delayMs
     });
-    await ingestDeliveredBotReplies(runtime, deliveredReplies);
+    firstDeliveredReplyId = deliveredReplies[0]?.id ?? null;
+    await ingestDeliveredBotReplies(runtime, deliveredReplies, {
+      targetUserId: envelope.userId,
+      targetMessageId: envelope.messageId
+    });
     replyDelivered = true;
     void runtime.queues.sessionCompaction.add(
       "session-compaction",
@@ -942,7 +999,7 @@ async function processInvocation(
     if (queueItemId) {
       try {
         if (replyDelivered) {
-          await runtime.replyQueue.complete(queueItemId);
+          await runtime.replyQueue.complete(queueItemId, firstDeliveredReplyId);
         } else {
           await runtime.replyQueue.abandon(queueItemId);
         }
@@ -957,7 +1014,11 @@ async function processInvocation(
     if (!replyDelivered) {
       try {
         const deliveredReplies = await sendReply(message, EMPTY_REPLY_FALLBACK);
-        await ingestDeliveredBotReplies(runtime, deliveredReplies);
+        firstDeliveredReplyId = deliveredReplies[0]?.id ?? null;
+        await ingestDeliveredBotReplies(runtime, deliveredReplies, {
+          targetUserId: envelope.userId,
+          targetMessageId: envelope.messageId
+        });
       } catch (replyError) {
         runtime.logger.warn(
           {
@@ -973,7 +1034,7 @@ async function processInvocation(
   } finally {
     if (queueItemId) {
       try {
-        await runtime.replyQueue.complete(queueItemId);
+        await runtime.replyQueue.complete(queueItemId, firstDeliveredReplyId);
         await drainReplyQueue(runtime, message);
       } catch (error) {
         runtime.logger.warn({ error, queueItemId }, "reply queue cleanup failed");

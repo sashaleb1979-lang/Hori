@@ -4,6 +4,14 @@ import type { AppRedisClient } from "@hori/shared";
 import { ActiveMemoryService } from "../active/active-memory-service";
 import { SessionBufferService } from "../session/session-buffer-service";
 
+function extractTargetMetadata(flags: unknown) {
+  const value = flags as { targetUserId?: unknown; targetMessageId?: unknown } | null | undefined;
+  return {
+    targetUserId: typeof value?.targetUserId === "string" ? value.targetUserId : null,
+    targetMessageId: typeof value?.targetMessageId === "string" ? value.targetMessageId : null
+  };
+}
+
 export class ContextService {
   constructor(
     private readonly prisma: AppPrismaClient,
@@ -40,7 +48,8 @@ export class ContextService {
             isBot: message.user.isBot,
             content: message.content,
             createdAt: message.createdAt,
-            replyToMessageId: message.replyToMessageId
+            replyToMessageId: message.replyToMessageId,
+            ...extractTargetMetadata(message.flags)
           })));
 
     const [recentMessages, activeMemory] = await Promise.all([

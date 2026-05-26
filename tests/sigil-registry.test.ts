@@ -49,6 +49,13 @@ describe("V6 Sigil registry", () => {
     expect(reserved.intent).not.toBe("rewrite");
   });
 
+  it("leaves slot codewords to bot-layer handlers", () => {
+    const router = new IntentRouter();
+    expect(router.route(withContent("Хори запомни это"), "Хори").intent).toBe("chat");
+    expect(router.route(withContent("Хори вспомни это"), "Хори").intent).toBe("chat");
+    expect(router.route(withContent("Хори забудь это"), "Хори").intent).toBe("chat");
+  });
+
   it("router with explicit enabledSigils activates reserved sigils", () => {
     const router = new IntentRouter({ enabledSigils: ["?", "!"] });
     const result = router.route(withContent("! rewrite please"), "Хори");

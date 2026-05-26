@@ -186,32 +186,6 @@ describe("/hori admin V5 commands", () => {
     });
   });
 
-  it("lets moderators list user memory cards from /hori memory-cards", async () => {
-    const runtime = createRuntime({
-      slashAdmin: {
-        listMemoryCards: vi.fn().mockResolvedValue("- card-1: Важная тема [normal]")
-      }
-    });
-    const interaction = createHoriInteraction({
-      userId: "mod-1",
-      subcommand: "memory-cards",
-      isModerator: true,
-      values: {
-        user: "user-7",
-        action: "list",
-        limit: 5
-      }
-    });
-
-    await routeInteraction(runtime, interaction as never);
-
-    expect(runtime.slashAdmin.listMemoryCards).toHaveBeenCalledWith("guild-1", "user-7", 5);
-    expect(interaction.reply).toHaveBeenCalledWith({
-      content: "- card-1: Важная тема [normal]",
-      flags: EPHEMERAL_FLAG
-    });
-  });
-
   it("lets moderators list knowledge clusters from /hori knowledge", async () => {
     const runtime = createRuntime({
       knowledge: {

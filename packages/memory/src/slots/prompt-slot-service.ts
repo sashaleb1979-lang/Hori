@@ -206,6 +206,13 @@ export class PromptSlotService {
     });
   }
 
+  async listForGuild(guildId: string): Promise<PromptSlotRecord[]> {
+    return this.slots.findMany({
+      where: { guildId },
+      orderBy: [{ updatedAt: "desc" }]
+    });
+  }
+
   async delete(slotId: string): Promise<void> {
     await this.slots.delete({ where: { id: slotId } });
   }

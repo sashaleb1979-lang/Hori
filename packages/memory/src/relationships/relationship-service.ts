@@ -1,4 +1,4 @@
-import type { AppPrismaClient, RelationshipOverlay, RelationshipState } from "@hori/shared";
+import type { AppPrismaClient, RelationshipHook, RelationshipOverlay, RelationshipState } from "@hori/shared";
 import {
   DEFAULT_SIGNALS,
   type RelationshipVector,
@@ -32,6 +32,26 @@ type RelationshipProfileRecord = RelationshipOverlay & {
 type RelationshipProfileDelegate = {
   findUnique(args: unknown): Promise<RelationshipProfileRecord | null>;
   upsert(args: unknown): Promise<RelationshipProfileRecord>;
+};
+
+type RelationshipHookRecord = {
+  id: string;
+  guildId: string;
+  userId: string;
+  label: string;
+  detail: string;
+  useTag?: string | null;
+  avoidTag?: string | null;
+  confidence?: number | null;
+  freshness?: string | null;
+  active?: boolean | null;
+  expiresAt?: Date | null;
+};
+
+type RelationshipHookDelegate = {
+  findMany(args: unknown): Promise<RelationshipHookRecord[]>;
+  deleteMany(args: unknown): Promise<unknown>;
+  createMany(args: unknown): Promise<unknown>;
 };
 
 export interface UpsertRelationshipInput {
@@ -70,6 +90,10 @@ export class RelationshipService {
     return this.prisma.relationshipProfile as unknown as RelationshipProfileDelegate;
   }
 
+  private get hooks(): RelationshipHookDelegate | null {
+    return (this.prisma as unknown as { relationshipHook?: RelationshipHookDelegate }).relationshipHook ?? null;
+  }
+
   async getRelationship(guildId: string, userId: string): Promise<RelationshipOverlay | null> {
     const profile = await this.findProfile(guildId, userId);
 
@@ -78,6 +102,128 @@ export class RelationshipService {
     }
 
     return this.toOverlay(profile);
+  }
+
+  async listPromptHooks(guildId: string, userId: string, limit = 5): Promise<RelationshipHook[]> {
+    const now = new Date();
+    const persisted = this.hooks
+      ? await this.hooks.findMany({
+          where: {
+            guildId,
+            userId,
+            active: true,
+            OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
+          },
+          orderBy: [{ confidence: "desc" }, { updatedAt: "desc" }],
+          take: limit
+        }).catch(() => [])
+      : [];
+
+    if (persisted.length > 0) {
+      return persisted.map((hook) => ({
+        id: hook.id,
+        label: hook.label,
+        detail: hook.detail,
+        useTag: hook.useTag ?? null,
+        avoidTag: hook.avoidTag ?? null,
+        confidence: hook.confidence ?? 0.7,
+        freshness: hook.freshness === "fresh" || hook.freshness === "stale" ? hook.freshness : "steady"
+      }));
+    }
+
+    const relationship = await this.getRelationship(guildId, userId);
+    const fallback: RelationshipHook[] = [];
+
+    if (relationship?.characteristic?.trim()) {
+      fallback.push({
+        id: `derived:characteristic:${userId}`,
+        label: "profile",
+        detail: relationship.characteristic.trim(),
+        confidence: 0.45,
+        freshness: "steady"
+      });
+    }
+
+    if (relationship?.lastChange?.trim()) {
+      fallback.push({
+        id: `derived:lastChange:${userId}`,
+        label: "recent",
+        detail: relationship.lastChange.trim(),
+        confidence: 0.35,
+        freshness: "fresh"
+      });
+    }
+
+    return fallback.slice(0, limit);
+  }
+
+  async mergePromptHooks(
+    guildId: string,
+    userId: string,
+    nextHooks: Array<Omit<RelationshipHook, "id">>,
+    limit = 5
+  ): Promise<RelationshipHook[]> {
+    const incoming = nextHooks
+      .map((hook) => normalizePromptHook(hook))
+      .filter((hook): hook is Omit<RelationshipHook, "id"> => Boolean(hook))
+      .slice(0, limit);
+
+    if (!this.hooks) {
+      return incoming.map((hook, index) => ({ id: `volatile:${userId}:${index}`, ...hook }));
+    }
+
+    const now = new Date();
+    const persisted = await this.hooks.findMany({
+      where: {
+        guildId,
+        userId,
+        active: true,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
+      },
+      orderBy: [{ confidence: "desc" }, { updatedAt: "desc" }],
+      take: limit
+    }).catch(() => []);
+
+    const merged = new Map<string, Omit<RelationshipHook, "id">>();
+
+    for (const hook of persisted) {
+      const normalized = normalizePromptHook(hook);
+      if (!normalized) {
+        continue;
+      }
+      merged.set(promptHookKey(normalized), normalized);
+    }
+
+    for (const hook of incoming) {
+      const key = promptHookKey(hook);
+      const previous = merged.get(key);
+      merged.set(key, previous ? mergePromptHooks(previous, hook) : hook);
+    }
+
+    const finalHooks = [...merged.values()]
+      .sort(comparePromptHooks)
+      .slice(0, limit);
+
+    await this.hooks.deleteMany({ where: { guildId, userId } }).catch(() => undefined);
+
+    if (finalHooks.length > 0) {
+      await this.hooks.createMany({
+        data: finalHooks.map((hook) => ({
+          guildId,
+          userId,
+          label: hook.label,
+          detail: hook.detail,
+          useTag: hook.useTag ?? null,
+          avoidTag: hook.avoidTag ?? null,
+          confidence: hook.confidence,
+          freshness: hook.freshness ?? "steady",
+          active: true,
+          expiresAt: null
+        }))
+      }).catch(() => undefined);
+    }
+
+    return finalHooks.map((hook, index) => ({ id: `merged:${userId}:${index}`, ...hook }));
   }
 
   async upsertRelationship(input: UpsertRelationshipInput): Promise<RelationshipVector> {
@@ -764,6 +910,84 @@ function normalizeTopicBoundaries(value: unknown): Record<string, boolean> {
     }
   }
   return normalized;
+
+    function normalizePromptHook(
+      hook: Partial<RelationshipHook> | Omit<RelationshipHook, "id">
+    ): Omit<RelationshipHook, "id"> | null {
+      const label = normalizeHookText(hook.label, 48);
+      const detail = normalizeHookText(hook.detail, 220);
+      if (!label || !detail) {
+        return null;
+      }
+
+      return {
+        label,
+        detail,
+        useTag: normalizeHookTag(hook.useTag),
+        avoidTag: normalizeHookTag(hook.avoidTag),
+        confidence: clampHookConfidence(hook.confidence),
+        freshness: normalizeHookFreshness(hook.freshness)
+      };
+    }
+
+    function normalizeHookText(value: unknown, maxLen: number) {
+      if (typeof value !== "string") {
+        return "";
+      }
+
+      const normalized = value.replace(/\s+/g, " ").trim();
+      return normalized.slice(0, maxLen).trim();
+    }
+
+    function normalizeHookTag(value: unknown) {
+      if (typeof value !== "string") {
+        return null;
+      }
+
+      const normalized = value.replace(/\s+/g, "_").trim().slice(0, 48);
+      return normalized || null;
+    }
+
+    function normalizeHookFreshness(value: unknown): "fresh" | "steady" | "stale" {
+      return value === "fresh" || value === "stale" ? value : "steady";
+    }
+
+    function clampHookConfidence(value: unknown) {
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        return 0.5;
+      }
+
+      return Math.max(0, Math.min(1, Number(value)));
+    }
+
+    function promptHookKey(hook: Omit<RelationshipHook, "id">) {
+      return `${hook.label.toLowerCase()}|${hook.useTag ?? ""}|${hook.detail.toLowerCase().slice(0, 80)}`;
+    }
+
+    function freshnessRank(value: Omit<RelationshipHook, "id">["freshness"]) {
+      return value === "fresh" ? 3 : value === "steady" ? 2 : 1;
+    }
+
+    function mergePromptHooks(
+      left: Omit<RelationshipHook, "id">,
+      right: Omit<RelationshipHook, "id">
+    ): Omit<RelationshipHook, "id"> {
+      const useRightDetail = right.confidence > left.confidence || right.detail.length > left.detail.length;
+      return {
+        label: right.label || left.label,
+        detail: useRightDetail ? right.detail : left.detail,
+        useTag: right.useTag ?? left.useTag ?? null,
+        avoidTag: right.avoidTag ?? left.avoidTag ?? null,
+        confidence: Math.max(left.confidence * 0.9, right.confidence),
+        freshness: freshnessRank(right.freshness) >= freshnessRank(left.freshness) ? right.freshness : left.freshness
+      };
+    }
+
+    function comparePromptHooks(left: Omit<RelationshipHook, "id">, right: Omit<RelationshipHook, "id">) {
+      return (right.confidence - left.confidence)
+        || (freshnessRank(right.freshness) - freshnessRank(left.freshness))
+        || left.label.localeCompare(right.label);
+    }
 }
 
 function clampRelationshipScore(value: number) {

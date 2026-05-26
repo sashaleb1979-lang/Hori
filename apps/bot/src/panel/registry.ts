@@ -46,6 +46,8 @@ export const PANEL_TABS: PanelTabDefinition[] = [
     actions: [
       { id: "cores_open_panel", label: "Редактор кор", emoji: "🧩", style: ButtonStyle.Primary, access: "owner" },
       { id: "cores_preview", label: "Превью сборки", emoji: "🔍", access: "moderator" },
+      { id: "cores_override", label: "Mood override", emoji: "🎭", access: "moderator" },
+      { id: "cores_overrides_list", label: "Overrides", emoji: "📋", access: "moderator" },
       { id: "cores_evaluator", label: "Evaluator", emoji: "🧪", access: "owner" },
       { id: "cores_aggression_checker", label: "Aggression checker", emoji: "🛡️", access: "owner" }
     ]
@@ -93,7 +95,7 @@ export const PANEL_TABS: PanelTabDefinition[] = [
     color: 0x9B59B6,
     description: [
       "Prompt-slot inventory, активные/cooldown, force activate/deactivate,",
-      "приоритет по ownerLevel, override prompt strength, legacy memory cards (maintenance)."
+      "приоритет по ownerLevel и ручная настройка strength для активного prompt contract."
     ].join("\n"),
     access: "moderator",
     actions: [
@@ -101,7 +103,8 @@ export const PANEL_TABS: PanelTabDefinition[] = [
       { id: "slots_inventory", label: "Реестр слотов", emoji: "📦", access: "moderator" },
       { id: "slots_force_activate", label: "Активировать", emoji: "⚡", access: "owner" },
       { id: "slots_deactivate", label: "Снять", emoji: "🛑", access: "owner" },
-      { id: "slots_legacy_cards", label: "Legacy карты", emoji: "🗄️", access: "owner" }
+      { id: "slots_edit", label: "Редактировать", emoji: "✏️", access: "owner" },
+      { id: "slots_set_strength", label: "Strength", emoji: "🎚️", access: "owner" }
     ]
   },
   {
@@ -137,6 +140,7 @@ export const PANEL_TABS: PanelTabDefinition[] = [
       { id: "queue_clear", label: "Очистить", emoji: "🧹", access: "moderator" },
       { id: "queue_phrase_pools", label: "Phrase pools", emoji: "💬", access: "owner" },
       { id: "queue_reset_pools", label: "Reset pools", emoji: "♻️", access: "owner" },
+      { id: "queue_media_reactions", label: "Media reacts", emoji: "🖼️", access: "owner" },
       { id: "queue_meme_status", label: "Memes", emoji: "🖼️", access: "moderator" }
     ]
   },
@@ -156,6 +160,7 @@ export const PANEL_TABS: PanelTabDefinition[] = [
       { id: "runtime_power", label: "Power profile", emoji: "⚡", access: "owner" },
       { id: "runtime_sigils", label: "Sigils", emoji: "🔣", access: "owner" },
       { id: "runtime_features", label: "Feature flags", emoji: "🏷️", access: "owner" },
+      { id: "runtime_flash_config", label: "Flash config", emoji: "🎯", access: "owner" },
       { id: "runtime_lockdown", label: "Lockdown", emoji: "🔒", access: "owner" }
     ]
   },

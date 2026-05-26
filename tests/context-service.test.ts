@@ -58,4 +58,42 @@ describe("ContextService", () => {
     expect(bundle.recentMessages).toHaveLength(1);
     expect(bundle.recentMessages[0]?.content).toContain("важный старый контекст");
   });
+
+  it("propagates target metadata from stored message flags in non-chat queries", async () => {
+    const prisma = {
+      message: {
+        findMany: vi.fn(async () => ([
+          {
+            id: "m1",
+            userId: "bot-user",
+            content: "ответ",
+            createdAt: new Date("2026-05-03T00:00:00.000Z"),
+            replyToMessageId: "u1",
+            flags: {
+              targetUserId: "user-1",
+              targetMessageId: "u1"
+            },
+            user: {
+              isBot: true,
+              username: "Hori",
+              globalName: "Hori"
+            }
+          }
+        ]))
+      }
+    } as never;
+
+    const service = new ContextService(prisma);
+
+    const bundle = await service.buildContext({
+      guildId: "g",
+      channelId: "c",
+      userId: "u",
+      limit: 12,
+      intent: "summary"
+    });
+
+    expect(bundle.recentMessages[0]?.targetUserId).toBe("user-1");
+    expect(bundle.recentMessages[0]?.targetMessageId).toBe("u1");
+  });
 });

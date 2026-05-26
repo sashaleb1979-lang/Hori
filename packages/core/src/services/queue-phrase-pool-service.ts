@@ -5,14 +5,14 @@
  *  - initial_warm   — пользователь с уровнем 1..4 в первый раз попал в очередь.
  *  - initial_neutral — уровень 0.
  *  - initial_cold   — уровень -1.
- *  - followup_warm  — пользователь с уровнем 1..4 продолжает писать в очереди.
+ *  - followup_warm  — legacy API alias для friendly follow-up bucket (score >= 1).
  *  - followup_neutral — уровень 0.
- *  - followup_cold  — уровень -1.
+ *  - followup_cold  — уровень <= -1.
  *
  * Анти-повтор: процесс хранит in-memory mapping (guildId+userId) → последняя
  * использованная фраза, и pick исключает её из выбора.
  *
- * Пулы пока зашиты в код. Редактирование из панели — отдельная итерация.
+ * Базовые пулы зашиты в код. Partial override редактируется через V7 panel.
  */
 
 export type QueuePhraseStage = "initial" | "followup";
@@ -224,7 +224,7 @@ interface AntiRepeatKey {
 
 function bucketFromScore(score: number | null | undefined): QueuePhraseBucket {
   if (typeof score !== "number") return "neutral";
-  if (score < 0) return "cold";
+  if (score <= -1) return "cold";
   if (score >= 1) return "warm";
   return "neutral";
 }
@@ -266,6 +266,14 @@ export class QueuePhrasePoolService {
       initial: { ...this.pools.initial },
       followup: { ...this.pools.followup }
     };
+  }
+
+  resetToDefaults(): void {
+    this.pools = {
+      initial: { ...DEFAULT_QUEUE_PHRASE_POOLS.initial },
+      followup: { ...DEFAULT_QUEUE_PHRASE_POOLS.followup }
+    };
+    this.lastUsed.clear();
   }
 
   /**

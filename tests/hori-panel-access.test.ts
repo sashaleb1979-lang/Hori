@@ -334,6 +334,32 @@ function createCorePromptResetButtonInteraction(userId: string) {
   };
 }
 
+function createHoriActionButtonInteraction(userId: string, action: string) {
+  const showModal = vi.fn();
+
+  return {
+    guildId: "guild-1",
+    channelId: "channel-1",
+    customId: `hori-action:${action}`,
+    user: {
+      id: userId,
+      username: "tester",
+      globalName: "Tester"
+    },
+    memberPermissions: {
+      has: vi.fn().mockReturnValue(false)
+    },
+    showModal,
+    update: vi.fn(),
+    reply: vi.fn(),
+    isButton: () => true,
+    isStringSelectMenu: () => false,
+    isModalSubmit: () => false,
+    isChatInputCommand: () => false,
+    isMessageContextMenuCommand: () => false
+  };
+}
+
 describe("/hori panel access", () => {
   it("blocks non-owner access to the master panel", async () => {
     const interaction = createPanelInteraction("user-1");
@@ -444,6 +470,30 @@ describe("/hori panel access", () => {
         components: expect.any(Array)
       })
     );
+  });
+
+  it("opens a modal for owner cold-reset from the people tab", async () => {
+    const interaction = createHoriActionButtonInteraction("owner-1", "people_reset_cold");
+
+    await routeInteraction(createRuntime(["owner-1"]), interaction as never);
+
+    expect(interaction.showModal).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        custom_id: "hori-modal:relationship-reset-cold"
+      })
+    }));
+  });
+
+  it("opens a modal for owner aggression stage reset from the aggression tab", async () => {
+    const interaction = createHoriActionButtonInteraction("owner-1", "aggression_stage_reset");
+
+    await routeInteraction(createRuntime(["owner-1"]), interaction as never);
+
+    expect(interaction.showModal).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        custom_id: "hori-modal:aggression-stage-reset"
+      })
+    }));
   });
 
   it("lets the owner change one LLM slot from the panel", async () => {

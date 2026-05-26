@@ -155,7 +155,7 @@ export class BotStateService {
   }
 
   private async channel(guildId: string, channelId: string): Promise<BotStatePanel> {
-    const [policy, queue, interjectionsHour] = await Promise.all([
+    const [policy, queue, interjectionsHour, guildSleepUntil, channelSession] = await Promise.all([
       this.runtime.runtimeConfig.getChannelPolicy(guildId, channelId),
       this.runtime.slashAdmin.queueStatus(guildId, channelId),
       this.runtime.prisma.interjectionLog.count({
@@ -164,7 +164,9 @@ export class BotStateService {
           channelId,
           createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) }
         }
-      })
+      }),
+      this.runtime.sessionBuffer.getGuildSleepUntil(guildId).catch(() => null),
+      this.runtime.sessionBuffer.getChannelSessionState(guildId, channelId).catch(() => null)
     ]);
 
     return {
@@ -173,6 +175,7 @@ export class BotStateService {
       fields: [
         { name: "Policy", value: `replies=${policy.allowBotReplies}, interjections=${policy.allowInterjections}, muted=${policy.isMuted}` },
         { name: "Tags", value: policy.topicInterestTags.join(", ") || "none" },
+        { name: "Session", value: clip(formatChannelSession(channelSession, guildSleepUntil)) },
         { name: "Queue", value: clip(queue), inline: true },
         { name: "Interjections 1h", value: String(interjectionsHour), inline: true }
       ]
@@ -358,4 +361,39 @@ function clip(value: string, max = 1000) {
 
 function formatNumber(value: number | null) {
   return value === null ? "n/a" : value.toFixed(0);
+}
+
+function compactIso(value: Date | null) {
+  if (!value) {
+    return "none";
+  }
+
+  const iso = value.toISOString();
+  return iso.length >= 16 ? `${iso.slice(5, 16)}Z` : iso;
+}
+
+function formatChannelSession(
+  state: {
+    sessionSince: Date;
+    lastActivityAt: Date;
+    compactionCount: number;
+    hasCompaction: boolean;
+    participants: string[];
+    sleepUntil: Date | null;
+  } | null,
+  guildSleepUntil: Date | null
+) {
+  if (!state) {
+    return guildSleepUntil ? `guildSleepUntil=${compactIso(guildSleepUntil)}` : "none";
+  }
+
+  return [
+    `since=${compactIso(state.sessionSince)}`,
+    `last=${compactIso(state.lastActivityAt)}`,
+    `participants=${state.participants.length}`,
+    `compactions=${state.compactionCount}`,
+    `hasCompaction=${state.hasCompaction ? "yes" : "no"}`,
+    `channelSleepUntil=${compactIso(state.sleepUntil)}`,
+    `guildSleepUntil=${compactIso(guildSleepUntil)}`
+  ].join("\n");
 }

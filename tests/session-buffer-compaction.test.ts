@@ -90,9 +90,87 @@ describe("SessionBufferService compaction", () => {
     expect(rendered[1]?.content).toBe("третье");
   });
 
+  it("preserves bot target metadata from stored message flags", async () => {
+    const base = new Date("2026-05-03T00:00:00.000Z");
+    const rows = [
+      {
+        ...makeMessage("m1", new Date(base.getTime() + 1_000), false, "первое"),
+        flags: null
+      },
+      {
+        ...makeMessage("m2", new Date(base.getTime() + 2_000), true, "второе"),
+        flags: {
+          targetUserId: "user",
+          targetMessageId: "m1"
+        }
+      }
+    ];
+
+    const prisma = {
+      message: {
+        findMany: vi.fn(async (args?: { select?: { createdAt?: boolean }; orderBy?: { createdAt: "asc" | "desc" }; take?: number }) => {
+          if (args?.select?.createdAt) {
+            return [...rows].reverse().slice(0, args.take ?? rows.length).map((row) => ({ createdAt: row.createdAt }));
+          }
+
+          const ordered = args?.orderBy?.createdAt === "desc" ? [...rows].reverse() : rows;
+          return ordered.slice(0, args?.take ?? ordered.length);
+        })
+      }
+    } as never;
+
+    const service = new SessionBufferService(prisma, new MemoryRedis() as never);
+    const messages = await service.getSessionMessages("g", "user", "c");
+
+    expect(messages[1]?.targetUserId).toBe("user");
+    expect(messages[1]?.targetMessageId).toBe("m1");
+  });
+
+  it("drops bot turns that explicitly target another user from the per-user session window", async () => {
+    const base = new Date("2026-05-03T00:00:00.000Z");
+    const rows = [
+      {
+        ...makeMessage("m1", new Date(base.getTime() + 1_000), false, "моё сообщение"),
+        flags: null
+      },
+      {
+        ...makeMessage("m2", new Date(base.getTime() + 2_000), true, "ответ не мне"),
+        flags: {
+          targetUserId: "other-user",
+          targetMessageId: "m-other"
+        }
+      },
+      {
+        ...makeMessage("m3", new Date(base.getTime() + 3_000), true, "ответ мне"),
+        flags: {
+          targetUserId: "user",
+          targetMessageId: "m1"
+        }
+      }
+    ];
+
+    const prisma = {
+      message: {
+        findMany: vi.fn(async (args?: { select?: { createdAt?: boolean }; orderBy?: { createdAt: "asc" | "desc" }; take?: number }) => {
+          if (args?.select?.createdAt) {
+            return [...rows].reverse().slice(0, args.take ?? rows.length).map((row) => ({ createdAt: row.createdAt }));
+          }
+
+          const ordered = args?.orderBy?.createdAt === "desc" ? [...rows].reverse() : rows;
+          return ordered.slice(0, args?.take ?? ordered.length);
+        })
+      }
+    } as never;
+
+    const service = new SessionBufferService(prisma, new MemoryRedis() as never);
+    const messages = await service.getSessionMessages("g", "user", "c");
+
+    expect(messages.map((message) => message.id)).toEqual(["m1", "m3"]);
+  });
+
   it("builds a compaction candidate only when raw unsummarized tail is long enough", async () => {
     const base = new Date("2026-05-03T00:00:00.000Z");
-    const rows = Array.from({ length: 60 }, (_, index) => makeMessage(
+    const rows = Array.from({ length: 54 }, (_, index) => makeMessage(
       `m${index + 1}`,
       new Date(base.getTime() + (index + 1) * 1_000),
       index % 2 === 1,
@@ -113,15 +191,15 @@ describe("SessionBufferService compaction", () => {
 
     const service = new SessionBufferService(prisma, new MemoryRedis() as never);
     const candidate = await service.getCompactionCandidate("g", "u", "c", {
-      chunkMessages: 50,
+      chunkMessages: 46,
       tailMessages: 8,
       maxMessages: 500
     });
 
     expect(candidate).toBeTruthy();
-    expect(candidate?.messages).toHaveLength(50);
+    expect(candidate?.messages).toHaveLength(46);
     expect(candidate?.messages[0]?.id).toBe("m1");
-    expect(candidate?.rangeEndMessageId).toBe("m50");
+    expect(candidate?.rangeEndMessageId).toBe("m46");
   });
 
   it("uses the most recent raw window for chat rendering instead of the oldest messages", async () => {
@@ -155,15 +233,15 @@ describe("SessionBufferService compaction", () => {
       channelId: "c",
       sessionSince: rows[0]!.createdAt.toISOString(),
       rangeStart: rows[0]!.createdAt,
-      rangeEnd: rows[49]!.createdAt,
-      rangeEndMessageId: "m50",
+      rangeEnd: rows[45]!.createdAt,
+      rangeEndMessageId: "m46",
       summary: "summary-1",
-      messageCount: 50
+      messageCount: 46
     });
 
     const rendered = await service.getCompactedSessionMessages("g", "u", "c");
 
-    expect(rendered[0]?.id).toBe("session-summary:m50");
+    expect(rendered[0]?.id).toBe("session-summary:m46");
     expect(rendered.some((message) => message.id === "m900")).toBe(true);
     expect(rendered.some((message) => message.id === "m1")).toBe(false);
   });
@@ -194,8 +272,8 @@ describe("SessionBufferService compaction", () => {
     const service = new SessionBufferService(prisma, redis);
 
     for (let segmentIndex = 0; segmentIndex < 10; segmentIndex += 1) {
-      const start = segmentIndex * 50;
-      const end = start + 49;
+      const start = segmentIndex * 46;
+      const end = start + 45;
       await service.storeCompactionSegment({
         guildId: "g",
         userId: "u",
@@ -205,7 +283,7 @@ describe("SessionBufferService compaction", () => {
         rangeEnd: rows[end]!.createdAt,
         rangeEndMessageId: rows[end]!.id,
         summary: `summary-${segmentIndex + 1}`,
-        messageCount: 50
+        messageCount: 46
       });
     }
 
@@ -247,9 +325,9 @@ describe("SessionBufferService compaction", () => {
     const redis = new MemoryRedis() as never;
     const service = new SessionBufferService(prisma, redis);
 
-    for (let segmentIndex = 0; segmentIndex < 10; segmentIndex += 1) {
-      const start = segmentIndex * 50;
-      const end = start + 49;
+    for (let segmentIndex = 0; segmentIndex < 11; segmentIndex += 1) {
+      const start = segmentIndex * 46;
+      const end = start + 45;
       await service.storeCompactionSegment({
         guildId: "g",
         userId: "u",
@@ -259,18 +337,103 @@ describe("SessionBufferService compaction", () => {
         rangeEnd: rows[end]!.createdAt,
         rangeEndMessageId: rows[end]!.id,
         summary: `summary-${segmentIndex + 1}`,
-        messageCount: 50
+        messageCount: 46
       });
     }
 
     const candidate = await service.getCompactionCandidate("g", "u", "c", {
-      chunkMessages: 50,
+      chunkMessages: 46,
       tailMessages: 8,
       maxMessages: 500
     });
 
     expect(candidate).toBeTruthy();
-    expect(candidate?.messages[0]?.id).toBe("m501");
-    expect(candidate?.rangeEndMessageId).toBe("m550");
+    expect(candidate?.messages[0]?.id).toBe("m507");
+    expect(candidate?.rangeEndMessageId).toBe("m552");
+  });
+
+  it("stores and clears guild sleep state", async () => {
+    const prisma = {
+      message: {
+        findMany: vi.fn().mockResolvedValue([])
+      }
+    } as never;
+
+    const service = new SessionBufferService(prisma, new MemoryRedis() as never);
+    const sleepUntil = new Date(Date.now() + 60_000);
+
+    await service.setGuildSleepUntil("guild-1", sleepUntil);
+
+    expect(await service.isGuildSleeping("guild-1")).toBe(true);
+    expect(await service.getGuildSleepUntil("guild-1")).toEqual(sleepUntil);
+
+    await service.clearGuildSleep("guild-1");
+
+    expect(await service.isGuildSleeping("guild-1")).toBe(false);
+    expect(await service.getGuildSleepUntil("guild-1")).toBeNull();
+  });
+
+  it("tracks explicit channel session state across activity, compaction and reset", async () => {
+    const prisma = {
+      message: {
+        findMany: vi.fn().mockResolvedValue([])
+      }
+    } as never;
+
+    const service = new SessionBufferService(prisma, new MemoryRedis() as never);
+    const start = new Date("2026-05-13T10:00:00.000Z");
+    const secondUserAt = new Date("2026-05-13T10:01:00.000Z");
+    const compactionAt = new Date("2026-05-13T10:02:00.000Z");
+    const nextSessionAt = new Date("2026-05-13T10:13:00.000Z");
+
+    await service.recordChannelActivity({
+      guildId: "g",
+      channelId: "c",
+      userId: "u1",
+      createdAt: start
+    });
+    await service.recordChannelActivity({
+      guildId: "g",
+      channelId: "c",
+      userId: "u2",
+      createdAt: secondUserAt
+    });
+    await service.storeCompactionSegment({
+      guildId: "g",
+      userId: "u1",
+      channelId: "c",
+      sessionSince: start.toISOString(),
+      rangeStart: start,
+      rangeEnd: compactionAt,
+      rangeEndMessageId: "m46",
+      summary: "summary",
+      messageCount: 46
+    });
+    await service.setChannelSessionSleepUntil("g", "c", new Date("2026-05-13T10:20:00.000Z"));
+
+    const current = await service.getChannelSessionState("g", "c");
+
+    expect(current?.sessionSince).toEqual(start);
+    expect(current?.lastActivityAt).toEqual(compactionAt);
+    expect(current?.participants).toEqual(["u1", "u2"]);
+    expect(current?.hasCompaction).toBe(true);
+    expect(current?.compactionCount).toBe(1);
+    expect(current?.sleepUntil).toEqual(new Date("2026-05-13T10:20:00.000Z"));
+
+    await service.recordChannelActivity({
+      guildId: "g",
+      channelId: "c",
+      userId: "u3",
+      createdAt: nextSessionAt
+    });
+
+    const next = await service.getChannelSessionState("g", "c");
+
+    expect(next?.sessionSince).toEqual(nextSessionAt);
+    expect(next?.lastActivityAt).toEqual(nextSessionAt);
+    expect(next?.participants).toEqual(["u3"]);
+    expect(next?.hasCompaction).toBe(false);
+    expect(next?.compactionCount).toBe(0);
+    expect(next?.sleepUntil).toBeNull();
   });
 });

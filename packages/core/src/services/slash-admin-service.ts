@@ -7,7 +7,7 @@ import { parseCsv, toVectorLiteral } from "@hori/shared";
 import { defaultPersonaSettings, type PowerProfileName } from "@hori/config";
 import { AnalyticsQueryService, formatAnalyticsOverview } from "@hori/analytics";
 import { isAiRouterClient, type EmbeddingAdapter, type LlmClient } from "@hori/llm";
-import { MemoryAlbumService, ReflectionService, RelationshipService, RetrievalService, SummaryService } from "@hori/memory";
+import { MemoryAlbumService, ReflectionService, RelationshipService, RetrievalService, SessionBufferService, SummaryService, type ChannelSessionState } from "@hori/memory";
 // V7: MoodService удалён. Оставлен локальный stub-тип для обратной совместимости с bootstrap.
 export interface MoodService {
   status?(guildId: string): Promise<{ mood: string; intensity: number; endsAt: Date } | null>;
@@ -15,7 +15,7 @@ export interface MoodService {
   clearMood?(guildId: string): Promise<{ count: number } | null>;
 }
 import type { ReplyQueueService } from "./reply-queue-service";
-import { FEATURE_KEY_MAP, type PowerProfileStatus, type RuntimeConfigService } from "./runtime-config-service";
+import { FEATURE_KEY_MAP, type CoreEpochFrontId, type PowerProfileStatus, type RuntimeConfigService } from "./runtime-config-service";
 
 export class SlashAdminService {
   constructor(
@@ -29,6 +29,7 @@ export class SlashAdminService {
     private readonly replyQueue?: ReplyQueueService,
     private readonly memoryAlbum?: MemoryAlbumService,
     private readonly reflection?: ReflectionService,
+    private readonly sessionBuffer?: SessionBufferService,
     private readonly embeddingAdapter?: EmbeddingAdapter,
     private readonly llmClient?: LlmClient
   ) {}
@@ -53,7 +54,7 @@ export class SlashAdminService {
       "- `/hori channel`: ответы, автовмешательства, длина ответа, теги канала.",
       "- `/hori summary`, `/hori stats`, `/hori topic`: summaries, статистика и текущая тема канала.",
       "- `/hori knowledge`: knowledge-кластеры, статьи, импорт markdown/txt.",
-      "- `/hori memory-cards`: просмотр и удаление memory cards.",
+      "- Prompt slots: через `/hori slot` или прямо фразами `запомни`, `вспомни`, `забудь`.",
       "",
       "Контекстные действия по сообщению:",
       "- `Хори: объясни`, `Хори: кратко`, `Хори: оценить тон`, `Хори: запомнить момент`.",
@@ -217,17 +218,56 @@ export class SlashAdminService {
     return `${formatPowerProfileStatus(status)}\n\nПресет применён.`;
   }
 
-  async runtimeModesStatus() {
+  async runtimeModesStatus(guildId?: string, channelId?: string) {
     if (!this.runtimeConfig) {
       return "Runtime settings недоступны.";
     }
 
-    const runtime = await this.runtimeConfig.getRuntimeSettings();
+    const [runtime, coreEpoch, sleepUntil, channelSession] = await Promise.all([
+      this.runtimeConfig.getRuntimeSettings(),
+      this.runtimeConfig.getCoreEpochState(),
+      guildId && this.sessionBuffer ? this.sessionBuffer.getGuildSleepUntil(guildId).catch(() => null) : Promise.resolve(null),
+      guildId && channelId && this.sessionBuffer
+        ? this.sessionBuffer.getChannelSessionState(guildId, channelId).catch(() => null)
+        : Promise.resolve(null)
+    ]);
+
     return [
       `memoryMode=${runtime.memoryMode}`,
       `relationshipGrowthMode=${runtime.relationshipGrowthMode}`,
       `stylePresetMode=${runtime.stylePresetMode}`,
-      `maxTimeoutMinutes=${runtime.maxTimeoutMinutes}`
+      `maxTimeoutMinutes=${runtime.maxTimeoutMinutes}`,
+      `coreEpoch=${coreEpoch.frontId} until=${compactIso(coreEpoch.expiresAt.toISOString())}`,
+      sleepUntil ? `sleepUntil=${compactIso(sleepUntil.toISOString())}` : "sleepUntil=none",
+      formatChannelSessionStatus(channelSession)
+    ].join("\n");
+  }
+
+  async rotateCoreEpoch(updatedBy?: string, frontId?: CoreEpochFrontId) {
+    if (!this.runtimeConfig) {
+      return "Runtime settings недоступны.";
+    }
+
+    const epoch = await this.runtimeConfig.rotateCoreEpoch(frontId, updatedBy);
+    return [
+      "Core epoch обновлён.",
+      `epochId=${epoch.epochId}`,
+      `frontId=${epoch.frontId}`,
+      `expiresAt=${epoch.expiresAt.toISOString()}`
+    ].join("\n");
+  }
+
+  async resetCoreEpoch(updatedBy?: string) {
+    if (!this.runtimeConfig) {
+      return "Runtime settings недоступны.";
+    }
+
+    const epoch = await this.runtimeConfig.resetCoreEpoch(updatedBy);
+    return [
+      "Core epoch сброшен к автоматическому расписанию.",
+      `epochId=${epoch.epochId}`,
+      `frontId=${epoch.frontId}`,
+      `expiresAt=${epoch.expiresAt.toISOString()}`
     ].join("\n");
   }
 
@@ -1034,6 +1074,19 @@ function resettableString(value: string | null | undefined, fallback: string) {
 
 function compactIso(value: string) {
   return value.length >= 16 ? `${value.slice(5, 16)}Z` : value;
+}
+
+function formatChannelSessionStatus(state: ChannelSessionState | null) {
+  if (!state) {
+    return "channelSession=none";
+  }
+
+  return [
+    `channelSession since=${compactIso(state.sessionSince.toISOString())} last=${compactIso(state.lastActivityAt.toISOString())}`,
+    `channelParticipants=${state.participants.length}`,
+    `channelCompactions=${state.compactionCount}`,
+    state.sleepUntil ? `channelSessionSleepUntil=${compactIso(state.sleepUntil.toISOString())}` : "channelSessionSleepUntil=none"
+  ].join("\n");
 }
 
 function resettableStringArray(value: string | null | undefined) {

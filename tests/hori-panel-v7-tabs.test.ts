@@ -86,7 +86,31 @@ describe("Hori Panel V7: tab matrix", () => {
     const ownerActions = resolveTabActions(cores, owner).map((a) => a.id);
     const modActions = resolveTabActions(cores, moderator).map((a) => a.id);
     expect(ownerActions).toContain("cores_open_panel");
+    expect(modActions).toContain("cores_override");
+    expect(modActions).toContain("cores_overrides_list");
     expect(modActions).not.toContain("cores_open_panel");
+  });
+
+  it("slots tab exposes owner controls without legacy card button", () => {
+    const slots = PANEL_TABS.find((t) => t.id === "slots")!;
+    const ownerActions = resolveTabActions(slots, owner).map((a) => a.id);
+    expect(ownerActions).toContain("slots_force_activate");
+    expect(ownerActions).toContain("slots_deactivate");
+    expect(ownerActions).toContain("slots_edit");
+    expect(ownerActions).toContain("slots_set_strength");
+    expect(ownerActions).not.toContain("slots_legacy_cards");
+  });
+
+  it("runtime tab exposes flash config editor for owner", () => {
+    const runtime = PANEL_TABS.find((t) => t.id === "runtime")!;
+    const ownerActions = resolveTabActions(runtime, owner).map((a) => a.id);
+    expect(ownerActions).toContain("runtime_flash_config");
+  });
+
+  it("queue tab exposes media reactions editor for owner", () => {
+    const queue = PANEL_TABS.find((t) => t.id === "queue")!;
+    const ownerActions = resolveTabActions(queue, owner).map((a) => a.id);
+    expect(ownerActions).toContain("queue_media_reactions");
   });
 
   it("action id используют префикс своей вкладки", () => {

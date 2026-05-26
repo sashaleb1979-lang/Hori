@@ -73,4 +73,78 @@ describe("MessageIngestService", () => {
       "reply target is missing in analytics store, saving message without relation"
     );
   });
+
+  it("persists target and session metadata for delivered bot replies inside message flags", async () => {
+    const messageUpsert = vi.fn().mockResolvedValue(undefined);
+    const tx = {
+      guild: { upsert: vi.fn().mockResolvedValue(undefined) },
+      channelConfig: { upsert: vi.fn().mockResolvedValue(undefined) },
+      user: { upsert: vi.fn().mockResolvedValue(undefined) },
+      message: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: messageUpsert
+      },
+      userStats: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue(undefined)
+      },
+      channelStats: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue(undefined)
+      },
+      userDailyAggregate: { upsert: vi.fn().mockResolvedValue(undefined) },
+      channelDailyAggregate: { upsert: vi.fn().mockResolvedValue(undefined) }
+    };
+    const prisma = {
+      message: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn().mockResolvedValue(null)
+      },
+      $transaction: vi.fn(async (callback: (value: typeof tx) => Promise<void>) => callback(tx))
+    };
+    const logger = {
+      debug: vi.fn(),
+      warn: vi.fn(),
+      info: vi.fn(),
+      error: vi.fn()
+    };
+
+    const service = new MessageIngestService(prisma as never, logger as never);
+
+    await service.ingestMessage({
+      messageId: "bot-msg-1",
+      guildId: "guild-1",
+      channelId: "channel-1",
+      userId: "bot-user",
+      username: "Hori",
+      displayName: "Hori",
+      content: "ответ",
+      createdAt: new Date("2026-04-10T16:11:00.000Z"),
+      replyToMessageId: "msg-1",
+      mentionCount: 0,
+      mentionedBot: false,
+      mentionsBotByName: false,
+      mentionedUserIds: [],
+      isModerator: false,
+      explicitInvocation: false,
+      isBotUser: true,
+      sessionId: "guild-1:channel-1:2026-04-10T16:00:00.000Z",
+      sendState: "sent",
+      targetUserId: "user-1",
+      targetMessageId: "msg-1"
+    });
+
+    expect(messageUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          flags: expect.objectContaining({
+            sessionId: "guild-1:channel-1:2026-04-10T16:00:00.000Z",
+            sendState: "sent",
+            targetUserId: "user-1",
+            targetMessageId: "msg-1"
+          })
+        })
+      })
+    );
+  });
 });

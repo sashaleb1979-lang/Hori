@@ -11,6 +11,21 @@ export interface MessageIngestInput extends MessageEnvelope {
   guildName?: string | null;
   channelName?: string | null;
   isBotUser?: boolean;
+  targetUserId?: string | null;
+  targetMessageId?: string | null;
+  sessionId?: string | null;
+  sendState?: "sent" | null;
+}
+
+function buildMessageFlags(input: MessageIngestInput) {
+  return {
+    explicitInvocation: input.explicitInvocation,
+    triggerSource: input.triggerSource ?? null,
+    targetUserId: input.targetUserId ?? null,
+    targetMessageId: input.targetMessageId ?? null,
+    sessionId: input.sessionId ?? null,
+    sendState: input.sendState ?? null
+  };
 }
 
 export class MessageIngestService {
@@ -122,10 +137,7 @@ export class MessageIngestService {
           mentionCount: input.mentionCount,
           charCount,
           tokenEstimate,
-          flags: {
-            explicitInvocation: input.explicitInvocation,
-            triggerSource: input.triggerSource ?? null
-          }
+          flags: buildMessageFlags(input)
         },
         create: {
           id: input.messageId,
@@ -138,10 +150,7 @@ export class MessageIngestService {
           mentionCount: input.mentionCount,
           charCount,
           tokenEstimate,
-          flags: {
-            explicitInvocation: input.explicitInvocation,
-            triggerSource: input.triggerSource ?? null
-          }
+          flags: buildMessageFlags(input)
         }
       });
 

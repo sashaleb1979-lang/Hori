@@ -30,11 +30,13 @@ import {
   type StylePresetMode
 } from "@hori/shared";
 import {
+  CORE_EPOCH_FRONT_CHOICES,
   CORE_PROMPT_DEFINITIONS,
   CORE_PROMPT_KEYS,
   getCorePromptDefaultContent,
   parseKnowledgeImportDocuments,
   isCorePromptKey,
+  type CoreEpochFrontId,
   type CorePromptKey
 } from "@hori/core";
 import { RelationshipService } from "@hori/memory";
@@ -740,6 +742,11 @@ async function handleHoriCommand(
     const growthMode = interaction.options.getString("relationship-growth-mode") as RelationshipGrowthMode | null;
     const stylePresetMode = interaction.options.getString("style-preset-mode") as StylePresetMode | null;
     const maxTimeoutMinutes = interaction.options.getInteger("max-timeout-minutes");
+    const epochAction = interaction.options.getString("epoch-action");
+    const epochFrontRaw = interaction.options.getString("epoch-front");
+    const epochFront = CORE_EPOCH_FRONT_CHOICES.includes((epochFrontRaw ?? "") as CoreEpochFrontId)
+      ? epochFrontRaw as CoreEpochFrontId
+      : undefined;
 
     if (memoryMode) {
       updates.push(await runtime.slashAdmin.setMemoryMode(memoryMode, interaction.user.id));
@@ -757,9 +764,17 @@ async function handleHoriCommand(
       updates.push(await runtime.slashAdmin.setMaxTimeoutMinutes(maxTimeoutMinutes, interaction.user.id));
     }
 
+    if (epochAction === "rotate") {
+      updates.push(await runtime.slashAdmin.rotateCoreEpoch(interaction.user.id, epochFront));
+    }
+
+    if (epochAction === "reset") {
+      updates.push(await runtime.slashAdmin.resetCoreEpoch(interaction.user.id));
+    }
+
     const content = updates.length
-      ? [...updates, "", await runtime.slashAdmin.runtimeModesStatus()].join("\n")
-      : await runtime.slashAdmin.runtimeModesStatus();
+      ? [...updates, "", await runtime.slashAdmin.runtimeModesStatus(interaction.guildId, interaction.channelId)].join("\n")
+      : await runtime.slashAdmin.runtimeModesStatus(interaction.guildId, interaction.channelId);
 
     await interaction.reply({ content, flags: MessageFlags.Ephemeral });
     return;
@@ -778,30 +793,6 @@ async function handleHoriCommand(
       : action === "reset-cold"
         ? await runtime.slashAdmin.resetRelationshipCold(interaction.guildId, targetUserId, interaction.user.id)
         : await runtime.slashAdmin.aggressionEvents(interaction.guildId, targetUserId, interaction.options.getInteger("limit") ?? 8);
-
-    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
-    return;
-  }
-
-  if (subcommand === "memory-cards") {
-    if (!isOwner && !isModerator) {
-      await interaction.reply({ content: "Memory cards доступны только модерам.", flags: MessageFlags.Ephemeral });
-      return;
-    }
-
-    const targetUserId = interaction.options.getUser("user", true).id;
-    const action = interaction.options.getString("action", true);
-    const content = action === "remove"
-      ? await runtime.slashAdmin.removeMemoryCard(
-          interaction.guildId,
-          targetUserId,
-          interaction.options.getString("id") ?? ""
-        )
-      : await runtime.slashAdmin.listMemoryCards(
-          interaction.guildId,
-          targetUserId,
-          interaction.options.getInteger("limit") ?? 8
-        );
 
     await interaction.reply({ content, flags: MessageFlags.Ephemeral });
     return;
@@ -1988,11 +1979,6 @@ async function routeModalSubmit(runtime: BotRuntime, interaction: ModalSubmitInt
     return;
   }
 
-  if (interaction.customId.startsWith("PROMPT_CARD_MODAL:")) {
-    await handlePromptCardModalSubmit(runtime, interaction);
-    return;
-  }
-
   if (interaction.customId.startsWith(`${HORI_MODAL_PREFIX}:`)) {
     await handleHoriModalSubmit(runtime, interaction);
     return;
@@ -2203,8 +2189,13 @@ async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubm
     const reason = interaction.fields.getTextInputValue("reason").trim() || null;
 
     const validCoreIds = ["core_annoyed", "core_base", "core_warm", "core_close", "core_teasing", "core_sweet", "core_serious"];
+    if (coreId === "clear") {
+      await runtime.runtimeConfig.clearCoreOverride(interaction.guildId, userId);
+      await interaction.reply({ content: `🧹 Mood override снят для <@${userId}>.`, flags: MessageFlags.Ephemeral });
+      return;
+    }
     if (!validCoreIds.includes(coreId)) {
-      await interaction.reply({ content: `Неизвестный coreId: \`${coreId}\`. Допустимые: ${validCoreIds.join(", ")}`, flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: `Неизвестный coreId: \`${coreId}\`. Допустимые: ${validCoreIds.join(", ")} или clear.`, flags: MessageFlags.Ephemeral });
       return;
     }
     const durationMs: number | null = durationRaw === "forever" || durationRaw === "" ? null
@@ -2315,6 +2306,36 @@ async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubm
     return;
   }
 
+  if (modalKind === "relationship-reset-cold") {
+    const userId = interaction.fields.getTextInputValue("userId").trim();
+
+    if (!userId) {
+      await interaction.reply({ content: "Нужен Discord user ID.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.reply({
+      content: await runtime.slashAdmin.resetRelationshipCold(interaction.guildId, userId, interaction.user.id),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (modalKind === "aggression-stage-reset") {
+    const userId = interaction.fields.getTextInputValue("userId").trim();
+
+    if (!userId) {
+      await interaction.reply({ content: "Нужен Discord user ID.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.reply({
+      content: await runtime.slashAdmin.resetRelationshipEscalation(interaction.guildId, userId),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
   if (modalKind === "style") {
     await interaction.reply({
       content: await runtime.slashAdmin.updateStyle(interaction.guildId, {
@@ -2361,6 +2382,291 @@ async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubm
       }),
       flags: MessageFlags.Ephemeral
     });
+    return;
+  }
+
+  if (modalKind === "flash-config") {
+    const current = runtime.flashTrolling.getConfig();
+    const enabled = readOptionalBoolean(interaction.fields.getTextInputValue("enabled")) ?? current.enabled;
+    const intervalMinutes = readIntegerText(interaction.fields.getTextInputValue("intervalMinutes"), 1, 1440);
+    const minMessageLength = readIntegerText(interaction.fields.getTextInputValue("minMessageLength"), 1, 4000);
+    const [retortWeight, questionWeight, memeWeight] = readNumberList(interaction.fields.getTextInputValue("weights"));
+    const channelAllowlistRaw = interaction.fields.getTextInputValue("channelAllowlist").trim();
+    const resetAllowlist = ["", "all", "*", "clear", "reset"].includes(channelAllowlistRaw.toLowerCase());
+
+    if (intervalMinutes === undefined) {
+      await interaction.reply({ content: "intervalMinutes должен быть целым числом от 1 до 1440.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    if (minMessageLength === undefined) {
+      await interaction.reply({ content: "minMessageLength должен быть целым числом от 1 до 4000.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const weights = [retortWeight, questionWeight, memeWeight];
+    if (weights.some((value) => value === undefined || !Number.isFinite(value) || value < 0)) {
+      await interaction.reply({ content: "Weights укажи как `retort,question,meme` с неотрицательными числами.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const updated = await runtime.runtimeConfig.setFlashTrollingConfig({
+      enabled,
+      intervalMinutes,
+      minMessageLength,
+      weights: {
+        retort: retortWeight!,
+        question: questionWeight!,
+        meme: memeWeight!
+      },
+      channelAllowlist: resetAllowlist ? [] : parseCsv(channelAllowlistRaw)
+    }, interaction.user.id);
+    runtime.flashTrolling.updateConfig(updated);
+
+    await interaction.reply({
+      content: [
+        "🎯 Flash config обновлён.",
+        buildFlashTrollingStatus(runtime),
+        "Сохранено в runtime settings и применено live."
+      ].join("\n"),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (modalKind === "queue-pools") {
+    const initialBuckets = parseQueuePhraseStageEditor(interaction.fields.getTextInputValue("initialBuckets"), "initial");
+    if ("error" in initialBuckets) {
+      await interaction.reply({ content: initialBuckets.error, flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const followupBuckets = parseQueuePhraseStageEditor(interaction.fields.getTextInputValue("followupBuckets"), "followup");
+    if ("error" in followupBuckets) {
+      await interaction.reply({ content: followupBuckets.error, flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const override = {
+      ...(Object.keys(initialBuckets.value).length ? { initial: initialBuckets.value } : {}),
+      ...(Object.keys(followupBuckets.value).length ? { followup: followupBuckets.value } : {})
+    };
+
+    if (!Object.keys(override).length) {
+      await runtime.runtimeConfig.resetQueuePhrasePoolsOverride();
+      applyQueuePhrasePoolsOverrideLive(runtime, null);
+      await interaction.reply({
+        content: [
+          "💬 Phrase pools сброшены к default.",
+          await buildV6QueueStatus(runtime)
+        ].join("\n"),
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    const saved = await runtime.runtimeConfig.setQueuePhrasePoolsOverride(override, interaction.user.id);
+    applyQueuePhrasePoolsOverrideLive(runtime, saved);
+    await interaction.reply({
+      content: [
+        "💬 Phrase pools override обновлён.",
+        await buildV6QueueStatus(runtime)
+      ].join("\n"),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (modalKind === "media-reactions") {
+    const chance = readFloatText(interaction.fields.getTextInputValue("chance"), 0, 1);
+    const minRelationshipScore = readFloatText(interaction.fields.getTextInputValue("minRelationshipScore"), -1, 4);
+    const cooldownSec = readIntegerText(interaction.fields.getTextInputValue("cooldownSec"), 0, 86400);
+
+    if (chance === undefined) {
+      await interaction.reply({ content: "chance должен быть числом от 0 до 1.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    if (minRelationshipScore === undefined) {
+      await interaction.reply({ content: "minRelationshipScore должен быть числом от -1 до 4.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    if (cooldownSec === undefined) {
+      await interaction.reply({ content: "cooldownSec должен быть целым числом от 0 до 86400.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const updated = await runtime.runtimeConfig.setMediaReactionConfig({
+      chance,
+      minRelationshipScore,
+      cooldownSec
+    }, interaction.user.id);
+
+    await interaction.reply({
+      content: [
+        "🖼️ Media reactions config обновлён.",
+        formatMediaReactionConfigStatus(updated)
+      ].join("\n"),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (modalKind === "aggression-policy") {
+    const timeoutMinutes = readIntegerText(interaction.fields.getTextInputValue("maxTimeoutMinutes"), 1, 15);
+    if (timeoutMinutes === undefined) {
+      await interaction.reply({ content: "maxTimeoutMinutes должен быть целым числом от 1 до 15.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const deltas = parseRelationshipDeltasEditor(interaction.fields.getTextInputValue("deltas"));
+    if ("error" in deltas) {
+      await interaction.reply({ content: deltas.error, flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    if (Object.keys(deltas.value).length) {
+      await runtime.runtimeConfig.setRelationshipDeltas(deltas.value, interaction.user.id);
+    } else {
+      await runtime.runtimeConfig.resetRelationshipDeltas();
+    }
+    await runtime.runtimeConfig.setRuntimeOverride("runtime.moderation.max_timeout_minutes", String(timeoutMinutes), interaction.user.id);
+
+    await interaction.reply({
+      content: [
+        "🛡️ Aggression policy обновлена.",
+        `maxTimeoutMinutes=${timeoutMinutes}`,
+        await buildV6RelationshipDeltas(runtime)
+      ].join("\n"),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (modalKind === "aggression-phrases") {
+    const stage1 = interaction.fields.getTextInputValue("stage1").trim();
+    const stage2 = interaction.fields.getTextInputValue("stage2").trim();
+    const stage3 = interaction.fields.getTextInputValue("stage3").trim();
+    const timeout = interaction.fields.getTextInputValue("timeout").trim();
+
+    if (!stage1 || !stage2 || !stage3 || !timeout) {
+      await interaction.reply({ content: "Все поля aggression phrases должны быть заполнены.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const updated = await runtime.runtimeConfig.setAggressionReplacementTexts({ stage1, stage2, stage3, timeout }, interaction.user.id);
+    await interaction.reply({
+      content: [
+        "🛡️ Aggression phrases обновлены.",
+        formatAggressionReplacementTextsStatus(updated)
+      ].join("\n"),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (modalKind === "slot-force") {
+    const slotId = interaction.fields.getTextInputValue("slotId").trim();
+    if (!slotId) {
+      await interaction.reply({ content: "Нужен ID или префикс слота.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    try {
+      const slot = await findGuildSlotByPrefix(runtime, interaction.guildId, slotId);
+      if (!slot) {
+        await interaction.reply({ content: `Слот \`${slotId}\` не найден.`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await runtime.promptSlots.forceActivate(slot.id);
+      await interaction.reply({
+        content: `⚡ Слот **${slot.title ?? slot.id.slice(0, 8)}** принудительно активирован.${slot.channelId ? `\nКанал: <#${slot.channelId}>` : "\nОбласть: global"}`,
+        flags: MessageFlags.Ephemeral
+      });
+    } catch (error) {
+      await interaction.reply({ content: asErrorMessage(error), flags: MessageFlags.Ephemeral });
+    }
+    return;
+  }
+
+  if (modalKind === "slot-deactivate") {
+    const slotId = interaction.fields.getTextInputValue("slotId").trim();
+    try {
+      const slot = slotId
+        ? await findGuildSlotByPrefix(runtime, interaction.guildId, slotId)
+        : await runtime.promptSlots.getActiveSlot(interaction.guildId, interaction.channelId);
+      if (!slot) {
+        await interaction.reply({ content: slotId ? `Слот \`${slotId}\` не найден.` : "В этом канале нет активного слота.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await runtime.promptSlots.deactivate(slot.id);
+      await interaction.reply({
+        content: `⏹️ Слот **${slot.title ?? slot.id.slice(0, 8)}** деактивирован.`,
+        flags: MessageFlags.Ephemeral
+      });
+    } catch (error) {
+      await interaction.reply({ content: asErrorMessage(error), flags: MessageFlags.Ephemeral });
+    }
+    return;
+  }
+
+  if (modalKind === "slot-edit") {
+    const slotId = interaction.fields.getTextInputValue("slotId").trim();
+    const rawTitle = interaction.fields.getTextInputValue("title").trim();
+    const content = interaction.fields.getTextInputValue("content").trim();
+    if (!slotId) {
+      await interaction.reply({ content: "Нужен ID или префикс слота.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (!content) {
+      await interaction.reply({ content: "Контент слота не может быть пустым.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    try {
+      const slot = await findGuildSlotByPrefix(runtime, interaction.guildId, slotId);
+      if (!slot) {
+        await interaction.reply({ content: `Слот \`${slotId}\` не найден.`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      const nextTitle = rawTitle || slot.title;
+      const updated = await runtime.promptSlots.updateContent(slot.id, content, nextTitle);
+      await interaction.reply({
+        content: `✏️ Слот **${updated.title ?? updated.id.slice(0, 8)}** обновлён.\nПоказано: ${updated.content.slice(0, 140)}`,
+        flags: MessageFlags.Ephemeral
+      });
+    } catch (error) {
+      await interaction.reply({ content: asErrorMessage(error), flags: MessageFlags.Ephemeral });
+    }
+    return;
+  }
+
+  if (modalKind === "slot-strength") {
+    const slotId = interaction.fields.getTextInputValue("slotId").trim();
+    const rawStrength = interaction.fields.getTextInputValue("strength").trim();
+    const strength = Number(rawStrength);
+    if (!slotId) {
+      await interaction.reply({ content: "Нужен ID или префикс слота.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (!Number.isInteger(strength) || strength < 0 || strength > 2) {
+      await interaction.reply({ content: "Strength должен быть 0, 1 или 2.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    try {
+      const slot = await findGuildSlotByPrefix(runtime, interaction.guildId, slotId);
+      if (!slot) {
+        await interaction.reply({ content: `Слот \`${slotId}\` не найден.`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await runtime.promptSlots.setStrength(slot.id, strength as 0 | 1 | 2);
+      await interaction.reply({
+        content: `🎚️ Для слота **${slot.title ?? slot.id.slice(0, 8)}** выставлен strength=${strength}.`,
+        flags: MessageFlags.Ephemeral
+      });
+    } catch (error) {
+      await interaction.reply({ content: asErrorMessage(error), flags: MessageFlags.Ephemeral });
+    }
+    return;
   }
 }
 
@@ -2482,53 +2788,6 @@ async function handleSlotButtonInteraction(runtime: BotRuntime, interaction: But
   await interaction.reply({ content: "Неизвестное действие.", flags: MessageFlags.Ephemeral });
 }
 
-async function handlePromptCardEditButton(runtime: BotRuntime, interaction: ButtonInteraction) {
-  if (!interaction.guildId) {
-    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
-    return;
-  }
-  // Только сам пользователь может редактировать свою карточку.
-  const ownerId = interaction.customId.split(":")[2];
-  if (interaction.user.id !== ownerId) {
-    await interaction.reply({ content: "Это чужая карточка.", flags: MessageFlags.Ephemeral });
-    return;
-  }
-
-  const existing = await runtime.prisma.userMemoryNote.findUnique({
-    where: { guildId_userId_key: { guildId: interaction.guildId, userId: interaction.user.id, key: "_prompt_card" } },
-    select: { value: true }
-  }).catch(() => null);
-  const existingSlots = await runtime.promptSlots.listForOwner(interaction.guildId, interaction.user.id).catch(() => []);
-  const legacySlot = existingSlots.find((slot) => slot.channelId === null && slot.title === "Мои инструкции");
-
-  if (!legacySlot && !existing?.value?.trim()) {
-    await interaction.reply({
-      content: "Личные карточки заменены prompt-слотами. Используй «хори запомни» и «хори вспомни».",
-      flags: MessageFlags.Ephemeral
-    });
-    return;
-  }
-
-  const modal = new ModalBuilder()
-    .setCustomId(`PROMPT_CARD_MODAL:${interaction.user.id}`)
-    .setTitle("Мои инструкции для Хори");
-
-  modal.addComponents(
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder()
-        .setCustomId("content")
-        .setLabel("Инструкции (каждая с новой строки)")
-        .setStyle(TextInputStyle.Paragraph)
-        .setRequired(false)
-        .setMaxLength(1000)
-        .setValue(legacySlot?.content ?? existing?.value ?? "")
-        .setPlaceholder("Например:\nГовори со мной без мата\nЯ предпочитаю краткие ответы\nСейчас я в роли модератора")
-    )
-  );
-
-  await interaction.showModal(modal);
-}
-
 /** Создать prompt-слот из модала (кнопка "➕ Создать слот"). */
 async function handleSlotCreateModalSubmit(runtime: BotRuntime, interaction: ModalSubmitInteraction) {
   if (!interaction.guildId) {
@@ -2592,59 +2851,9 @@ async function handleSlotCreateModalSubmit(runtime: BotRuntime, interaction: Mod
   }
 }
 
-/** Сохранить личные инструкции из модала. */
-async function handlePromptCardModalSubmit(runtime: BotRuntime, interaction: ModalSubmitInteraction) {
-  if (!interaction.guildId) {
-    await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
-    return;
-  }
-  const content = interaction.fields.getTextInputValue("content").trim();
-  const guildId = interaction.guildId;
-  const userId = interaction.user.id;
-  const relLevel = await runtime.relationshipService.getLevel(guildId, userId).catch(() => 0);
-  const existingSlots = await runtime.promptSlots.listForOwner(guildId, userId).catch(() => []);
-  const legacySlot = existingSlots.find((slot) => slot.channelId === null && slot.title === "Мои инструкции");
-
-  if (!content) {
-    await runtime.prisma.userMemoryNote.deleteMany({
-      where: { guildId, userId, key: "_prompt_card" }
-    });
-    if (legacySlot) {
-      await runtime.promptSlots.delete(legacySlot.id).catch(() => undefined);
-    }
-    await interaction.reply({ content: "🗑️ Инструкции удалены. Используй prompt-слоты для нового контекста.", flags: MessageFlags.Ephemeral });
-    return;
-  }
-
-  if (legacySlot) {
-    await runtime.promptSlots.updateContent(legacySlot.id, content, "Мои инструкции");
-  } else {
-    await runtime.promptSlots.create({
-      guildId,
-      channelId: null,
-      ownerUserId: userId,
-      ownerLevel: relLevel,
-      title: "Мои инструкции",
-      content,
-      trigger: null
-    });
-  }
-  await runtime.prisma.userMemoryNote.deleteMany({ where: { guildId, userId, key: "_prompt_card" } }).catch(() => undefined);
-
-  await interaction.reply({
-    content: `✅ Инструкции перенесены в prompt-слот «Мои инструкции» (${content.split("\n").filter(Boolean).length} строк). Активируй через «хори вспомни».`,
-    flags: MessageFlags.Ephemeral
-  });
-}
-
 async function routeButtonInteraction(runtime: BotRuntime, interaction: ButtonInteraction, isOwner: boolean) {
   if (interaction.customId.startsWith("SLOT:")) {
     await handleSlotButtonInteraction(runtime, interaction);
-    return;
-  }
-
-  if (interaction.customId.startsWith("PROMPT_CARD:edit:")) {
-    await handlePromptCardEditButton(runtime, interaction);
     return;
   }
 
@@ -3000,12 +3209,62 @@ async function handleHoriPanelAction(
     return;
   }
 
+  if (action === "runtime_flash_config") {
+    if (!isOwner) {
+      await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.showModal(buildFlashConfigModal(runtime.flashTrolling.getConfig()));
+    return;
+  }
+
+  if (action === "aggression_policy") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Политика агрессии только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const [deltasStatus, runtimeSettings] = await Promise.all([
+      runtime.runtimeConfig.getRelationshipDeltasStatus(),
+      runtime.runtimeConfig.getRuntimeSettings()
+    ]);
+    await interaction.showModal(buildAggressionPolicyModal(deltasStatus.value, runtimeSettings.maxTimeoutMinutes));
+    return;
+  }
+
+  if (action === "aggression_phrases") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Aggression phrases только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const phrases = await runtime.runtimeConfig.getAggressionReplacementTextsStatus();
+    await interaction.showModal(buildAggressionPhrasesModal(phrases.value));
+    return;
+  }
+
   if (action === "people_lookup" || action === "people_set_state") {
     if (action === "people_set_state" && !isOwner) {
       await interaction.reply({ content: "Смена уровня только для владельца.", flags: MessageFlags.Ephemeral });
       return;
     }
     await interaction.showModal(buildRelationshipModal());
+    return;
+  }
+
+  if (action === "people_reset_cold") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Снятие заморозки только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.showModal(buildUserTargetModal("relationship-reset-cold", "Снять заморозку", "Discord user ID", "123456789012345678"));
+    return;
+  }
+
+  if (action === "aggression_stage_reset") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Сброс stage только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.showModal(buildUserTargetModal("aggression-stage-reset", "Сбросить stage агрессии", "Discord user ID", "123456789012345678"));
     return;
   }
 
@@ -3022,6 +3281,60 @@ async function handleHoriPanelAction(
       return;
     }
     await interaction.showModal(buildCoreOverrideModal());
+    return;
+  }
+
+  if (action === "slots_force_activate") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Force activate только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.showModal(buildSlotForceModal());
+    return;
+  }
+
+  if (action === "slots_deactivate") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Деактивация только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.showModal(buildSlotDeactivateModal());
+    return;
+  }
+
+  if (action === "slots_edit") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Редактирование только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.showModal(buildSlotEditModal());
+    return;
+  }
+
+  if (action === "slots_set_strength") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Смена strength только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.showModal(buildSlotStrengthModal());
+    return;
+  }
+
+  if (action === "queue_phrase_pools") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Редактор phrase pools только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.showModal(buildQueuePhrasePoolsModal(await runtime.runtimeConfig.getQueuePhrasePoolsOverride()));
+    return;
+  }
+
+  if (action === "queue_media_reactions") {
+    if (!isOwner) {
+      await interaction.reply({ content: "Редактор media reactions только для владельца.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.showModal(buildMediaReactionConfigModal(await runtime.runtimeConfig.getMediaReactionConfig()));
     return;
   }
 
@@ -3190,7 +3503,7 @@ async function resolveHoriActionContent(
     case "aggression_policy":
       return buildV6RelationshipDeltas(runtime);
     case "aggression_phrases":
-      return buildV6QueueStatus(runtime);
+      return formatAggressionReplacementTextsStatus(await runtime.runtimeConfig.getAggressionReplacementTexts());
     case "slots_list": {
       try {
         const active = await runtime.promptSlots.getActiveSlot(guildId, interaction.channelId);
@@ -3213,13 +3526,17 @@ async function resolveHoriActionContent(
     }
     case "slots_inventory": {
       try {
-        const mySlots = await runtime.promptSlots.listForOwner(guildId, interaction.user.id);
-        if (!mySlots.length) return "📦 **Slots inventory** — у тебя нет зарегистрированных слотов.";
-        const lines = [`📦 **Slots inventory** (${mySlots.length} слотов):`];
-        for (const s of mySlots) {
+        const guildSlots = await runtime.promptSlots.listForGuild(guildId);
+        if (!guildSlots.length) return "📦 **Slots inventory** — на сервере нет зарегистрированных слотов.";
+        const visibleSlots = guildSlots.slice(0, isOwner ? 15 : 10);
+        const lines = [`📦 **Slots inventory** (${guildSlots.length} слотов на сервере):`];
+        for (const s of visibleSlots) {
           const st = s.active ? "✅ active" : s.cooldownUntil && s.cooldownUntil > new Date() ? `⏳ cooldown до ${s.cooldownUntil.toISOString().slice(11, 16)}` : "▫️ idle";
-          lines.push(`**${s.title ?? s.id.slice(0, 8)}** (lvl=${s.ownerLevel}${s.channelId ? ` <#${s.channelId}>` : " global"}) — ${st}`);
+          lines.push(`**${s.title ?? s.id.slice(0, 8)}** owner=<@${s.ownerUserId}> strength=${s.strength} (lvl=${s.ownerLevel}${s.channelId ? ` <#${s.channelId}>` : " global"}) — ${st}`);
           lines.push(`> ${s.content.slice(0, 100)}`);
+        }
+        if (guildSlots.length > visibleSlots.length) {
+          lines.push(`… ещё ${guildSlots.length - visibleSlots.length} слотов.`);
         }
         return lines.join("\n");
       } catch (error) {
@@ -3228,13 +3545,19 @@ async function resolveHoriActionContent(
     }
     case "slots_force_activate":
       if (!isOwner) return "Force activate только для владельца.";
-      return "Используй /hori slot user:@кто action:activate для активации слота.";
+      return "Открой owner modal и укажи ID или префикс слота для принудительной активации.";
     case "slots_deactivate":
       if (!isOwner) return "Деактивация только для владельца.";
-      return "Используй /hori slot user:@кто action:deactivate для снятия слота.";
+      return "Открой owner modal и укажи ID слота, либо оставь поле пустым для снятия активного слота в текущем канале.";
+    case "slots_edit":
+      if (!isOwner) return "Редактирование только для владельца.";
+      return "Открой owner modal и укажи слот с новым title/content.";
+    case "slots_set_strength":
+      if (!isOwner) return "Смена strength только для владельца.";
+      return "Открой owner modal и укажи слот с новым strength 0..2.";
     case "slots_legacy_cards":
-      if (!isOwner) return "Legacy карты только для владельца.";
-      return runtime.slashAdmin.listMemoryCards(guildId, interaction.user.id, 8);
+      if (!isOwner) return "Legacy мост доступен только владельцу.";
+      return "Legacy memory cards сняты с публичного UX. Остался только migration bridge `_prompt_card` -> prompt slot.";
     case "channels_status":
       return buildChannelPolicyStatus(runtime, guildId, interaction.channelId);
     case "channels_matrix":
@@ -3253,10 +3576,16 @@ async function resolveHoriActionContent(
     case "queue_reset_pools":
       if (!isOwner) return "Сброс phrase pools только для владельца.";
       return resetV6QueuePools(runtime);
+    case "queue_media_reactions":
+      if (!isOwner) return "Media reactions config только для владельца.";
+      return formatMediaReactionConfigStatus(await runtime.runtimeConfig.getMediaReactionConfig());
     case "queue_meme_status":
       return buildV6FlashStatus(runtime);
     case "runtime_status":
       return runtime.slashAdmin.runtimeModesStatus();
+    case "runtime_flash_config":
+      if (!isOwner) return "Flash config только для владельца.";
+      return buildFlashTrollingStatus(runtime);
     case "runtime_sigils":
       return buildV6SigilsStatus(runtime);
     case "runtime_features":
@@ -3500,6 +3829,8 @@ function horiActionTitle(action: string) {
     slots_inventory: "Реестр слотов",
     slots_force_activate: "Активировать слот",
     slots_deactivate: "Снять слот",
+    slots_edit: "Редактировать слот",
+    slots_set_strength: "Сила слота",
     slots_legacy_cards: "Legacy карты",
     channels_status: "Текущий канал",
     channels_matrix: "Матрица сервера",
@@ -3508,10 +3839,12 @@ function horiActionTitle(action: string) {
     channels_set_off: "Канал: Off",
     queue_phrase_pools: "Phrase pools",
     queue_reset_pools: "Reset pools",
+    queue_media_reactions: "Media reactions",
     queue_meme_status: "Memes",
     runtime_status: "Рантайм сводка",
     runtime_llm_panel: "LLM маршрутизация",
     runtime_power: "Power profile",
+    runtime_flash_config: "Flash config",
     runtime_sigils: "Sigils",
     runtime_features: "Feature flags",
     runtime_lockdown: "Owner Lockdown",
@@ -4874,6 +5207,248 @@ function buildChannelModal(
   return modal;
 }
 
+function buildFlashConfigModal(current: {
+  enabled: boolean;
+  intervalMinutes: number;
+  minMessageLength: number;
+  weights: { retort: number; question: number; meme: number };
+  channelAllowlist: string[];
+}) {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:flash-config`)
+    .setTitle("Flash runtime config");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("enabled")
+        .setLabel("enabled")
+        .setPlaceholder("true / false")
+        .setRequired(false)
+        .setValue(booleanToFieldValue(current.enabled))
+        .setMaxLength(10)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("intervalMinutes")
+        .setLabel("intervalMinutes")
+        .setPlaceholder("60")
+        .setRequired(true)
+        .setValue(String(current.intervalMinutes))
+        .setMaxLength(4)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("minMessageLength")
+        .setLabel("minMessageLength")
+        .setPlaceholder("80")
+        .setRequired(true)
+        .setValue(String(current.minMessageLength))
+        .setMaxLength(4)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("weights")
+        .setLabel("weights: retort,question,meme")
+        .setPlaceholder("40,10,40")
+        .setRequired(true)
+        .setValue(`${current.weights.retort},${current.weights.question},${current.weights.meme}`)
+        .setMaxLength(60)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("channelAllowlist")
+        .setLabel("channelAllowlist")
+        .setPlaceholder("channel ids через запятую; пусто = все")
+        .setRequired(false)
+        .setValue(current.channelAllowlist.join(", "))
+        .setMaxLength(400)
+        .setStyle(TextInputStyle.Paragraph)
+    )
+  );
+
+  return modal;
+}
+
+function buildMediaReactionConfigModal(current: {
+  chance: number;
+  minRelationshipScore: number;
+  cooldownSec: number;
+}) {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:media-reactions`)
+    .setTitle("Media reactions");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("chance")
+        .setLabel("chance")
+        .setPlaceholder("0.05")
+        .setRequired(true)
+        .setValue(String(current.chance))
+        .setMaxLength(12)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("minRelationshipScore")
+        .setLabel("minRelationshipScore")
+        .setPlaceholder("2")
+        .setRequired(true)
+        .setValue(String(current.minRelationshipScore))
+        .setMaxLength(8)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("cooldownSec")
+        .setLabel("cooldownSec")
+        .setPlaceholder("0")
+        .setRequired(true)
+        .setValue(String(current.cooldownSec))
+        .setMaxLength(8)
+        .setStyle(TextInputStyle.Short)
+    )
+  );
+
+  return modal;
+}
+
+function buildQueuePhrasePoolsModal(current: {
+  initial?: Partial<Record<"warm" | "neutral" | "cold", string[]>>;
+  followup?: Partial<Record<"warm" | "neutral" | "cold", string[]>>;
+} | null) {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:queue-pools`)
+    .setTitle("Queue phrase pools");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("initialBuckets")
+        .setLabel("initial buckets")
+        .setPlaceholder("warm: фраза 1 | фраза 2\nneutral: ...\ncold: ...")
+        .setRequired(false)
+        .setValue(formatQueuePhraseStageEditor(current?.initial, "initial"))
+        .setMaxLength(4000)
+        .setStyle(TextInputStyle.Paragraph)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("followupBuckets")
+        .setLabel("followup buckets")
+        .setPlaceholder("friendly: фраза 1 | фраза 2\nneutral: ...\ncold: ...")
+        .setRequired(false)
+        .setValue(formatQueuePhraseStageEditor(current?.followup, "followup"))
+        .setMaxLength(4000)
+        .setStyle(TextInputStyle.Paragraph)
+    )
+  );
+
+  return modal;
+}
+
+function buildAggressionPolicyModal(
+  deltas: {
+    session_evaluator_a: number;
+    session_evaluator_b: number;
+    session_evaluator_v: number;
+    microreaction_positive: number;
+    microreaction_negative: number;
+    recall_invocation: number;
+    aggression_event: number;
+    mod_manual: number;
+  },
+  maxTimeoutMinutes: number
+) {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:aggression-policy`)
+    .setTitle("Aggression policy");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("maxTimeoutMinutes")
+        .setLabel("maxTimeoutMinutes")
+        .setPlaceholder("15")
+        .setRequired(true)
+        .setValue(String(maxTimeoutMinutes))
+        .setMaxLength(2)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("deltas")
+        .setLabel("relationship deltas")
+        .setPlaceholder("session_evaluator_a=1\nsession_evaluator_b=0.05\n...")
+        .setRequired(true)
+        .setValue(formatRelationshipDeltasEditor(deltas))
+        .setMaxLength(4000)
+        .setStyle(TextInputStyle.Paragraph)
+    )
+  );
+
+  return modal;
+}
+
+function buildAggressionPhrasesModal(current: {
+  stage1: string;
+  stage2: string;
+  stage3: string;
+  timeout: string;
+}) {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:aggression-phrases`)
+    .setTitle("Aggression phrases");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("stage1")
+        .setLabel("stage1")
+        .setRequired(true)
+        .setValue(current.stage1)
+        .setMaxLength(200)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("stage2")
+        .setLabel("stage2")
+        .setRequired(true)
+        .setValue(current.stage2)
+        .setMaxLength(200)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("stage3")
+        .setLabel("stage3")
+        .setRequired(true)
+        .setValue(current.stage3)
+        .setMaxLength(200)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("timeout")
+        .setLabel("timeout")
+        .setPlaceholder("Используй {minutes} для подстановки")
+        .setRequired(true)
+        .setValue(current.timeout)
+        .setMaxLength(200)
+        .setStyle(TextInputStyle.Short)
+    )
+  );
+
+  return modal;
+}
+
 function parseMemoryAlbumModalId(customId: string) {
   const [prefix, requestId, messageId] = customId.split(":");
 
@@ -4926,6 +5501,15 @@ function readIntegerText(value: string | undefined, min: number, max: number) {
 
   const parsed = Number(value.trim());
   return Number.isInteger(parsed) ? Math.max(min, Math.min(max, parsed)) : undefined;
+}
+
+function readFloatText(value: string | undefined, min: number, max: number) {
+  if (!value?.trim()) {
+    return undefined;
+  }
+
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : undefined;
 }
 
 function readIntInRange(value: number | undefined, min: number, max: number) {
@@ -5058,7 +5642,7 @@ function buildCoreOverrideModal(): ModalBuilder {
         .setStyle(TextInputStyle.Short)
         .setRequired(true)
         .setMaxLength(30)
-        .setPlaceholder("core_annoyed | core_base | core_warm | core_close | core_teasing | core_sweet | core_serious")
+        .setPlaceholder("core_annoyed | core_base | core_warm | core_close | core_teasing | core_sweet | core_serious | clear")
     ),
     new ActionRowBuilder<TextInputBuilder>().addComponents(
       new TextInputBuilder()
@@ -5080,6 +5664,176 @@ function buildCoreOverrideModal(): ModalBuilder {
     )
   );
   return modal;
+}
+
+function buildSlotForceModal(): ModalBuilder {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:slot-force`)
+    .setTitle("Force Activate Slot");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("slotId")
+        .setLabel("Slot ID или префикс")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(64)
+        .setPlaceholder("slot_123 или первые 8 символов")
+    )
+  );
+
+  return modal;
+}
+
+function buildUserTargetModal(modalKind: string, title: string, label: string, placeholder: string): ModalBuilder {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:${modalKind}`)
+    .setTitle(title);
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("userId")
+        .setLabel(label)
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(32)
+        .setPlaceholder(placeholder)
+    )
+  );
+
+  return modal;
+}
+
+function buildSlotDeactivateModal(): ModalBuilder {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:slot-deactivate`)
+    .setTitle("Deactivate Slot");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("slotId")
+        .setLabel("Slot ID или префикс")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setMaxLength(64)
+        .setPlaceholder("оставь пустым для активного слота в этом канале")
+    )
+  );
+
+  return modal;
+}
+
+function buildSlotEditModal(): ModalBuilder {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:slot-edit`)
+    .setTitle("Edit Slot");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("slotId")
+        .setLabel("Slot ID или префикс")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(64)
+        .setPlaceholder("slot_123 или первые 8 символов")
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("title")
+        .setLabel("Новое название")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setMaxLength(64)
+        .setPlaceholder("оставь пустым, чтобы сохранить текущее")
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("content")
+        .setLabel("Новый контент")
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true)
+        .setMaxLength(1900)
+        .setPlaceholder("Обнови контекст слота")
+    )
+  );
+
+  return modal;
+}
+
+function buildSlotStrengthModal(): ModalBuilder {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:slot-strength`)
+    .setTitle("Set Slot Strength");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("slotId")
+        .setLabel("Slot ID или префикс")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(64)
+        .setPlaceholder("slot_123 или первые 8 символов")
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("strength")
+        .setLabel("Strength")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(1)
+        .setPlaceholder("0, 1 или 2")
+        .setValue("1")
+    )
+  );
+
+  return modal;
+}
+
+interface GuildPromptSlotLookup {
+  id: string;
+  guildId: string;
+  channelId: string | null;
+  ownerUserId: string;
+  ownerLevel: number;
+  title: string | null;
+  content: string;
+  active: boolean;
+  strength: number;
+  activatedAt: Date | null;
+  cooldownUntil: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+async function findGuildSlotByPrefix(runtime: BotRuntime, guildId: string, rawId: string): Promise<GuildPromptSlotLookup | null> {
+  const needle = rawId.trim();
+  if (!needle) {
+    return null;
+  }
+
+  const slots = (await runtime.promptSlots.listForGuild(guildId))
+    .filter((slot) => slot.id.startsWith(needle))
+    .slice(0, 5);
+
+  const exact = slots.find((slot) => slot.id === needle);
+  if (exact) {
+    return exact;
+  }
+
+  if (slots.length === 1) {
+    return slots[0] ?? null;
+  }
+
+  if (slots.length > 1) {
+    throw new Error(`Префикс \`${needle}\` неоднозначен. Уточни ID.`);
+  }
+
+  return null;
 }
 
 async function buildCoreOverridesList(runtime: BotRuntime, guildId: string): Promise<string> {
@@ -5118,12 +5872,190 @@ async function setV6SigilState(runtime: BotRuntime, sigil: string, enabled: bool
   }
 }
 
+function formatQueuePhraseStageEditor(
+  stage: Partial<Record<"warm" | "neutral" | "cold", string[]>> | undefined,
+  stageId: "initial" | "followup"
+) {
+  return ["warm", "neutral", "cold"]
+    .map((bucket) => {
+      const label = stageId === "followup" && bucket === "warm" ? "friendly" : bucket;
+      return `${label}: ${stage?.[bucket as "warm" | "neutral" | "cold"]?.join(" | ") ?? ""}`.trimEnd();
+    })
+    .join("\n");
+}
+
+function parseQueuePhraseStageEditor(value: string, stageId: "initial" | "followup"):
+  | { value: Partial<Record<"warm" | "neutral" | "cold", string[]>> }
+  | { error: string } {
+  const parsed: Partial<Record<"warm" | "neutral" | "cold", string[]>> = {};
+  const seen = new Set<string>();
+
+  for (const rawLine of value.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+
+    const match = /^(friendly|warm|neutral|cold)\s*:\s*(.*)$/i.exec(line);
+    if (!match) {
+      return {
+        error: `Не поняла строку \`${line}\`. Формат: ${stageId === "followup" ? "friendly" : "warm"}: фраза 1 | фраза 2`
+      };
+    }
+
+    const rawBucket = match[1].toLowerCase();
+    if (stageId === "initial" && rawBucket === "friendly") {
+      return { error: "Bucket `friendly` допустим только для followup. Для initial используй `warm`." };
+    }
+
+    const bucket = rawBucket === "friendly" ? "warm" : rawBucket as "warm" | "neutral" | "cold";
+    if (seen.has(bucket)) {
+      return { error: `Bucket \`${stageId === "followup" && bucket === "warm" ? "friendly" : bucket}\` указан больше одного раза.` };
+    }
+    seen.add(bucket);
+
+    const phrases = match[2]
+      .split("|")
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (phrases.length) {
+      parsed[bucket] = phrases;
+    }
+  }
+
+  return { value: parsed };
+}
+
+function applyQueuePhrasePoolsOverrideLive(
+  runtime: BotRuntime,
+  override: {
+    initial?: Partial<Record<"warm" | "neutral" | "cold", string[]>>;
+    followup?: Partial<Record<"warm" | "neutral" | "cold", string[]>>;
+  } | null
+) {
+  runtime.queuePhrasePool.resetToDefaults();
+  if (override) {
+    runtime.queuePhrasePool.setPools(override);
+  }
+}
+
+function formatRelationshipDeltasEditor(deltas: {
+  session_evaluator_a: number;
+  session_evaluator_b: number;
+  session_evaluator_v: number;
+  microreaction_positive: number;
+  microreaction_negative: number;
+  recall_invocation: number;
+  aggression_event: number;
+  mod_manual: number;
+}) {
+  return [
+    `session_evaluator_a=${deltas.session_evaluator_a}`,
+    `session_evaluator_b=${deltas.session_evaluator_b}`,
+    `session_evaluator_v=${deltas.session_evaluator_v}`,
+    `microreaction_positive=${deltas.microreaction_positive}`,
+    `microreaction_negative=${deltas.microreaction_negative}`,
+    `recall_invocation=${deltas.recall_invocation}`,
+    `aggression_event=${deltas.aggression_event}`,
+    `mod_manual=${deltas.mod_manual}`
+  ].join("\n");
+}
+
+function parseRelationshipDeltasEditor(value: string):
+  | { value: Partial<{
+      session_evaluator_a: number;
+      session_evaluator_b: number;
+      session_evaluator_v: number;
+      microreaction_positive: number;
+      microreaction_negative: number;
+      recall_invocation: number;
+      aggression_event: number;
+      mod_manual: number;
+    }> }
+  | { error: string } {
+  const parsed: Partial<{
+    session_evaluator_a: number;
+    session_evaluator_b: number;
+    session_evaluator_v: number;
+    microreaction_positive: number;
+    microreaction_negative: number;
+    recall_invocation: number;
+    aggression_event: number;
+    mod_manual: number;
+  }> = {};
+  const allowed = new Set([
+    "session_evaluator_a",
+    "session_evaluator_b",
+    "session_evaluator_v",
+    "microreaction_positive",
+    "microreaction_negative",
+    "recall_invocation",
+    "aggression_event",
+    "mod_manual"
+  ]);
+
+  for (const rawLine of value.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+
+    const match = /^([a-z_]+)\s*[=:]\s*(-?\d+(?:\.\d+)?)$/i.exec(line);
+    if (!match) {
+      return { error: `Не поняла строку \`${line}\`. Формат: key=value` };
+    }
+
+    const key = match[1].toLowerCase();
+    if (!allowed.has(key)) {
+      return { error: `Неизвестный delta key: \`${key}\`.` };
+    }
+
+    parsed[key as keyof typeof parsed] = Number(match[2]);
+  }
+
+  return { value: parsed };
+}
+
+function formatAggressionReplacementTextsStatus(texts: {
+  stage1: string;
+  stage2: string;
+  stage3: string;
+  timeout: string;
+}) {
+  return [
+    "**Aggression replacement phrases**",
+    `stage1: ${texts.stage1}`,
+    `stage2: ${texts.stage2}`,
+    `stage3: ${texts.stage3}`,
+    `timeout: ${texts.timeout}`
+  ].join("\n");
+}
+
+function formatMediaReactionConfigStatus(config: {
+  chance: number;
+  minRelationshipScore: number;
+  cooldownSec: number;
+}) {
+  return [
+    "**Media reactions**",
+    `chance: \`${config.chance}\``,
+    `minRelationshipScore: \`${config.minRelationshipScore}\``,
+    `cooldownSec: \`${config.cooldownSec}\``
+  ].join("\n");
+}
+
 async function buildV6QueueStatus(runtime: BotRuntime) {
   try {
     const pools = runtime.queuePhrasePool.getPools();
     const counts = (Object.entries(pools) as Array<[string, Record<string, string[]>]>)
       .map(([stage, buckets]) => {
-        const parts = Object.entries(buckets).map(([b, list]) => `${b}: ${list.length}`).join(", ");
+        const parts = Object.entries(buckets)
+          .map(([bucket, list]) => {
+            const label = stage === "followup" && bucket === "warm" ? "friendly" : bucket;
+            return `${label}: ${list.length}`;
+          })
+          .join(", ");
         return `\`${stage}\` → ${parts}`;
       })
       .join("\n");
@@ -5137,6 +6069,7 @@ async function buildV6QueueStatus(runtime: BotRuntime) {
 async function resetV6QueuePools(runtime: BotRuntime) {
   try {
     await runtime.runtimeConfig.resetQueuePhrasePoolsOverride();
+    applyQueuePhrasePoolsOverrideLive(runtime, null);
     return "Phrase pools сброшены к default.";
   } catch (error) {
     return `Не удалось сбросить: ${asErrorMessage(error)}`;
@@ -5145,16 +6078,26 @@ async function resetV6QueuePools(runtime: BotRuntime) {
 
 function buildV6FlashStatus(runtime: BotRuntime) {
   try {
-    const cfg = runtime.flashTrolling.getConfig();
-    const w = cfg.weights;
-    return [
-      `**V6 Flash trolling**`,
-      `weights: retort=\`${w.retort}\` question=\`${w.question}\` meme=\`${w.meme}\``,
-      `intervalMinutes: \`${cfg.intervalMinutes ?? "—"}\``
-    ].join("\n");
+    return buildFlashTrollingStatus(runtime, "**V6 Flash trolling**");
   } catch (error) {
     return `Не удалось получить flash cfg: ${asErrorMessage(error)}`;
   }
+}
+
+function buildFlashTrollingStatus(runtime: BotRuntime, heading = "**Flash trolling**") {
+  const cfg = runtime.flashTrolling.getConfig();
+  const weights = cfg.weights;
+  const channels = cfg.channelAllowlist.length
+    ? cfg.channelAllowlist.map((channelId) => `<#${channelId}>`).join(", ")
+    : "все каналы";
+
+  return [
+    heading,
+    `enabled: ${cfg.enabled ? "🟢 on" : "🔴 off"}`,
+    `intervalMinutes: \`${cfg.intervalMinutes}\` · minMessageLength: \`${cfg.minMessageLength}\``,
+    `weights: retort=\`${weights.retort}\` question=\`${weights.question}\` meme=\`${weights.meme}\``,
+    `channels: ${channels}`
+  ].join("\n");
 }
 
 async function buildV6FlashMemes(_runtime: BotRuntime) {

@@ -51,6 +51,7 @@ model Guild {
   knowledgeClusters  KnowledgeCluster[]
   promptSlots        HoriPromptSlot[]
   coreOverrides      HoriCoreOverride[]
+  relationshipHooks  RelationshipHook[]
 }
 
 model ChannelConfig {
@@ -95,6 +96,7 @@ model User {
   promptSlots      HoriPromptSlot[]
   coreOverrides    HoriCoreOverride[]
   userDailyAggregates UserDailyAggregate[]
+  relationshipHooks RelationshipHook[]
 }
 
 model UserStats {
@@ -166,6 +168,27 @@ model RelationshipProfile {
   updatedByUser    User?    @relation("RelationshipUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
 
   @@unique([guildId, userId])
+}
+
+model RelationshipHook {
+  id         String   @id @default(cuid())
+  guildId    String
+  userId     String
+  label      String
+  detail     String   @db.Text
+  useTag     String?
+  avoidTag   String?
+  confidence Float    @default(0.7)
+  freshness  String   @default("steady")
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  expiresAt  DateTime?
+  guild      Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, userId, active])
+  @@index([guildId, userId, expiresAt])
 }
 
 model Message {

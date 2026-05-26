@@ -6,11 +6,17 @@
  * под новую систему (interaction-router панель, runtime-config-service,
  * orchestrator legacy reads).
  *
+ * Это не source of truth для production chat prompt assembly. Текущий runtime
+ * contract живёт в ChatOrchestrator и runtime-config-service; этот файл держит
+ * только transitional key surface до окончательной нормализации namespace.
+ *
  * Эти заглушки будут окончательно удалены в Phase 4 (user prompts) и Phase 9
  * (panel rewrite).
  */
 
 import type { MessageKind } from "@hori/shared";
+
+import { coreText } from "./cores";
 
 // Широкий union ключей: новые camelCase + legacy snake_case, которые ещё реально используются.
 export const CORE_PROMPT_KEYS = [
@@ -60,7 +66,7 @@ export interface CorePromptTemplates {
 }
 
 export const DEFAULT_CORE_PROMPT_TEMPLATES: CorePromptTemplates = {
-  commonCore: "",
+  commonCore: coreText("core_base"),
   memorySummarizer: "",
   aggressionChecker: "",
   relationshipEvaluator: "",

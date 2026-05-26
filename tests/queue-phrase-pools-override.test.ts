@@ -45,6 +45,15 @@ describe("V6 Phase F: QueuePhrasePoolService panel-tunability", () => {
     expect(svc.getPools().initial.warm).toEqual(["ok"]);
   });
 
+  it("resetToDefaults restores the built-in pools after an override", () => {
+    const svc = new QueuePhrasePoolService();
+    svc.setPools({ initial: { cold: ["custom-cold"] } });
+
+    svc.resetToDefaults();
+
+    expect(svc.getPools().initial.cold).toEqual(DEFAULT_QUEUE_PHRASE_POOLS.initial.cold);
+  });
+
   it("score routing maps to correct bucket", () => {
     const svc = new QueuePhrasePoolService({
       initial: { warm: ["W"], neutral: ["N"], cold: ["C"] },
@@ -52,7 +61,8 @@ describe("V6 Phase F: QueuePhrasePoolService panel-tunability", () => {
     });
     expect(svc.pickPhrase({ guildId: "g", userId: "u", score: 2, stage: "initial" })).toBe("W");
     expect(svc.pickPhrase({ guildId: "g", userId: "u", score: 0, stage: "initial" })).toBe("N");
-    expect(svc.pickPhrase({ guildId: "g", userId: "u", score: -0.5, stage: "initial" })).toBe("C");
+    expect(svc.pickPhrase({ guildId: "g", userId: "u", score: -0.5, stage: "initial" })).toBe("N");
+    expect(svc.pickPhrase({ guildId: "g", userId: "u", score: -1, stage: "initial" })).toBe("C");
     expect(svc.pickPhrase({ guildId: "g", userId: "u", score: 4, stage: "followup" })).toBe("fW");
   });
 });
@@ -87,6 +97,28 @@ describe("V6 Phase F: RuntimeConfigService queue pool override", () => {
     const result = await svc.getQueuePhrasePoolsOverride();
     expect(result).toEqual({
       initial: { warm: ["a", "b"], cold: ["ok"] }
+    });
+  });
+
+  it("accepts friendly as an alias for the followup warm bucket", async () => {
+    const prisma = {
+      runtimeSetting: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            key: QUEUE_PHRASE_POOLS_SETTING_KEY,
+            value: JSON.stringify({
+              followup: { friendly: ["f-1", "f-2"] }
+            }),
+            updatedBy: null,
+            updatedAt: new Date()
+          }
+        ])
+      }
+    } as unknown as AppPrismaClient;
+    const svc = new RuntimeConfigService(prisma, makeEnv());
+
+    expect(await svc.getQueuePhrasePoolsOverride()).toEqual({
+      followup: { warm: ["f-1", "f-2"] }
     });
   });
 

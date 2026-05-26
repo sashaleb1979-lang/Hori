@@ -1,20 +1,18 @@
 /**
- * V7 ACTIVE_CORE composer.
+ * V7 core selector and legacy compatibility layer.
  *
- * Один из 7 cores выбирается через relationship value → подаётся как единственный
- * статический prompt-блок. Все динамические блоки старой системы (tone, style,
- * antiSlop, fewShot, ideological, slang, snarkConfidence, contextEnergy,
- * messageKind, replyMode, selfInterjection, channelStyle, stylePreset,
- * relationship overlay, server overlay и т.д.) удалены полностью.
+ * Current production chat prompt assembly lives in ChatOrchestrator as a
+ * message-array contract. This module no longer owns the full chat prompt; it
+ * only selects the base core text plus legacy-compatible limits/trace fields
+ * still consumed by PersonaService and adjacent callers.
  *
- * Возвращает legacy-совместимую форму ComposeBehaviorPromptOutput для
- * совместимости с существующими потребителями (chat-orchestrator, persona-service).
- * Старые trace-поля заполняются безопасными заглушками.
+ * All dynamic blocks from the old persona system (tone, style, antiSlop,
+ * fewShot, ideological, slang, messageKind overlays, self-interjection,
+ * relationship/server overlays and similar layers) are not assembled here.
  */
 import type { PersonaBehaviorTrace, PersonaResponseLimits, RelationshipState } from "@hori/shared";
 
 import { coreText, USER_PROMPT_FRAMING, type CoreId } from "./cores";
-import { pickCore } from "./relationship-mapping";
 import type { ComposeBehaviorPromptInput, ComposeBehaviorPromptOutput } from "./types";
 
 const VALID_CORE_IDS: ReadonlyArray<string> = [
@@ -52,28 +50,6 @@ function relationshipStateFromCore(core: CoreId): RelationshipState {
       return "serious";
     default:
       return "base";
-  }
-}
-
-function resolveRelationshipValue(input: ComposeBehaviorPromptInput): number {
-  const score = input.relationship?.relationshipScore;
-  if (typeof score === "number" && Number.isFinite(score)) return score;
-  const state = input.relationship?.relationshipState;
-  switch (state) {
-    case "cold_lowest":
-      return -1;
-    case "warm":
-      return 1;
-    case "close":
-      return 2;
-    case "teasing":
-      return 3;
-    case "sweet":
-      return 4;
-    case "serious":
-      return 0;
-    default:
-      return 0;
   }
 }
 
@@ -119,11 +95,9 @@ function buildTraceStub(
 }
 
 export function composeBehaviorPrompt(input: ComposeBehaviorPromptInput): ComposeBehaviorPromptOutput {
-  const value = resolveRelationshipValue(input);
-  const moderatorContext = Boolean(input.moderatorOverlay && input.message?.isModerator);
   const coreId: CoreId = (input.manualCoreOverride && isValidCoreId(input.manualCoreOverride))
     ? input.manualCoreOverride as CoreId
-    : pickCore(value, { moderatorContext });
+    : "core_base";
 
   const coreString = coreText(coreId);
   const limits = DEFAULT_LIMITS;

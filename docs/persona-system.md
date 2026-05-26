@@ -1,5 +1,9 @@
 # Persona System
 
+> Status: legacy / migration reference.
+> Это не current source of truth для production chat prompt.
+> Актуальный current-state contract описан в [docs/prompt-architecture-audit-2026-05-24.md](docs/prompt-architecture-audit-2026-05-24.md), а target architecture — в [docs/hori-epoch-core-ladder-plan-ru.md](docs/hori-epoch-core-ladder-plan-ru.md).
+
 Cluster 1 adds a modular behavior composer for Hori. It replaces the old single persona prompt with deterministic blocks: identity, style rules, active mode, channel style, message kind, context usage, response length, fast preset, slang, ideological flavour, self-interjection constraints, anti-slop and analogy suppression.
 
 ## Persona Config

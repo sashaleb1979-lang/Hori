@@ -29,6 +29,7 @@ import {
   type CorePromptTemplates,
   DEFAULT_CORE_PROMPT_TEMPLATES
 } from "../persona/prompt-spec-stubs";
+import { DEFAULT_FLASH_TROLLING_CONFIG, type FlashTrollingConfig } from "./flash-trolling-service";
 
 export const FEATURE_KEY_MAP = {
   web_search: "webSearch",
@@ -53,6 +54,27 @@ export const OPENAI_EMBED_DIMENSIONS_SETTING_KEY = "llm.openai_embed_dimensions"
 export const MEMORY_HYDE_SETTING_KEY = "memory.hyde_enabled";
 export const AI_ROUTER_STATE_SETTING_KEY = "llm.ai_router_state";
 export const PREFERRED_CHAT_PROVIDER_SETTING_KEY = "llm.active_chat_provider";
+export const CORE_EPOCH_STATE_SETTING_KEY = "prompt.core.epoch_state";
+
+const CORE_EPOCH_DURATION_MS = 2 * 60 * 60 * 1000;
+const CORE_EPOCH_FRONTS = {
+  dry_echo: "Эпоха: сухое эхо. Держи ровный тон, короткие ответы и ощущение, будто ты уже на полшага впереди чужой мысли.",
+  low_voltage: "Эпоха: низкое напряжение. Отвечай коротко, вяло-иронично, без длинных разворотов и без дружелюбной суеты.",
+  forensic_snark: "Эпоха: forensic snark. Замечай слабые места тезиса быстро, но не превращай ответ в лекцию или трибунал.",
+  quiet_paranoia: "Эпоха: тихая паранойя. Чуть больше настороженности и странной собранности, но без отрыва от фактов и текущего контекста."
+} as const;
+
+export const CORE_EPOCH_FRONT_CHOICES = Object.keys(CORE_EPOCH_FRONTS) as Array<keyof typeof CORE_EPOCH_FRONTS>;
+
+export type CoreEpochFrontId = keyof typeof CORE_EPOCH_FRONTS;
+
+export interface CoreEpochState {
+  epochId: string;
+  frontId: CoreEpochFrontId;
+  startedAt: Date;
+  expiresAt: Date;
+  frontText: string;
+}
 
 /**
  * V6 Phase B: per-source relationship deltas (panel-tunable).
@@ -112,6 +134,38 @@ export const RELATIONSHIP_DELTA_LABELS_RU: Record<RelationshipDeltaSource, strin
   mod_manual: "Ручная коррекция (по умолчанию 0)"
 };
 
+export const AGGRESSION_REPLACEMENTS_SETTING_KEY = "aggression.replacements";
+
+export interface AggressionReplacementTexts {
+  stage1: string;
+  stage2: string;
+  stage3: string;
+  timeout: string;
+}
+
+export const DEFAULT_AGGRESSION_REPLACEMENTS: AggressionReplacementTexts = {
+  stage1: "предупреждаю, не надо так.",
+  stage2: "я это запомню.",
+  stage3: "последний раз предупреждаю.",
+  timeout: "тайм-аут на {minutes} минут."
+};
+
+export const MEDIA_REACTION_CONFIG_SETTING_KEY = "media.reactions";
+
+export interface MediaReactionConfig {
+  chance: number;
+  minRelationshipScore: number;
+  cooldownSec: number;
+}
+
+export const DEFAULT_MEDIA_REACTION_CONFIG: MediaReactionConfig = {
+  chance: 0.05,
+  minRelationshipScore: 2,
+  cooldownSec: 0
+};
+
+export const FLASH_TROLLING_CONFIG_SETTING_KEY = "flash.trolling";
+
 /**
  * V6 Phase D: enabled sigils. Хранится JSON-array of single-character strings.
  * Если ключ не задан — IntentRouter использует defaults (только `?`).
@@ -145,9 +199,6 @@ const RUNTIME_OVERRIDE_DEFINITIONS: Record<string, { field: keyof Omit<Effective
   "runtime.ollama.keep_alive": { field: "ollamaKeepAlive", parse: parseStringValue },
   "runtime.ollama.num_ctx": { field: "ollamaNumCtx", parse: parsePositiveInt },
   "runtime.ollama.num_batch": { field: "ollamaNumBatch", parse: parsePositiveInt },
-  "runtime.media.auto_global_cooldown_sec": { field: "mediaAutoGlobalCooldownSec", parse: parseNonNegativeInt },
-  "runtime.media.auto_min_confidence": { field: "mediaAutoMinConfidence", parse: parseUnitFloat },
-  "runtime.media.auto_min_intensity": { field: "mediaAutoMinIntensity", parse: parseUnitFloat },
   [OPENAI_EMBED_DIMENSIONS_SETTING_KEY]: { field: "openaiEmbedDimensions", parse: parseOpenAIEmbeddingDimensions },
   [MEMORY_HYDE_SETTING_KEY]: { field: "memoryHydeEnabled", parse: parseBooleanValue },
   "runtime.memory.mode": { field: "memoryMode", parse: parseMemoryMode },
@@ -157,6 +208,10 @@ const RUNTIME_OVERRIDE_DEFINITIONS: Record<string, { field: keyof Omit<Effective
 };
 
 export type ChannelAccessMode = "full" | "silent" | "off";
+
+type FlashTrollingConfigPatch = Partial<Omit<FlashTrollingConfig, "weights">> & {
+  weights?: Partial<FlashTrollingConfig["weights"]>;
+};
 
 function isChannelAccessMode(value: unknown): value is ChannelAccessMode {
   return value === "full" || value === "silent" || value === "off";
@@ -207,9 +262,6 @@ export interface EffectiveRuntimeSettings {
   ollamaKeepAlive: string;
   ollamaNumCtx: number;
   ollamaNumBatch: number;
-  mediaAutoGlobalCooldownSec: number;
-  mediaAutoMinConfidence: number;
-  mediaAutoMinIntensity: number;
   memoryMode: MemoryMode;
   relationshipGrowthMode: RelationshipGrowthMode;
   stylePresetMode: StylePresetMode;
@@ -712,12 +764,243 @@ export class RuntimeConfigService {
     return next;
   }
 
+  async setRelationshipDeltas(
+    values: Partial<RelationshipDeltaConfig>,
+    updatedBy?: string
+  ) {
+    const sanitized = sanitizeDeltas(values);
+    const current = await this.getRelationshipDeltas();
+    const next: RelationshipDeltaConfig = { ...current, ...sanitized };
+    await this.prisma.runtimeSetting.upsert({
+      where: { key: RELATIONSHIP_DELTAS_SETTING_KEY },
+      update: {
+        value: JSON.stringify(next),
+        updatedBy: updatedBy ?? null,
+        updatedAt: new Date()
+      },
+      create: {
+        key: RELATIONSHIP_DELTAS_SETTING_KEY,
+        value: JSON.stringify(next),
+        updatedBy: updatedBy ?? null
+      }
+    });
+    this.invalidate();
+    return next;
+  }
+
   async resetRelationshipDeltas() {
     await this.prisma.runtimeSetting.deleteMany({
       where: { key: RELATIONSHIP_DELTAS_SETTING_KEY }
     });
     this.invalidate();
     return { ...DEFAULT_RELATIONSHIP_DELTAS };
+  }
+
+  async getAggressionReplacementTexts(): Promise<AggressionReplacementTexts> {
+    const row = await this.getRuntimeSettingRow(AGGRESSION_REPLACEMENTS_SETTING_KEY);
+    if (!row?.value) {
+      return { ...DEFAULT_AGGRESSION_REPLACEMENTS };
+    }
+    try {
+      const parsed = JSON.parse(row.value) as Partial<AggressionReplacementTexts>;
+      return { ...DEFAULT_AGGRESSION_REPLACEMENTS, ...sanitizeAggressionReplacementTexts(parsed) };
+    } catch {
+      return { ...DEFAULT_AGGRESSION_REPLACEMENTS };
+    }
+  }
+
+  async getAggressionReplacementTextsStatus(): Promise<RuntimeOverrideStatus<AggressionReplacementTexts>> {
+    const row = await this.getRuntimeSettingRow(AGGRESSION_REPLACEMENTS_SETTING_KEY);
+    const value = await this.getAggressionReplacementTexts();
+    if (!row?.value) {
+      return { value, source: "default" };
+    }
+    return {
+      value,
+      source: "runtime_setting",
+      updatedBy: row.updatedBy,
+      updatedAt: row.updatedAt
+    };
+  }
+
+  async setAggressionReplacementTexts(values: Partial<AggressionReplacementTexts>, updatedBy?: string) {
+    const sanitized = sanitizeAggressionReplacementTexts(values);
+    const current = await this.getAggressionReplacementTexts();
+    const next: AggressionReplacementTexts = { ...current, ...sanitized };
+    await this.prisma.runtimeSetting.upsert({
+      where: { key: AGGRESSION_REPLACEMENTS_SETTING_KEY },
+      update: {
+        value: JSON.stringify(next),
+        updatedBy: updatedBy ?? null,
+        updatedAt: new Date()
+      },
+      create: {
+        key: AGGRESSION_REPLACEMENTS_SETTING_KEY,
+        value: JSON.stringify(next),
+        updatedBy: updatedBy ?? null
+      }
+    });
+    this.invalidate();
+    return next;
+  }
+
+  async resetAggressionReplacementTexts() {
+    await this.prisma.runtimeSetting.deleteMany({
+      where: { key: AGGRESSION_REPLACEMENTS_SETTING_KEY }
+    });
+    this.invalidate();
+    return { ...DEFAULT_AGGRESSION_REPLACEMENTS };
+  }
+
+  async getMediaReactionConfig(): Promise<MediaReactionConfig> {
+    const row = await this.getRuntimeSettingRow(MEDIA_REACTION_CONFIG_SETTING_KEY);
+    if (!row?.value) {
+      return { ...DEFAULT_MEDIA_REACTION_CONFIG };
+    }
+
+    try {
+      const parsed = JSON.parse(row.value) as Partial<MediaReactionConfig>;
+      return { ...DEFAULT_MEDIA_REACTION_CONFIG, ...sanitizeMediaReactionConfig(parsed) };
+    } catch {
+      return { ...DEFAULT_MEDIA_REACTION_CONFIG };
+    }
+  }
+
+  async getMediaReactionConfigStatus(): Promise<RuntimeOverrideStatus<MediaReactionConfig>> {
+    const row = await this.getRuntimeSettingRow(MEDIA_REACTION_CONFIG_SETTING_KEY);
+    const value = await this.getMediaReactionConfig();
+
+    if (!row?.value) {
+      return { value, source: "default" };
+    }
+
+    return {
+      value,
+      source: "runtime_setting",
+      updatedBy: row.updatedBy,
+      updatedAt: row.updatedAt
+    };
+  }
+
+  async setMediaReactionConfig(values: Partial<MediaReactionConfig>, updatedBy?: string) {
+    const sanitized = sanitizeMediaReactionConfig(values);
+    const current = await this.getMediaReactionConfig();
+    const next: MediaReactionConfig = { ...current, ...sanitized };
+
+    await this.prisma.runtimeSetting.upsert({
+      where: { key: MEDIA_REACTION_CONFIG_SETTING_KEY },
+      update: {
+        value: JSON.stringify(next),
+        updatedBy: updatedBy ?? null,
+        updatedAt: new Date()
+      },
+      create: {
+        key: MEDIA_REACTION_CONFIG_SETTING_KEY,
+        value: JSON.stringify(next),
+        updatedBy: updatedBy ?? null
+      }
+    });
+
+    this.invalidate();
+    return next;
+  }
+
+  async resetMediaReactionConfig() {
+    await this.prisma.runtimeSetting.deleteMany({
+      where: { key: MEDIA_REACTION_CONFIG_SETTING_KEY }
+    });
+    this.invalidate();
+    return { ...DEFAULT_MEDIA_REACTION_CONFIG };
+  }
+
+  async getFlashTrollingConfig(): Promise<FlashTrollingConfig> {
+    const row = await this.getRuntimeSettingRow(FLASH_TROLLING_CONFIG_SETTING_KEY);
+    if (!row?.value) {
+      return {
+        ...DEFAULT_FLASH_TROLLING_CONFIG,
+        weights: { ...DEFAULT_FLASH_TROLLING_CONFIG.weights },
+        channelAllowlist: [...DEFAULT_FLASH_TROLLING_CONFIG.channelAllowlist]
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(row.value) as FlashTrollingConfigPatch;
+      const sanitized = sanitizeFlashTrollingConfig(parsed);
+      return {
+        ...DEFAULT_FLASH_TROLLING_CONFIG,
+        ...sanitized,
+        weights: {
+          ...DEFAULT_FLASH_TROLLING_CONFIG.weights,
+          ...(sanitized.weights ?? {})
+        },
+        channelAllowlist: sanitized.channelAllowlist ?? [...DEFAULT_FLASH_TROLLING_CONFIG.channelAllowlist]
+      };
+    } catch {
+      return {
+        ...DEFAULT_FLASH_TROLLING_CONFIG,
+        weights: { ...DEFAULT_FLASH_TROLLING_CONFIG.weights },
+        channelAllowlist: [...DEFAULT_FLASH_TROLLING_CONFIG.channelAllowlist]
+      };
+    }
+  }
+
+  async getFlashTrollingConfigStatus(): Promise<RuntimeOverrideStatus<FlashTrollingConfig>> {
+    const row = await this.getRuntimeSettingRow(FLASH_TROLLING_CONFIG_SETTING_KEY);
+    const value = await this.getFlashTrollingConfig();
+
+    if (!row?.value) {
+      return { value, source: "default" };
+    }
+
+    return {
+      value,
+      source: "runtime_setting",
+      updatedBy: row.updatedBy,
+      updatedAt: row.updatedAt
+    };
+  }
+
+  async setFlashTrollingConfig(values: FlashTrollingConfigPatch, updatedBy?: string) {
+    const sanitized = sanitizeFlashTrollingConfig(values);
+    const current = await this.getFlashTrollingConfig();
+    const next: FlashTrollingConfig = {
+      ...current,
+      ...sanitized,
+      weights: {
+        ...current.weights,
+        ...(sanitized.weights ?? {})
+      },
+      channelAllowlist: sanitized.channelAllowlist ?? current.channelAllowlist
+    };
+
+    await this.prisma.runtimeSetting.upsert({
+      where: { key: FLASH_TROLLING_CONFIG_SETTING_KEY },
+      update: {
+        value: JSON.stringify(next),
+        updatedBy: updatedBy ?? null,
+        updatedAt: new Date()
+      },
+      create: {
+        key: FLASH_TROLLING_CONFIG_SETTING_KEY,
+        value: JSON.stringify(next),
+        updatedBy: updatedBy ?? null
+      }
+    });
+
+    this.invalidate();
+    return next;
+  }
+
+  async resetFlashTrollingConfig() {
+    await this.prisma.runtimeSetting.deleteMany({
+      where: { key: FLASH_TROLLING_CONFIG_SETTING_KEY }
+    });
+    this.invalidate();
+    return {
+      ...DEFAULT_FLASH_TROLLING_CONFIG,
+      weights: { ...DEFAULT_FLASH_TROLLING_CONFIG.weights },
+      channelAllowlist: [...DEFAULT_FLASH_TROLLING_CONFIG.channelAllowlist]
+    };
   }
 
   /**
@@ -954,6 +1237,50 @@ export class RuntimeConfigService {
     ) as Partial<Record<CorePromptKey, string>>;
 
     return { ...DEFAULT_CORE_PROMPT_TEMPLATES, ...overrides };
+  }
+
+  async getCoreEpochState(now = new Date()): Promise<CoreEpochState> {
+    const row = await this.getRuntimeSettingRow(CORE_EPOCH_STATE_SETTING_KEY);
+    const parsed = parseCoreEpochState(row?.value);
+    if (parsed && parsed.expiresAt.getTime() > now.getTime()) {
+      return parsed;
+    }
+
+    const next = createNextCoreEpochState(now);
+    await this.writeRuntimeSetting(CORE_EPOCH_STATE_SETTING_KEY, JSON.stringify({
+      epochId: next.epochId,
+      frontId: next.frontId,
+      startedAt: next.startedAt.toISOString(),
+      expiresAt: next.expiresAt.toISOString()
+    }), "system:epoch", false);
+    return next;
+  }
+
+  async rotateCoreEpoch(frontId?: CoreEpochFrontId, updatedBy?: string): Promise<CoreEpochState> {
+    const current = await this.getCoreEpochState();
+    const next = createNextCoreEpochState(new Date(), frontId ?? nextCoreEpochFrontId(current.frontId));
+    await this.writeRuntimeSetting(CORE_EPOCH_STATE_SETTING_KEY, JSON.stringify({
+      epochId: next.epochId,
+      frontId: next.frontId,
+      startedAt: next.startedAt.toISOString(),
+      expiresAt: next.expiresAt.toISOString()
+    }), updatedBy ?? "system:epoch");
+    return next;
+  }
+
+  async resetCoreEpoch(updatedBy?: string): Promise<CoreEpochState> {
+    await this.deleteRuntimeSetting(CORE_EPOCH_STATE_SETTING_KEY);
+    return this.getCoreEpochState().then(async (state) => {
+      if (updatedBy) {
+        await this.writeRuntimeSetting(CORE_EPOCH_STATE_SETTING_KEY, JSON.stringify({
+          epochId: state.epochId,
+          frontId: state.frontId,
+          startedAt: state.startedAt.toISOString(),
+          expiresAt: state.expiresAt.toISOString()
+        }), updatedBy);
+      }
+      return state;
+    });
   }
 
   async setCorePromptTemplate(guildId: string, key: CorePromptKey, content: string, updatedBy?: string) {
@@ -1232,9 +1559,6 @@ export class RuntimeConfigService {
       ollamaKeepAlive: this.env.OLLAMA_KEEP_ALIVE,
       ollamaNumCtx: this.env.OLLAMA_NUM_CTX,
       ollamaNumBatch: this.env.OLLAMA_NUM_BATCH,
-      mediaAutoGlobalCooldownSec: this.env.MEDIA_AUTO_GLOBAL_COOLDOWN_SEC,
-      mediaAutoMinConfidence: this.env.MEDIA_AUTO_MIN_CONFIDENCE,
-      mediaAutoMinIntensity: this.env.MEDIA_AUTO_MIN_INTENSITY,
       memoryMode: "OFF",
       relationshipGrowthMode: "OFF",
       stylePresetMode: "manual_only",
@@ -1408,6 +1732,78 @@ function sanitizeDeltas(input: Partial<RelationshipDeltaConfig>): Partial<Relati
   return out;
 }
 
+function sanitizeAggressionReplacementTexts(input: Partial<AggressionReplacementTexts>): Partial<AggressionReplacementTexts> {
+  const out: Partial<AggressionReplacementTexts> = {};
+  for (const key of Object.keys(DEFAULT_AGGRESSION_REPLACEMENTS) as Array<keyof AggressionReplacementTexts>) {
+    const value = input[key];
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) {
+        out[key] = trimmed;
+      }
+    }
+  }
+  return out;
+}
+
+function sanitizeMediaReactionConfig(input: Partial<MediaReactionConfig>): Partial<MediaReactionConfig> {
+  const out: Partial<MediaReactionConfig> = {};
+
+  if (typeof input.chance === "number" && Number.isFinite(input.chance)) {
+    out.chance = Math.max(0, Math.min(1, input.chance));
+  }
+
+  if (typeof input.minRelationshipScore === "number" && Number.isFinite(input.minRelationshipScore)) {
+    out.minRelationshipScore = Math.max(-1, Math.min(4, input.minRelationshipScore));
+  }
+
+  if (typeof input.cooldownSec === "number" && Number.isFinite(input.cooldownSec)) {
+    out.cooldownSec = Math.max(0, Math.round(input.cooldownSec));
+  }
+
+  return out;
+}
+
+function sanitizeFlashTrollingConfig(input: FlashTrollingConfigPatch): FlashTrollingConfigPatch {
+  const out: FlashTrollingConfigPatch = {};
+
+  if (typeof input.enabled === "boolean") {
+    out.enabled = input.enabled;
+  }
+
+  if (typeof input.intervalMinutes === "number" && Number.isFinite(input.intervalMinutes)) {
+    out.intervalMinutes = Math.max(1, Math.min(1440, Math.round(input.intervalMinutes)));
+  }
+
+  if (typeof input.minMessageLength === "number" && Number.isFinite(input.minMessageLength)) {
+    out.minMessageLength = Math.max(1, Math.min(4000, Math.round(input.minMessageLength)));
+  }
+
+  if (input.weights && typeof input.weights === "object") {
+    const weights: Partial<FlashTrollingConfig["weights"]> = {};
+    for (const key of ["retort", "question", "meme"] as const) {
+      const value = input.weights[key];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        weights[key] = Math.max(0, value);
+      }
+    }
+    if (Object.keys(weights).length) {
+      out.weights = weights;
+    }
+  }
+
+  if (Array.isArray(input.channelAllowlist)) {
+    out.channelAllowlist = Array.from(new Set(
+      input.channelAllowlist
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim())
+        .filter(Boolean)
+    ));
+  }
+
+  return out;
+}
+
 function sanitizeQueuePoolsOverride(input: unknown): QueuePhrasePoolsOverride | null {
   if (!input || typeof input !== "object") return null;
   const src = input as Record<string, unknown>;
@@ -1418,7 +1814,9 @@ function sanitizeQueuePoolsOverride(input: unknown): QueuePhrasePoolsOverride | 
     const stageObj = stageVal as Record<string, unknown>;
     const stageOut: { warm?: string[]; neutral?: string[]; cold?: string[] } = {};
     for (const bucket of ["warm", "neutral", "cold"] as const) {
-      const list = stageObj[bucket];
+      const list = stage === "followup" && bucket === "warm"
+        ? (stageObj.friendly ?? stageObj.warm)
+        : stageObj[bucket];
       if (Array.isArray(list)) {
         const cleaned = list.filter((p): p is string => typeof p === "string" && p.trim().length > 0);
         if (cleaned.length) stageOut[bucket] = cleaned;
@@ -1435,6 +1833,69 @@ function parseRelationshipGrowthMode(value: string) {
 
 function parseStylePresetMode(value: string) {
   return value === "manual_only" ? value : undefined;
+}
+
+function isCoreEpochFrontId(value: unknown): value is CoreEpochFrontId {
+  return typeof value === "string" && value in CORE_EPOCH_FRONTS;
+}
+
+function parseCoreEpochState(value: string | null | undefined): CoreEpochState | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as {
+      epochId?: unknown;
+      frontId?: unknown;
+      startedAt?: unknown;
+      expiresAt?: unknown;
+    };
+    if (!isCoreEpochFrontId(parsed.frontId) || typeof parsed.epochId !== "string") {
+      return null;
+    }
+
+    const startedAt = new Date(typeof parsed.startedAt === "string" ? parsed.startedAt : 0);
+    const expiresAt = new Date(typeof parsed.expiresAt === "string" ? parsed.expiresAt : 0);
+    if (Number.isNaN(startedAt.getTime()) || Number.isNaN(expiresAt.getTime())) {
+      return null;
+    }
+
+    return {
+      epochId: parsed.epochId,
+      frontId: parsed.frontId,
+      startedAt,
+      expiresAt,
+      frontText: CORE_EPOCH_FRONTS[parsed.frontId]
+    };
+  } catch {
+    return null;
+  }
+}
+
+function createNextCoreEpochState(now: Date, forcedFrontId?: CoreEpochFrontId): CoreEpochState {
+  const epochIndex = Math.floor(now.getTime() / CORE_EPOCH_DURATION_MS);
+  const frontIds = Object.keys(CORE_EPOCH_FRONTS) as CoreEpochFrontId[];
+  const frontId = forcedFrontId ?? frontIds[epochIndex % frontIds.length] ?? "dry_echo";
+  const startedAt = new Date(epochIndex * CORE_EPOCH_DURATION_MS);
+  const expiresAt = new Date(startedAt.getTime() + CORE_EPOCH_DURATION_MS);
+
+  return {
+    epochId: `${frontId}:${startedAt.toISOString()}`,
+    frontId,
+    startedAt,
+    expiresAt,
+    frontText: CORE_EPOCH_FRONTS[frontId]
+  };
+}
+
+function nextCoreEpochFrontId(current: CoreEpochFrontId): CoreEpochFrontId {
+  const frontIds = Object.keys(CORE_EPOCH_FRONTS) as CoreEpochFrontId[];
+  const currentIndex = frontIds.indexOf(current);
+  if (currentIndex < 0) {
+    return frontIds[0] ?? "dry_echo";
+  }
+  return frontIds[(currentIndex + 1) % frontIds.length] ?? "dry_echo";
 }
 
 function parseMaxTimeoutMinutes(value: string) {

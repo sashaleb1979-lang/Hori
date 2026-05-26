@@ -6,7 +6,7 @@ const SESSION_DEFAULT_MAX_MESSAGES = 40;
 const SESSION_CHAT_MAX_MESSAGES = 500;
 const SESSION_LOOKBACK_SCAN_LIMIT = 1500;
 
-export const SESSION_COMPACTION_CHUNK_MESSAGES = 50;
+export const SESSION_COMPACTION_CHUNK_MESSAGES = 46;
 export const SESSION_COMPACTION_TAIL_MESSAGES = 8;
 
 interface SessionCompactionSegment {
@@ -32,12 +32,114 @@ export interface SessionCompactionCandidate {
   rangeEndMessageId: string;
 }
 
+export interface ChannelSessionState {
+  sessionSince: Date;
+  lastActivityAt: Date;
+  compactionCount: number;
+  hasCompaction: boolean;
+  participants: string[];
+  sleepUntil: Date | null;
+}
+
+interface StoredChannelSessionState {
+  sessionSince: string;
+  lastActivityAt: string;
+  compactionCount: number;
+  hasCompaction: boolean;
+  participants: string[];
+  sleepUntil: string | null;
+  compactionMessageIds: string[];
+}
+
+function extractTargetMetadata(flags: unknown): Pick<ContextMessage, "targetUserId" | "targetMessageId"> {
+  const value = flags as { targetUserId?: unknown; targetMessageId?: unknown } | null | undefined;
+  return {
+    targetUserId: typeof value?.targetUserId === "string" ? value.targetUserId : null,
+    targetMessageId: typeof value?.targetMessageId === "string" ? value.targetMessageId : null
+  };
+}
+
 function sessionSinceKey(guildId: string, userId: string, channelId: string): string {
   return `session:since:${guildId}:${userId}:${channelId}`;
 }
 
 function sessionCompactionKey(guildId: string, userId: string, channelId: string): string {
   return `session:compaction:${guildId}:${userId}:${channelId}`;
+}
+
+function channelSessionStateKey(guildId: string, channelId: string): string {
+  return `session:channel-state:${guildId}:${channelId}`;
+}
+
+function guildSleepKey(guildId: string): string {
+  return `session:sleep:${guildId}`;
+}
+
+function uniqueStringValues(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (typeof value !== "string") {
+      continue;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+  }
+
+  return [...seen];
+}
+
+function parseStoredChannelSessionState(raw: string): StoredChannelSessionState | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredChannelSessionState> | null;
+    if (!parsed || typeof parsed.sessionSince !== "string" || typeof parsed.lastActivityAt !== "string") {
+      return null;
+    }
+
+    const sessionSince = new Date(parsed.sessionSince);
+    const lastActivityAt = new Date(parsed.lastActivityAt);
+    if (Number.isNaN(sessionSince.getTime()) || Number.isNaN(lastActivityAt.getTime())) {
+      return null;
+    }
+
+    const sleepUntil = typeof parsed.sleepUntil === "string"
+      ? new Date(parsed.sleepUntil)
+      : null;
+
+    return {
+      sessionSince: parsed.sessionSince,
+      lastActivityAt: parsed.lastActivityAt,
+      compactionCount: typeof parsed.compactionCount === "number" && Number.isFinite(parsed.compactionCount)
+        ? Math.max(0, Math.floor(parsed.compactionCount))
+        : 0,
+      hasCompaction: Boolean(parsed.hasCompaction),
+      participants: Array.isArray(parsed.participants)
+        ? uniqueStringValues(parsed.participants)
+        : [],
+      sleepUntil: sleepUntil && !Number.isNaN(sleepUntil.getTime()) ? parsed.sleepUntil ?? null : null,
+      compactionMessageIds: Array.isArray(parsed.compactionMessageIds)
+        ? uniqueStringValues(parsed.compactionMessageIds)
+        : []
+    };
+  } catch {
+    return null;
+  }
+}
+
+function toChannelSessionState(state: StoredChannelSessionState): ChannelSessionState {
+  const compactionCount = state.compactionMessageIds.length || state.compactionCount;
+  return {
+    sessionSince: new Date(state.sessionSince),
+    lastActivityAt: new Date(state.lastActivityAt),
+    compactionCount,
+    hasCompaction: state.hasCompaction || compactionCount > 0,
+    participants: [...state.participants],
+    sleepUntil: state.sleepUntil ? new Date(state.sleepUntil) : null
+  };
 }
 
 /**
@@ -51,6 +153,81 @@ export class SessionBufferService {
     private readonly prisma: AppPrismaClient,
     private readonly redis?: AppRedisClient
   ) {}
+
+  async getChannelSessionState(
+    guildId: string,
+    channelId: string,
+    ttlSec = SESSION_DEFAULT_TTL_SEC
+  ): Promise<ChannelSessionState | null> {
+    const state = await this.getStoredChannelSessionState(guildId, channelId, ttlSec);
+    return state ? toChannelSessionState(state) : null;
+  }
+
+  async recordChannelActivity(input: {
+    guildId: string;
+    channelId: string;
+    userId: string;
+    createdAt: Date;
+    isBot?: boolean;
+    targetUserId?: string | null;
+    ttlSec?: number;
+  }): Promise<ChannelSessionState | null> {
+    if (!this.redis) {
+      return null;
+    }
+
+    const ttlSec = input.ttlSec ?? SESSION_DEFAULT_TTL_SEC;
+    const current = await this.getStoredChannelSessionState(input.guildId, input.channelId, ttlSec);
+    const participantIds = input.isBot
+      ? uniqueStringValues([input.targetUserId])
+      : uniqueStringValues([input.userId]);
+    const shouldResetSession = !current
+      || current.sleepUntil !== null
+      || input.createdAt.getTime() - new Date(current.lastActivityAt).getTime() > SESSION_INACTIVITY_MS;
+
+    const next: StoredChannelSessionState = shouldResetSession
+      ? {
+          sessionSince: input.createdAt.toISOString(),
+          lastActivityAt: input.createdAt.toISOString(),
+          compactionCount: 0,
+          hasCompaction: false,
+          participants: participantIds,
+          sleepUntil: null,
+          compactionMessageIds: []
+        }
+      : {
+          ...current,
+          lastActivityAt: new Date(Math.max(
+            new Date(current.lastActivityAt).getTime(),
+            input.createdAt.getTime()
+          )).toISOString(),
+          participants: uniqueStringValues([...current.participants, ...participantIds])
+        };
+
+    await this.saveStoredChannelSessionState(input.guildId, input.channelId, next, ttlSec);
+    return toChannelSessionState(next);
+  }
+
+  async setChannelSessionSleepUntil(
+    guildId: string,
+    channelId: string,
+    sleepUntil: Date,
+    ttlSec = SESSION_DEFAULT_TTL_SEC
+  ): Promise<void> {
+    if (!this.redis) {
+      return;
+    }
+
+    const current = await this.getStoredChannelSessionState(guildId, channelId, ttlSec);
+    if (!current) {
+      return;
+    }
+
+    await this.saveStoredChannelSessionState(guildId, channelId, {
+      ...current,
+      sleepUntil: sleepUntil.getTime() > Date.now() ? sleepUntil.toISOString() : null
+    }, ttlSec);
+  }
 
   /**
    * Returns messages belonging to the current session for this user in the
@@ -128,8 +305,9 @@ export class SessionBufferService {
       maxMessages
     );
     const unsummarized = this.sliceAfterSegments(messages, priorSegments);
+    const triggerMessages = chunkMessages + tailMessages;
 
-    if (unsummarized.length <= chunkMessages + tailMessages) {
+    if (unsummarized.length < triggerMessages) {
       return null;
     }
 
@@ -190,7 +368,16 @@ export class SessionBufferService {
 
     await Promise.allSettled([
       this.redis.set(key, JSON.stringify(next), "EX", ttlSec),
-      this.redis.set(sessionSinceKey(input.guildId, input.userId, input.channelId), input.sessionSince, "EX", ttlSec)
+      this.redis.set(sessionSinceKey(input.guildId, input.userId, input.channelId), input.sessionSince, "EX", ttlSec),
+      this.markChannelSessionCompaction({
+        guildId: input.guildId,
+        channelId: input.channelId,
+        userId: input.userId,
+        sessionSince: input.sessionSince,
+        rangeEnd: input.rangeEnd,
+        rangeEndMessageId: input.rangeEndMessageId,
+        ttlSec
+      })
     ]);
   }
 
@@ -204,6 +391,51 @@ export class SessionBufferService {
       sessionSinceKey(guildId, userId, channelId),
       sessionCompactionKey(guildId, userId, channelId)
     ).catch(() => null);
+  }
+
+  async getGuildSleepUntil(guildId: string): Promise<Date | null> {
+    if (!this.redis) {
+      return null;
+    }
+
+    const raw = await this.redis.get(guildSleepKey(guildId)).catch(() => null);
+    if (!raw) {
+      return null;
+    }
+
+    const sleepUntil = new Date(raw);
+    if (Number.isNaN(sleepUntil.getTime()) || sleepUntil.getTime() <= Date.now()) {
+      await this.redis.del(guildSleepKey(guildId)).catch(() => null);
+      return null;
+    }
+
+    return sleepUntil;
+  }
+
+  async isGuildSleeping(guildId: string): Promise<boolean> {
+    return Boolean(await this.getGuildSleepUntil(guildId));
+  }
+
+  async setGuildSleepUntil(guildId: string, sleepUntil: Date): Promise<void> {
+    if (!this.redis) {
+      return;
+    }
+
+    if (sleepUntil.getTime() <= Date.now()) {
+      await this.redis.del(guildSleepKey(guildId)).catch(() => null);
+      return;
+    }
+
+    const ttlSec = Math.max(1, Math.ceil((sleepUntil.getTime() - Date.now()) / 1000) + 60);
+    await this.redis.set(guildSleepKey(guildId), sleepUntil.toISOString(), "EX", ttlSec).catch(() => null);
+  }
+
+  async clearGuildSleep(guildId: string): Promise<void> {
+    if (!this.redis) {
+      return;
+    }
+
+    await this.redis.del(guildSleepKey(guildId)).catch(() => null);
   }
 
   private async resolveSessionStart(guildId: string, userId: string, channelId: string, ttlSec: number): Promise<Date> {
@@ -241,15 +473,18 @@ export class SessionBufferService {
       include: { user: true }
     });
 
-    return rows.map((row) => ({
-      id: row.id,
-      author: row.user.globalName || row.user.username || row.userId,
-      userId: row.userId,
-      isBot: row.user.isBot,
-      content: row.content,
-      createdAt: row.createdAt,
-      replyToMessageId: row.replyToMessageId
-    }));
+    return rows
+      .map((row) => ({
+        id: row.id,
+        author: row.user.globalName || row.user.username || row.userId,
+        userId: row.userId,
+        isBot: row.user.isBot,
+        content: row.content,
+        createdAt: row.createdAt,
+        replyToMessageId: row.replyToMessageId,
+        ...extractTargetMetadata(row.flags)
+      }))
+      .filter((row) => !row.isBot || !row.targetUserId || row.targetUserId === userId);
   }
 
   private async loadRecentSessionMessages(
@@ -271,15 +506,18 @@ export class SessionBufferService {
       include: { user: true }
     });
 
-    return rows.reverse().map((row) => ({
-      id: row.id,
-      author: row.user.globalName || row.user.username || row.userId,
-      userId: row.userId,
-      isBot: row.user.isBot,
-      content: row.content,
-      createdAt: row.createdAt,
-      replyToMessageId: row.replyToMessageId
-    }));
+    return rows.reverse()
+      .map((row) => ({
+        id: row.id,
+        author: row.user.globalName || row.user.username || row.userId,
+        userId: row.userId,
+        isBot: row.user.isBot,
+        content: row.content,
+        createdAt: row.createdAt,
+        replyToMessageId: row.replyToMessageId,
+        ...extractTargetMetadata(row.flags)
+      }))
+      .filter((row) => !row.isBot || !row.targetUserId || row.targetUserId === userId);
   }
 
   private async getCompactionState(guildId: string, userId: string, channelId: string, ttlSec: number): Promise<SessionCompactionState | null> {
@@ -304,6 +542,90 @@ export class SessionBufferService {
     } catch {
       return null;
     }
+  }
+
+  private async getStoredChannelSessionState(
+    guildId: string,
+    channelId: string,
+    ttlSec: number
+  ): Promise<StoredChannelSessionState | null> {
+    if (!this.redis) {
+      return null;
+    }
+
+    const key = channelSessionStateKey(guildId, channelId);
+    const raw = await this.redis.get(key).catch(() => null);
+    if (!raw) {
+      return null;
+    }
+
+    await this.redis.expire(key, ttlSec).catch(() => null);
+    return parseStoredChannelSessionState(raw);
+  }
+
+  private async saveStoredChannelSessionState(
+    guildId: string,
+    channelId: string,
+    state: StoredChannelSessionState,
+    ttlSec: number
+  ): Promise<void> {
+    if (!this.redis) {
+      return;
+    }
+
+    await this.redis.set(
+      channelSessionStateKey(guildId, channelId),
+      JSON.stringify({
+        ...state,
+        compactionCount: state.compactionMessageIds.length || state.compactionCount,
+        hasCompaction: state.hasCompaction || state.compactionMessageIds.length > 0
+      }),
+      "EX",
+      ttlSec
+    ).catch(() => null);
+  }
+
+  private async markChannelSessionCompaction(input: {
+    guildId: string;
+    channelId: string;
+    userId: string;
+    sessionSince: string;
+    rangeEnd: Date;
+    rangeEndMessageId: string;
+    ttlSec: number;
+  }): Promise<void> {
+    if (!this.redis) {
+      return;
+    }
+
+    const current = await this.getStoredChannelSessionState(input.guildId, input.channelId, input.ttlSec);
+    const resetsSession = !current || current.sessionSince !== input.sessionSince;
+    const compactionMessageIds = resetsSession
+      ? [input.rangeEndMessageId]
+      : uniqueStringValues([...current.compactionMessageIds, input.rangeEndMessageId]);
+    const next: StoredChannelSessionState = resetsSession
+      ? {
+          sessionSince: input.sessionSince,
+          lastActivityAt: input.rangeEnd.toISOString(),
+          compactionCount: compactionMessageIds.length,
+          hasCompaction: true,
+          participants: uniqueStringValues([input.userId]),
+          sleepUntil: null,
+          compactionMessageIds
+        }
+      : {
+          ...current,
+          lastActivityAt: new Date(Math.max(
+            new Date(current.lastActivityAt).getTime(),
+            input.rangeEnd.getTime()
+          )).toISOString(),
+          compactionCount: compactionMessageIds.length,
+          hasCompaction: true,
+          participants: uniqueStringValues([...current.participants, input.userId]),
+          compactionMessageIds
+        };
+
+    await this.saveStoredChannelSessionState(input.guildId, input.channelId, next, input.ttlSec);
   }
 
   private sliceAfterSegments(messages: ContextMessage[], segments: SessionCompactionSegment[]) {

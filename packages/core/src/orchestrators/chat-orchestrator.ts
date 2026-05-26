@@ -1,5 +1,5 @@
 import type { AppEnv } from "@hori/config";
-import type { AppLogger, AppPrismaClient, BotIntent, BotReplyPayload, BotTrace, LlmCallTrace, LlmChatMessage, MessageEnvelope, SearchHit } from "@hori/shared";
+import type { AppLogger, AppPrismaClient, BotIntent, BotReplyPayload, BotTrace, ContextMessage, LlmCallTrace, LlmChatMessage, MessageEnvelope, RelationshipHook, RelationshipOverlay, SearchHit } from "@hori/shared";
 import { asErrorMessage, botLatencyHistogram, botRepliesCounter, clamp, normalizeWhitespace } from "@hori/shared";
 import { llmCachedTokensCounter, llmCostCounter, llmTokensCounter } from "@hori/shared";
 
@@ -16,8 +16,8 @@ import { PersonaService } from "../persona/persona-service";
 import { ResponseGuard } from "../safety/response-guard";
 import { RoastPolicy } from "../safety/roast-policy";
 import { ContextBuilderService } from "../services/context-builder";
-import type { EffectiveRoutingConfig, EffectiveRuntimeSettings } from "../services/runtime-config-service";
-import { RuntimeConfigService } from "../services/runtime-config-service";
+import type { CoreEpochState, EffectiveRoutingConfig, EffectiveRuntimeSettings } from "../services/runtime-config-service";
+import { DEFAULT_AGGRESSION_REPLACEMENTS, RuntimeConfigService } from "../services/runtime-config-service";
 
 interface OrchestratorDeps {
   env: AppEnv;
@@ -46,22 +46,6 @@ interface AggressionPipelineResult {
     durationMinutes: number;
     replacementText: string;
   } | null;
-}
-
-interface MemorySessionMessage {
-  role: "User" | "Hori";
-  content: string;
-  createdAt: Date;
-}
-
-interface MemorySummarizerResult {
-  title: string;
-  summary: string[];
-  details: string[];
-  openQuestions: string[];
-  importance: "low" | "normal" | "high";
-  save: boolean;
-  reason?: string | null;
 }
 
 export class ChatOrchestrator {
@@ -141,34 +125,6 @@ export class ChatOrchestrator {
     // V7: intent-router детерминирован (chat / `?` / русские memory_*) — LLM-fallback больше не нужен.
     const intent = initialIntent;
 
-    if (intent.intent === "chat") {
-      const recallSelectionReply = await this.tryHandleMemoryRecallSelection(message, intent.cleanedContent);
-      if (recallSelectionReply) {
-        return this.finish(
-          {
-            triggerSource: message.triggerSource,
-            explicitInvocation: message.explicitInvocation,
-            intent: "memory_recall",
-            routeReason: "memory_recall_selection",
-            usedSearch: false,
-            toolNames: [],
-            contextMessages: 0,
-            memoryLayers: [],
-            relationshipApplied: false,
-            responded: true,
-            queue: queueTrace,
-            restoredContext: {
-              active: true,
-              title: recallSelectionReply.title
-            }
-          },
-          startedAt,
-          recallSelectionReply.reply,
-          message
-        );
-      }
-    }
-
     const queryEmbedding = intent.intent !== "help"
       ? await this.buildContextQueryEmbedding(intent.cleanedContent, intent.intent, runtimeSettings, llmCalls, message)
       : undefined;
@@ -195,8 +151,10 @@ export class ChatOrchestrator {
         ? "info_question"
         : "casual_address";
     const contour = { contour: "C" as const, reason: "v7_static" };
-    // V7: affinity service удалён → используем base relationship из contextBundle.
-    const affinityRelationship = this.relationshipsHardDisabled() ? null : contextBundle.relationship;
+    // Relationship tail now follows the current target user directly.
+    const affinityRelationship = this.relationshipsHardDisabled() || !this.deps.relationships
+      ? null
+      : await this.deps.relationships.getRelationship(message.guildId, message.userId).catch(() => null);
     // V7: emotion+conflict pipeline удалён. Все параметры — фиксированные.
 
     // V7: context-scoring service удалён. mockeryConfidence/contextConfidence больше не вычисляются.
@@ -220,6 +178,10 @@ export class ChatOrchestrator {
         }
       }
     });
+
+    const promptHooks = this.deps.relationships
+      ? await this.deps.relationships.listPromptHooks(message.guildId, message.userId, 5).catch(() => [])
+      : [];
 
     const effectiveRoast = runtimeConfig.featureFlags.roast
       ? this.roastPolicy.resolveRoastLevel(guildSettings.roastLevel, affinityRelationship)
@@ -266,17 +228,12 @@ export class ChatOrchestrator {
       sigil: intent.sigil ?? null,
       manualCoreOverride: coreOverride?.coreId ?? null
     });
-    const restoredContext = intent.intent === "chat" ? await this.getActiveRestoredContext(message) : null;
-    // V7: ACTIVE_CORE — единственный системный prompt. Никаких dynamic guidance блоков.
-    const corePrompt = behavior.prompt;
-    // Активный prompt-слот подмешивается после кор-промта (если есть).
-    let systemPrompt = corePrompt;
-    if (activePromptSlot?.content.trim()) {
-      const strength = activePromptSlot.strength ?? 1;
-      const prefix = strength === 2 ? "🎯 Главный фокус: " : strength === 0 ? "(слабая подсказка) " : "";
-      const label = activePromptSlot.title ? `[${activePromptSlot.title}]` : "[Слот]";
-      systemPrompt = `${corePrompt}\n\n${label}\n${prefix}${activePromptSlot.content}`;
-    }
+    const coreEpoch = await this.deps.runtimeConfig.getCoreEpochState();
+    const stableCorePrompt = this.buildStableCorePrompt({
+      commonCore: corePromptTemplates.commonCore,
+      coreEpoch,
+      activePromptSlot
+    });
 
     const trace: BotTrace = {
       triggerSource: message.triggerSource,
@@ -303,13 +260,7 @@ export class ChatOrchestrator {
           }
         : { enabled: false, entries: 0, layers: [], reason: "not_available" },
       llmCalls,
-      restoredContext: restoredContext
-        ? {
-            active: true,
-            cardId: restoredContext.id,
-            title: restoredContext.title
-          }
-        : { active: false },
+      restoredContext: { active: false },
       context: contextTrace
     };
 
@@ -328,32 +279,20 @@ export class ChatOrchestrator {
           trace.searchDiagnostics = "diagnostics" in result ? result.diagnostics : undefined;
           break;
         }
-        case "memory_write":
-          reply = await this.handleMemoryWrite(message, intent.cleanedContent);
-          break;
-        case "memory_recall":
-          reply = await this.handleMemoryRecall(message, intent.cleanedContent);
-          break;
-        case "memory_forget":
-          reply = await this.handleMemoryForget(message, intent.cleanedContent);
-          break;
         case "chat":
         default:
           reply = await this.handleChat({
               message,
               content: intent.cleanedContent,
-              behavior,
+              stableCorePrompt,
               contextBundle,
+              relationshipHooks: promptHooks,
+              relationship: affinityRelationship,
               runtimeSettings,
               maxTokens: behavior.limits.maxTokens,
               contour: contour.contour,
-              llmCalls,
-              restoredContext: restoredContext ? this.formatRestoredContextText(restoredContext) : null
+              llmCalls
             });
-
-          if (restoredContext) {
-            await this.consumeRestoredContext(restoredContext.id);
-          }
           break;
       }
     } catch (error) {
@@ -471,76 +410,211 @@ export class ChatOrchestrator {
     return typeof result.reply === "string" ? result.reply : (result.reply?.text ?? "Нечего сказать.");
   }
 
-  private buildStableChatSystemPrompt(
-    behavior: ReturnType<PersonaService["composeBehavior"]>,
-    restoredContext?: string | null
-  ) {
-    const stablePrefix = behavior.staticPrefix.trim() || behavior.assembly.commonCore;
+  private buildEpochFrontBlock(coreEpoch: CoreEpochState) {
+    return [
+      "[CORE EPOCH]",
+      `epochId=${coreEpoch.epochId}`,
+      `frontId=${coreEpoch.frontId}`,
+      coreEpoch.frontText
+    ].join("\n");
+  }
+
+  private buildStableCorePrompt(options: {
+    commonCore: string;
+    coreEpoch: CoreEpochState;
+    activePromptSlot?: { title: string; content: string; strength: number } | null;
+  }) {
+    const slotBlock = options.activePromptSlot?.content.trim()
+      ? (() => {
+          const strength = options.activePromptSlot?.strength ?? 1;
+          const prefix = strength === 2 ? "🎯 Главный фокус: " : strength === 0 ? "(слабая подсказка) " : "";
+          const label = options.activePromptSlot?.title ? `[${options.activePromptSlot.title}]` : "[Слот]";
+          return `${label}\n${prefix}${options.activePromptSlot.content}`;
+        })()
+      : null;
 
     return [
-      stablePrefix,
-      restoredContext?.trim() ? restoredContext.trim() : null
+      options.commonCore.trim(),
+      this.buildEpochFrontBlock(options.coreEpoch),
+      slotBlock
     ]
       .filter(Boolean)
       .join("\n\n");
   }
 
+  private buildStableChatSystemPrompt(stableCorePrompt: string) {
+    return stableCorePrompt.trim();
+  }
+
+  private resolveBotTurnTargetUserId(
+    entry: ContextMessage,
+    entriesById: Map<string, ContextMessage>
+  ) {
+    if (!entry.isBot || entry.userId === "session-summary") {
+      return null;
+    }
+
+    if (entry.targetUserId) {
+      return entry.targetUserId;
+    }
+
+    if (!entry.replyToMessageId) {
+      return null;
+    }
+
+    const repliedEntry = entriesById.get(entry.replyToMessageId);
+    return repliedEntry?.userId ?? repliedEntry?.targetUserId ?? null;
+  }
+
+  private buildFocusLockBlock(
+    message: MessageEnvelope,
+    relationship?: RelationshipOverlay | null
+  ) {
+    const targetLabel = message.displayName ?? message.username;
+    const distance = relationship?.relationshipState === "cold_lowest"
+      ? "cold"
+      : relationship?.relationshipState === "warm"
+        ? "warm"
+        : relationship?.relationshipState === "close" || relationship?.relationshipState === "teasing" || relationship?.relationshipState === "sweet"
+          ? "close"
+          : "neutral";
+    const mockery = relationship?.doNotMock
+      ? "none"
+      : (relationship?.roastLevel ?? 0) >= 4
+        ? "high"
+        : (relationship?.roastLevel ?? 0) >= 2
+          ? "medium"
+          : (relationship?.roastLevel ?? 0) >= 1
+            ? "low"
+            : "none";
+    const caution = relationship?.coldPermanent || relationship?.coldUntil || (relationship?.escalationStage ?? 0) >= 2
+      ? "high"
+      : (relationship?.escalationStage ?? 0) >= 1 || (relationship?.protectedTopics?.length ?? 0) > 0
+        ? "medium"
+        : "low";
+    const tone = relationship?.toneBias ?? "neutral";
+
+    return [
+      "[ФОКУС]",
+      `Текущий адресат: ${targetLabel}`,
+      "Отвечай на последнее сообщение этого пользователя в окне.",
+      "Не перескакивай на чужие линии без явной связи.",
+      "",
+      "[ОТНОШЕНИЕ]",
+      `distance=${distance}`,
+      `mockery=${mockery}`,
+      `caution=${caution}`,
+      `tone=${tone}`
+    ].join("\n");
+  }
+
+  private buildHooksBlock(hooks: RelationshipHook[]) {
+    if (!hooks.length) {
+      return "";
+    }
+
+    return [
+      "[ХУКИ]",
+      ...hooks.slice(0, 5).map((hook) => {
+        const tagParts = [
+          hook.useTag ? `use=${hook.useTag}` : null,
+          hook.avoidTag ? `avoid=${hook.avoidTag}` : null
+        ].filter(Boolean).join(", ");
+        const suffix = tagParts ? ` (${tagParts})` : "";
+        return `- ${hook.label}: ${hook.detail}${suffix}`;
+      })
+    ].join("\n");
+  }
+
   private buildRecentChatTurns(
     message: MessageEnvelope,
+    content: string,
     contextBundle: Awaited<ReturnType<ContextService["buildContext"]>>
   ): LlmChatMessage[] {
     const filtered = contextBundle.recentMessages
       .filter((entry) => entry.id !== message.messageId)
       .filter((entry) => normalizeWhitespace(entry.content).length > 0);
-    const summaryEntries = filtered.filter((entry) => entry.userId === "session-summary");
-    const liveEntries = filtered.filter((entry) => entry.userId !== "session-summary").slice(-8);
+    const entriesById = new Map(
+      filtered
+        .filter((entry): entry is ContextMessage & { id: string } => typeof entry.id === "string")
+        .map((entry) => [entry.id, entry])
+    );
+    const targetLabels = new Map<string, string>();
 
-    return [...summaryEntries, ...liveEntries]
+    for (const entry of filtered) {
+      if (!entry.isBot && entry.userId) {
+        targetLabels.set(entry.userId, entry.author);
+      }
+    }
+
+    targetLabels.set(message.userId, message.displayName ?? message.username);
+
+    const summaryEntries = filtered.filter((entry) => entry.userId === "session-summary");
+    const liveEntries = filtered
+      .filter((entry) => entry.userId !== "session-summary")
+      .filter((entry) => {
+        if (!entry.isBot) {
+          return true;
+        }
+
+        const targetUserId = this.resolveBotTurnTargetUserId(entry, entriesById);
+        return !targetUserId || targetUserId === message.userId;
+      })
+      .slice(-8);
+
+    const renderedTurns = [...summaryEntries, ...liveEntries]
       .map((entry) => {
-        if (entry.isBot) {
+        if (entry.userId === "session-summary") {
           return { role: "assistant" as const, content: entry.content };
         }
-        const prefix = entry.userId !== message.userId ? `[${entry.author}]: ` : "";
-        return { role: "user" as const, content: `${prefix}${entry.content}` };
-      });
-  }
 
-  private formatRestoredContextText(ctx: {
-    title: string;
-    summary: string[];
-    details: string[];
-    openQuestions: string[];
-  }): string {
-    const lines: string[] = [`[Память: ${ctx.title}]`];
-    if (ctx.summary.length) lines.push(...ctx.summary);
-    if (ctx.details.length) lines.push(...ctx.details);
-    if (ctx.openQuestions.length) {
-      lines.push("Открытые вопросы:", ...ctx.openQuestions.map((q) => `- ${q}`));
+        if (entry.isBot) {
+          const targetUserId = this.resolveBotTurnTargetUserId(entry, entriesById);
+          const targetLabel = targetUserId ? (targetLabels.get(targetUserId) ?? targetUserId) : null;
+          const prefix = targetLabel ? `Хори -> ${targetLabel}: ` : "Хори: ";
+          return { role: "assistant" as const, content: `${prefix}${entry.content}` };
+        }
+        const speaker = entry.userId === message.userId ? "Пользователь -> Хори" : `${entry.author} -> Хори`;
+        return { role: "user" as const, content: `${speaker}: ${entry.content}` };
+      });
+
+    if (normalizeWhitespace(content).length > 0) {
+      renderedTurns.push({ role: "user" as const, content: `Пользователь -> Хори: ${content}` });
     }
-    return lines.join("\n");
+
+    return renderedTurns;
   }
 
   private async handleChat(options: {
     message: MessageEnvelope;
     content: string;
-    behavior: ReturnType<PersonaService["composeBehavior"]>;
+    stableCorePrompt: string;
     contextBundle: Awaited<ReturnType<ContextService["buildContext"]>>;
+    relationshipHooks: RelationshipHook[];
+    relationship?: RelationshipOverlay | null;
     runtimeSettings: EffectiveRuntimeSettings;
     maxTokens?: number;
     contour?: Contour;
     llmCalls?: LlmCallTrace[];
-    restoredContext?: string | null;
   }) {
     const llm = this.getChatSettingsForContour(options.contour ?? "B", options.runtimeSettings, options.maxTokens);
     const messages: LlmChatMessage[] = [
       {
         role: "system",
-        content: this.buildStableChatSystemPrompt(options.behavior, options.restoredContext)
+        content: this.buildStableChatSystemPrompt(options.stableCorePrompt)
       }
     ];
 
-    messages.push(...this.buildRecentChatTurns(options.message, options.contextBundle));
-    messages.push({ role: "user", content: options.content });
+    const hooksBlock = this.buildHooksBlock(options.relationshipHooks);
+    if (hooksBlock) {
+      messages.push({ role: "system", content: hooksBlock });
+    }
+
+    messages.push(...this.buildRecentChatTurns(options.message, options.content, options.contextBundle));
+    messages.push({
+      role: "system",
+      content: this.buildFocusLockBlock(options.message, options.relationship)
+    });
 
     const response = await this.deps.llmClient.chat({
       model: llm.model,
@@ -575,6 +649,12 @@ export class ChatOrchestrator {
   private withVisibleReplacement(reply: string, replacement: string) {
     const base = normalizeWhitespace(reply);
     return base ? `${base} ${replacement}` : replacement;
+  }
+
+  private renderAggressionTimeoutText(template: string, timeoutMinutes: number) {
+    return template.includes("{minutes}")
+      ? template.replace(/\{minutes\}/g, String(timeoutMinutes))
+      : template;
   }
 
   private async runAggressionChecker(
@@ -650,9 +730,10 @@ export class ChatOrchestrator {
 
     const updated = await this.deps.relationships.noteAggressionMarker(options.message.guildId, options.message.userId);
     const stageAfter = updated.escalationStage ?? Math.min(4, stageBefore + 1);
+    const replacementTexts = await this.deps.runtimeConfig.getAggressionReplacementTexts().catch(() => DEFAULT_AGGRESSION_REPLACEMENTS);
 
     if (stageAfter === 1) {
-      const replacementText = "предупреждаю, не надо так.";
+      const replacementText = replacementTexts.stage1;
       return {
         reply: this.withVisibleReplacement(extracted.content, replacementText),
         trace: {
@@ -675,7 +756,7 @@ export class ChatOrchestrator {
         options.runtimeSettings,
         options.llmCalls
       );
-      const replacementText = "я это запомню.";
+      const replacementText = replacementTexts.stage2;
 
       if (verdict === "AGGRESSIVE") {
         await this.deps.relationships.confirmAggression(options.message.guildId, options.message.userId);
@@ -696,7 +777,7 @@ export class ChatOrchestrator {
     }
 
     if (stageAfter === 3) {
-      const replacementText = "последний раз предупреждаю.";
+      const replacementText = replacementTexts.stage3;
       return {
         reply: this.withVisibleReplacement(extracted.content, replacementText),
         trace: {
@@ -711,17 +792,17 @@ export class ChatOrchestrator {
       };
     }
 
-      const verdict = await this.runAggressionChecker(
-        options.message.content,
-        extracted.content,
-        options.corePromptTemplates.aggressionCheckerPrompt,
-        options.runtimeSettings,
-        options.llmCalls
-      );
+    const verdict = await this.runAggressionChecker(
+      options.message.content,
+      extracted.content,
+      options.corePromptTemplates.aggressionCheckerPrompt,
+      options.runtimeSettings,
+      options.llmCalls
+    );
 
     if (verdict === "AGGRESSIVE") {
       const timeoutMinutes = Math.max(1, Math.min(15, options.runtimeSettings.maxTimeoutMinutes));
-      const replacementText = `тайм-аут на ${timeoutMinutes} минут.`;
+      const replacementText = this.renderAggressionTimeoutText(replacementTexts.timeout, timeoutMinutes);
       await this.deps.relationships.confirmAggression(options.message.guildId, options.message.userId, { timedOut: true });
       return {
         reply: extracted.content,
@@ -1048,469 +1129,6 @@ export class ChatOrchestrator {
       rangeStart: messages[0]?.createdAt ?? message.createdAt,
       rangeEnd: messages[messages.length - 1]?.createdAt ?? message.createdAt
     };
-  }
-
-  private formatSessionForSummarizer(messages: MemorySessionMessage[]) {
-    return messages.map((entry) => `${entry.role}: ${entry.content}`).join("\n");
-  }
-
-  private parseSummarizerLines(value: string) {
-    return value
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => line.replace(/^[-*]\s*/, ""))
-      .filter(Boolean);
-  }
-
-  private parseMemorySummarizerOutput(text: string): MemorySummarizerResult {
-    const normalized = text.replace(/\r/g, "").trim();
-    const lines = normalized.split("\n");
-    const sections = new Map<string, string[]>();
-    let currentKey: string | null = null;
-
-    for (const line of lines) {
-      const match = line.match(/^(title|summary|details|openQuestions|importance|save)\s*:\s*(.*)$/i);
-      if (match) {
-        currentKey = match[1];
-        const value = match[2]?.trim();
-        sections.set(currentKey, value ? [value] : []);
-        continue;
-      }
-
-      if (currentKey) {
-        sections.get(currentKey)?.push(line);
-      }
-    }
-
-    const saveRaw = sections.get("save")?.join(" ").trim().toLowerCase() ?? "false";
-    const summary = this.parseSummarizerLines((sections.get("summary") ?? []).join("\n"));
-    const details = this.parseSummarizerLines((sections.get("details") ?? []).join("\n"));
-    const openQuestions = this.parseSummarizerLines((sections.get("openQuestions") ?? []).join("\n"));
-    const importance = ((sections.get("importance")?.join(" ").trim().toLowerCase() ?? "normal") as MemorySummarizerResult["importance"]);
-
-    return {
-      title: sections.get("title")?.join(" ").trim() || "Без названия",
-      summary,
-      details,
-      openQuestions,
-      importance: importance === "low" || importance === "high" ? importance : "normal",
-      save: /^true\b/.test(saveRaw),
-      reason: /^false\b(.+)?$/.test(saveRaw) ? saveRaw.replace(/^false\b[:\-]?\s*/i, "").trim() || null : null
-    };
-  }
-
-  private async summarizeMemorySession(guildId: string, messages: MemorySessionMessage[]) {
-    const runtimeSettings = await this.deps.runtimeConfig.getRuntimeSettings();
-    const corePromptTemplates = await this.deps.runtimeConfig.getCorePromptTemplates(guildId);
-    const llm = this.getLlmSettings("summary", runtimeSettings, 280, { temperature: 0 });
-    const promptMessages: LlmChatMessage[] = [
-      { role: "system", content: corePromptTemplates.memorySummarizerPrompt },
-      { role: "user", content: this.formatSessionForSummarizer(messages) }
-    ];
-    const response = await this.deps.llmClient.chat({
-      model: llm.model,
-      messages: promptMessages,
-      temperature: llm.temperature,
-      topP: llm.topP,
-      maxTokens: llm.maxTokens,
-      keepAlive: llm.keepAlive,
-      numCtx: llm.numCtx,
-      numBatch: llm.numBatch
-    });
-
-    return this.parseMemorySummarizerOutput(response.message.content);
-  }
-
-  private parseMemorySelection(rawValue: string, cards: Array<{ id: string; title: string }>) {
-    const value = normalizeWhitespace(rawValue).toLowerCase();
-    if (!value) {
-      return null;
-    }
-
-    const numeric = Number(value);
-    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= cards.length) {
-      return cards[numeric - 1] ?? null;
-    }
-
-    return cards.find((card) => card.title.toLowerCase() === value)
-      ?? cards.find((card) => card.title.toLowerCase().includes(value));
-  }
-
-  private async activateRestoredContext(message: MessageEnvelope, cardId: string) {
-    const restoredContext = (this.deps.prisma as typeof this.deps.prisma & {
-      horiRestoredContext?: {
-        upsert(args: unknown): Promise<unknown>;
-      };
-    }).horiRestoredContext;
-
-    if (!restoredContext?.upsert) {
-      return null;
-    }
-
-    return restoredContext.upsert({
-      where: {
-        guildId_channelId_userId: {
-          guildId: message.guildId,
-          channelId: message.channelId,
-          userId: message.userId
-        }
-      },
-      update: {
-        memoryCardId: cardId,
-        consumedAt: null,
-        expiresAt: new Date(Date.now() + 30 * 60 * 1000)
-      },
-      create: {
-        guildId: message.guildId,
-        channelId: message.channelId,
-        userId: message.userId,
-        memoryCardId: cardId,
-        expiresAt: new Date(Date.now() + 30 * 60 * 1000)
-      }
-    });
-  }
-
-  private async getActiveRestoredContext(message: MessageEnvelope) {
-    const restoredContext = (this.deps.prisma as typeof this.deps.prisma & {
-      horiRestoredContext?: {
-        findUnique(args: unknown): Promise<{
-          id: string;
-          expiresAt: Date | null;
-          consumedAt: Date | null;
-          memoryCard: {
-            title: string;
-            summary: string[];
-            details: string[];
-            openQuestions: string[];
-            active: boolean;
-          };
-        } | null>;
-      };
-    }).horiRestoredContext;
-
-    if (!restoredContext?.findUnique) {
-      return null;
-    }
-
-    const row = await restoredContext.findUnique({
-      where: {
-        guildId_channelId_userId: {
-          guildId: message.guildId,
-          channelId: message.channelId,
-          userId: message.userId
-        }
-      },
-      include: {
-        memoryCard: true
-      }
-    });
-
-    if (!row || row.consumedAt || (row.expiresAt && row.expiresAt.getTime() <= Date.now()) || !row.memoryCard.active) {
-      return null;
-    }
-
-    return {
-      id: row.id,
-      title: row.memoryCard.title,
-      summary: row.memoryCard.summary,
-      details: row.memoryCard.details,
-      openQuestions: row.memoryCard.openQuestions
-    };
-  }
-
-  private async consumeRestoredContext(id: string) {
-    const restoredContext = (this.deps.prisma as typeof this.deps.prisma & {
-      horiRestoredContext?: {
-        update(args: unknown): Promise<unknown>;
-      };
-    }).horiRestoredContext;
-
-    if (!restoredContext?.update) {
-      return;
-    }
-
-    await restoredContext.update({
-      where: { id },
-      data: { consumedAt: new Date() }
-    });
-  }
-
-  private async tryHandleMemoryRecallSelection(message: MessageEnvelope, cleanedContent: string) {
-    const interactionRequest = (this.deps.prisma as typeof this.deps.prisma & {
-      interactionRequest?: {
-        findFirst(args: unknown): Promise<{ id: string } | null>;
-        update(args: unknown): Promise<unknown>;
-      };
-      horiUserMemoryCard?: {
-        findMany(args: unknown): Promise<Array<{ id: string; title: string }>>;
-      };
-    }).interactionRequest;
-    const memoryCard = (this.deps.prisma as typeof this.deps.prisma & {
-      horiUserMemoryCard?: {
-        findMany(args: unknown): Promise<Array<{ id: string; title: string }>>;
-      };
-    }).horiUserMemoryCard;
-
-    if (!interactionRequest?.findFirst || !interactionRequest.update || !memoryCard?.findMany) {
-      return null;
-    }
-
-    const pending = await interactionRequest.findFirst({
-      where: {
-        guildId: message.guildId,
-        channelId: message.channelId,
-        userId: message.userId,
-        category: "hori_memory_recall",
-        status: "pending",
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }]
-      },
-      orderBy: { createdAt: "desc" }
-    });
-
-    if (!pending) {
-      return null;
-    }
-
-    const cards = await memoryCard.findMany({
-      where: {
-        guildId: message.guildId,
-        userId: message.userId,
-        active: true
-      },
-      orderBy: { createdAt: "desc" },
-      take: 8,
-      select: { id: true, title: true }
-    });
-    const selected = this.parseMemorySelection(cleanedContent, cards);
-
-    if (!selected) {
-      return null;
-    }
-
-    await this.activateRestoredContext(message, selected.id);
-    await interactionRequest.update({
-      where: { id: pending.id },
-      data: {
-        status: "answered",
-        answerText: cleanedContent,
-        answerJson: { memoryCardId: selected.id, title: selected.title } as never,
-        answeredAt: new Date()
-      }
-    });
-
-    return {
-      reply: `вспомнила: ${selected.title}`,
-      title: selected.title
-    };
-  }
-
-  private memoryCardLimitForLevel(level: number): number {
-    // capacity по уровню отношений: -1 → 0; 0 → 3; 1 → 5; 2 → 8; 3 → 12; 4+ → 20.
-    if (level <= -1) return 0;
-    if (level === 0) return 3;
-    if (level === 1) return 5;
-    if (level === 2) return 8;
-    if (level === 3) return 12;
-    return 20;
-  }
-
-  private async handleMemoryWrite(message: MessageEnvelope, _cleanedContent: string) {
-    const session = await this.getLatestSession(message);
-
-    if (!session) {
-      return "тут нечего сохранять";
-    }
-
-    let userLevel = 0;
-    try {
-      if (this.deps.relationships) {
-        userLevel = await this.deps.relationships.getLevel(message.guildId, message.userId);
-      }
-    } catch {
-      userLevel = 0;
-    }
-    const limit = this.memoryCardLimitForLevel(userLevel);
-    if (limit <= 0) {
-      return "сейчас нечего держать в голове.";
-    }
-
-    const existingCount = await this.deps.prisma.horiUserMemoryCard.count({
-      where: { guildId: message.guildId, userId: message.userId, active: true }
-    });
-
-    const summary = await this.summarizeMemorySession(message.guildId, session.messages);
-    if (!summary.save || !summary.summary.length) {
-      return "тут нечего сохранять";
-    }
-
-    // Если лимит исчерпан — гасим самую старую активную карточку (rotate).
-    if (existingCount >= limit) {
-      const oldest = await this.deps.prisma.horiUserMemoryCard.findFirst({
-        where: { guildId: message.guildId, userId: message.userId, active: true },
-        orderBy: { createdAt: "asc" },
-        select: { id: true }
-      });
-      if (oldest) {
-        await this.deps.prisma.horiUserMemoryCard.update({
-          where: { id: oldest.id },
-          data: { active: false }
-        });
-      }
-    }
-
-    const card = await this.deps.prisma.horiUserMemoryCard.create({
-      data: {
-        guildId: message.guildId,
-        userId: message.userId,
-        title: summary.title,
-        summary: summary.summary,
-        details: summary.details,
-        openQuestions: summary.openQuestions,
-        importance: summary.importance,
-        sessionRangeStart: session.rangeStart,
-        sessionRangeEnd: session.rangeEnd,
-        sessionMessageCount: session.messages.length
-      }
-    });
-
-    return `запомнила: ${card.title}`;
-  }
-
-  private async handleMemoryRecall(message: MessageEnvelope, cleanedContent: string) {
-    const cards = await this.deps.prisma.horiUserMemoryCard.findMany({
-      where: {
-        guildId: message.guildId,
-        userId: message.userId,
-        active: true
-      },
-      orderBy: { createdAt: "desc" },
-      take: 8,
-      select: {
-        id: true,
-        title: true
-      }
-    });
-
-    if (!cards.length) {
-      return "пока пусто.";
-    }
-
-    const selectionText = normalizeWhitespace(cleanedContent.replace(/^вспомни\b/i, ""));
-    const directSelection = this.parseMemorySelection(selectionText, cards);
-    if (directSelection) {
-      await this.activateRestoredContext(message, directSelection.id);
-      return `вспомнила: ${directSelection.title}`;
-    }
-
-    await this.deps.prisma.interactionRequest.updateMany({
-      where: {
-        guildId: message.guildId,
-        channelId: message.channelId,
-        userId: message.userId,
-        category: "hori_memory_recall",
-        status: "pending"
-      },
-      data: {
-        status: "cancelled",
-        answerText: "superseded"
-      }
-    });
-
-    await this.deps.prisma.interactionRequest.create({
-      data: {
-        guildId: message.guildId,
-        channelId: message.channelId,
-        messageId: message.messageId,
-        userId: message.userId,
-        requestType: "choice",
-        status: "pending",
-        title: "Хори, вспомни",
-        prompt: "напиши номер или название темы",
-        category: "hori_memory_recall",
-        expectedAnswerType: "number_or_title",
-        allowedOptions: cards.map((card) => card.title),
-        metadataJson: {
-          options: cards
-        } as never,
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000)
-      }
-    });
-
-    return [
-      "вспомнила. есть темы:",
-      ...cards.map((card, index) => `${index + 1}. ${card.title}`),
-      "напиши номер или название."
-    ].join("\n");
-  }
-
-  private async handleMemoryForget(message: MessageEnvelope, cleanedContent: string) {
-    const selectionText = normalizeWhitespace(cleanedContent.replace(/^забудь\b/i, ""));
-
-    if (!selectionText) {
-      return "скажи что забыть.";
-    }
-
-    const cards = await this.deps.prisma.horiUserMemoryCard.findMany({
-      where: {
-        guildId: message.guildId,
-        userId: message.userId,
-        active: true
-      },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-      select: {
-        id: true,
-        title: true
-      }
-    });
-
-    if (/всё|все|обо мне/i.test(selectionText)) {
-      await this.deps.prisma.horiUserMemoryCard.updateMany({
-        where: {
-          guildId: message.guildId,
-          userId: message.userId,
-          active: true
-        },
-        data: {
-          active: false
-        }
-      });
-      await this.deps.prisma.horiRestoredContext.updateMany({
-        where: {
-          guildId: message.guildId,
-          userId: message.userId,
-          consumedAt: null
-        },
-        data: {
-          consumedAt: new Date()
-        }
-      });
-      return "забыла всё, что было сохранено.";
-    }
-
-    const selected = this.parseMemorySelection(selectionText, cards);
-    if (!selected) {
-      return "не нашла такую тему.";
-    }
-
-    await this.deps.prisma.horiUserMemoryCard.update({
-      where: { id: selected.id },
-      data: { active: false }
-    });
-    await this.deps.prisma.horiRestoredContext.updateMany({
-      where: {
-        guildId: message.guildId,
-        channelId: message.channelId,
-        userId: message.userId,
-        memoryCardId: selected.id
-      },
-      data: {
-        consumedAt: new Date()
-      }
-    });
-
-    return `забыла: ${selected.title}`;
   }
 
   private async buildLinkUnderstandingContext(content: string) {
