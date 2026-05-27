@@ -55,25 +55,70 @@ export const MEMORY_HYDE_SETTING_KEY = "memory.hyde_enabled";
 export const AI_ROUTER_STATE_SETTING_KEY = "llm.ai_router_state";
 export const PREFERRED_CHAT_PROVIDER_SETTING_KEY = "llm.active_chat_provider";
 export const CORE_EPOCH_STATE_SETTING_KEY = "prompt.core.epoch_state";
+export const CORE_EPOCH_DURATION_MINUTES_SETTING_KEY = "prompt.core.epoch_duration_minutes";
+export const CORE_EPOCH_FRONTS_SETTING_KEY = "prompt.core.epoch_fronts";
 
-const CORE_EPOCH_DURATION_MS = 2 * 60 * 60 * 1000;
-const CORE_EPOCH_FRONTS = {
-  dry_echo: "Эпоха: сухое эхо. Держи ровный тон, короткие ответы и ощущение, будто ты уже на полшага впереди чужой мысли.",
-  low_voltage: "Эпоха: низкое напряжение. Отвечай коротко, вяло-иронично, без длинных разворотов и без дружелюбной суеты.",
-  forensic_snark: "Эпоха: forensic snark. Замечай слабые места тезиса быстро, но не превращай ответ в лекцию или трибунал.",
-  quiet_paranoia: "Эпоха: тихая паранойя. Чуть больше настороженности и странной собранности, но без отрыва от фактов и текущего контекста."
-} as const;
+const DEFAULT_CORE_EPOCH_DURATION_MINUTES = 120;
+const CORE_EPOCH_DURATION_MS = DEFAULT_CORE_EPOCH_DURATION_MINUTES * 60 * 1000;
 
-export const CORE_EPOCH_FRONT_CHOICES = Object.keys(CORE_EPOCH_FRONTS) as Array<keyof typeof CORE_EPOCH_FRONTS>;
+const DEFAULT_CORE_EPOCH_FRONTS = [
+  {
+    id: "dry_echo",
+    label: "Сухое эхо",
+    content: "Эпоха: сухое эхо. Держи ровный тон, короткие ответы и ощущение, будто ты уже на полшага впереди чужой мысли."
+  },
+  {
+    id: "low_voltage",
+    label: "Низкое напряжение",
+    content: "Эпоха: низкое напряжение. Отвечай коротко, вяло-иронично, без длинных разворотов и без дружелюбной суеты."
+  },
+  {
+    id: "forensic_snark",
+    label: "Forensic snark",
+    content: "Эпоха: forensic snark. Замечай слабые места тезиса быстро, но не превращай ответ в лекцию или трибунал."
+  },
+  {
+    id: "quiet_paranoia",
+    label: "Тихая паранойя",
+    content: "Эпоха: тихая паранойя. Чуть больше настороженности и странной собранности, но без отрыва от фактов и текущего контекста."
+  }
+] as const;
 
-export type CoreEpochFrontId = keyof typeof CORE_EPOCH_FRONTS;
+const DEFAULT_CORE_EPOCH_FRONT_BY_ID = new Map(DEFAULT_CORE_EPOCH_FRONTS.map((front) => [front.id, front]));
+const CORE_EPOCH_FALLBACK_FRONT_ID = DEFAULT_CORE_EPOCH_FRONTS[0]?.id ?? "dry_echo";
+
+export const CORE_EPOCH_FRONT_CHOICES = DEFAULT_CORE_EPOCH_FRONTS.map((front) => front.id);
+
+export type CoreEpochFrontId = string;
 
 export interface CoreEpochState {
   epochId: string;
-  frontId: CoreEpochFrontId;
+  frontId: string;
   startedAt: Date;
   expiresAt: Date;
   frontText: string;
+}
+
+export interface CoreEpochFrontStatus {
+  id: string;
+  label: string;
+  content: string;
+  enabled: boolean;
+  builtIn: boolean;
+  source: "default" | "runtime_setting";
+  updatedBy?: string | null;
+  updatedAt?: Date | null;
+}
+
+export interface CoreEpochRotationStatus {
+  durationMinutes: number;
+  durationSource: "default" | "runtime_setting";
+  fronts: CoreEpochFrontStatus[];
+  activeFrontId: string;
+  activeFrontLabel: string;
+  activeExpiresAt: Date;
+  updatedBy?: string | null;
+  updatedAt?: Date | null;
 }
 
 /**
@@ -1236,35 +1281,230 @@ export class RuntimeConfigService {
         .map((entry) => [entry.key, entry.content])
     ) as Partial<Record<CorePromptKey, string>>;
 
-    return { ...DEFAULT_CORE_PROMPT_TEMPLATES, ...overrides };
+    return {
+      ...DEFAULT_CORE_PROMPT_TEMPLATES,
+      ...overrides,
+      commonCore: overrides.commonCore ?? overrides.common_core_base ?? DEFAULT_CORE_PROMPT_TEMPLATES.commonCore,
+      memorySummarizerPrompt: overrides.memorySummarizer ?? DEFAULT_CORE_PROMPT_TEMPLATES.memorySummarizerPrompt,
+      aggressionCheckerPrompt: overrides.aggressionChecker ?? DEFAULT_CORE_PROMPT_TEMPLATES.aggressionCheckerPrompt,
+      relationshipEvaluatorPrompt: overrides.relationshipEvaluator
+        ?? overrides.relationship_base
+        ?? DEFAULT_CORE_PROMPT_TEMPLATES.relationshipEvaluatorPrompt
+    };
+  }
+
+  async getCoreEpochDurationMinutesStatus(): Promise<RuntimeOverrideStatus<number>> {
+    const row = await this.getRuntimeSettingRow(CORE_EPOCH_DURATION_MINUTES_SETTING_KEY);
+    const value = row ? parseCoreEpochDurationMinutes(row.value) : undefined;
+
+    return {
+      value: value ?? DEFAULT_CORE_EPOCH_DURATION_MINUTES,
+      source: value !== undefined ? "runtime_setting" : "default",
+      updatedBy: value !== undefined ? row?.updatedBy : null,
+      updatedAt: value !== undefined ? row?.updatedAt : null
+    };
+  }
+
+  async listCoreEpochFronts(): Promise<CoreEpochFrontStatus[]> {
+    const row = await this.getRuntimeSettingRow(CORE_EPOCH_FRONTS_SETTING_KEY);
+    return mergeCoreEpochFronts(parseStoredCoreEpochFronts(row?.value), row);
+  }
+
+  async getCoreEpochRotationStatus(now = new Date()): Promise<CoreEpochRotationStatus> {
+    const [durationStatus, fronts, active] = await Promise.all([
+      this.getCoreEpochDurationMinutesStatus(),
+      this.listCoreEpochFronts(),
+      this.getCoreEpochState(now)
+    ]);
+    const activeFront = fronts.find((front) => front.id === active.frontId)
+      ?? buildFallbackCoreEpochFrontStatus();
+
+    return {
+      durationMinutes: durationStatus.value,
+      durationSource: durationStatus.source === "runtime_setting" ? "runtime_setting" : "default",
+      fronts,
+      activeFrontId: active.frontId,
+      activeFrontLabel: activeFront.label,
+      activeExpiresAt: active.expiresAt,
+      updatedBy: durationStatus.source === "runtime_setting" ? durationStatus.updatedBy : null,
+      updatedAt: durationStatus.source === "runtime_setting" ? durationStatus.updatedAt : null
+    };
+  }
+
+  async setCoreEpochDurationMinutes(minutes: number, updatedBy?: string): Promise<CoreEpochRotationStatus> {
+    const parsed = parseCoreEpochDurationMinutes(String(minutes));
+    if (parsed === undefined) {
+      throw new Error("Частота epoch rotation должна быть целым числом от 15 до 1440 минут.");
+    }
+
+    const current = await this.getCoreEpochState().catch(() => null);
+    await this.writeRuntimeSetting(CORE_EPOCH_DURATION_MINUTES_SETTING_KEY, String(parsed), updatedBy, false);
+
+    const fronts = await this.listCoreEpochFronts();
+    const next = createNextCoreEpochState(new Date(), {
+      durationMinutes: parsed,
+      fronts,
+      forcedFrontId: current?.frontId ?? null
+    });
+
+    await this.writeRuntimeSetting(CORE_EPOCH_STATE_SETTING_KEY, serializeCoreEpochState(next), updatedBy ?? "system:epoch", false);
+    return this.getCoreEpochRotationStatus(next.startedAt);
+  }
+
+  async resetCoreEpochDurationMinutes(updatedBy?: string): Promise<CoreEpochRotationStatus> {
+    await this.deleteRuntimeSetting(CORE_EPOCH_DURATION_MINUTES_SETTING_KEY);
+    const current = await this.getCoreEpochState().catch(() => null);
+    const fronts = await this.listCoreEpochFronts();
+    const next = createNextCoreEpochState(new Date(), {
+      durationMinutes: DEFAULT_CORE_EPOCH_DURATION_MINUTES,
+      fronts,
+      forcedFrontId: current?.frontId ?? null
+    });
+    await this.writeRuntimeSetting(CORE_EPOCH_STATE_SETTING_KEY, serializeCoreEpochState(next), updatedBy ?? "system:epoch", false);
+    return this.getCoreEpochRotationStatus(next.startedAt);
+  }
+
+  async upsertCoreEpochFront(input: {
+    id?: string | null;
+    label: string;
+    content: string;
+    enabled?: boolean;
+  }, updatedBy?: string): Promise<CoreEpochFrontStatus> {
+    const label = sanitizeCoreEpochFrontLabel(input.label);
+    const content = sanitizeCoreEpochFrontContent(input.content);
+
+    if (!label) {
+      throw new Error("Название core front не может быть пустым.");
+    }
+
+    if (!content) {
+      throw new Error("Текст core front не может быть пустым.");
+    }
+
+    const current = await this.listCoreEpochFronts();
+    const currentIds = new Set(current.map((front) => front.id));
+    const explicitId = normalizeCoreEpochFrontId(input.id ?? null);
+    const targetId = explicitId && (currentIds.has(explicitId) || DEFAULT_CORE_EPOCH_FRONT_BY_ID.has(explicitId))
+      ? explicitId
+      : createCoreEpochFrontId(label, currentIds);
+
+    const next = [...current];
+    const existingIndex = next.findIndex((front) => front.id === targetId);
+    const enabled = input.enabled ?? next[existingIndex]?.enabled ?? true;
+    const nextFront: CoreEpochFrontStatus = {
+      id: targetId,
+      label,
+      content,
+      enabled,
+      builtIn: DEFAULT_CORE_EPOCH_FRONT_BY_ID.has(targetId),
+      source: "runtime_setting",
+      updatedBy: updatedBy ?? null,
+      updatedAt: new Date()
+    };
+
+    if (existingIndex >= 0) {
+      next.splice(existingIndex, 1, nextFront);
+    } else {
+      next.push(nextFront);
+    }
+
+    assertHasEnabledCoreEpochFront(next);
+    await this.persistCoreEpochFronts(next, updatedBy);
+    const saved = await this.listCoreEpochFronts();
+    return saved.find((front) => front.id === targetId) ?? nextFront;
+  }
+
+  async setCoreEpochFrontEnabled(frontId: string, enabled: boolean, updatedBy?: string): Promise<CoreEpochFrontStatus> {
+    const normalizedId = normalizeCoreEpochFrontId(frontId);
+    if (!normalizedId) {
+      throw new Error("Неизвестный core front.");
+    }
+
+    const current = await this.listCoreEpochFronts();
+    const next = current.map((front) => front.id === normalizedId ? { ...front, enabled, source: "runtime_setting" as const } : front);
+
+    if (!next.some((front) => front.id === normalizedId)) {
+      throw new Error(`Core front ${frontId} не найден.`);
+    }
+
+    assertHasEnabledCoreEpochFront(next);
+    await this.persistCoreEpochFronts(next, updatedBy);
+    const saved = await this.listCoreEpochFronts();
+    return saved.find((front) => front.id === normalizedId) ?? next.find((front) => front.id === normalizedId)!;
+  }
+
+  async resetCoreEpochFront(frontId: string, updatedBy?: string): Promise<CoreEpochRotationStatus> {
+    const normalizedId = normalizeCoreEpochFrontId(frontId);
+    if (!normalizedId) {
+      throw new Error("Неизвестный core front.");
+    }
+
+    const current = await this.listCoreEpochFronts();
+    const next = current.flatMap((front) => {
+      if (front.id !== normalizedId) {
+        return [front];
+      }
+
+      const defaultFront = DEFAULT_CORE_EPOCH_FRONT_BY_ID.get(normalizedId);
+      if (defaultFront) {
+        return [{
+          id: defaultFront.id,
+          label: defaultFront.label,
+          content: defaultFront.content,
+          enabled: true,
+          builtIn: true,
+          source: "default" as const,
+          updatedBy: null,
+          updatedAt: null
+        }];
+      }
+
+      return [];
+    });
+
+    assertHasEnabledCoreEpochFront(next);
+    await this.persistCoreEpochFronts(next, updatedBy);
+    return this.getCoreEpochRotationStatus();
   }
 
   async getCoreEpochState(now = new Date()): Promise<CoreEpochState> {
-    const row = await this.getRuntimeSettingRow(CORE_EPOCH_STATE_SETTING_KEY);
-    const parsed = parseCoreEpochState(row?.value);
-    if (parsed && parsed.expiresAt.getTime() > now.getTime()) {
+    const [row, fronts, durationStatus] = await Promise.all([
+      this.getRuntimeSettingRow(CORE_EPOCH_STATE_SETTING_KEY),
+      this.listCoreEpochFronts(),
+      this.getCoreEpochDurationMinutesStatus()
+    ]);
+    const parsed = parseCoreEpochState(row?.value, buildCoreEpochFrontLookup(fronts));
+    const enabledFronts = resolveEnabledCoreEpochFronts(fronts);
+
+    if (parsed && parsed.expiresAt.getTime() > now.getTime() && enabledFronts.some((front) => front.id === parsed.frontId)) {
       return parsed;
     }
 
-    const next = createNextCoreEpochState(now);
-    await this.writeRuntimeSetting(CORE_EPOCH_STATE_SETTING_KEY, JSON.stringify({
-      epochId: next.epochId,
-      frontId: next.frontId,
-      startedAt: next.startedAt.toISOString(),
-      expiresAt: next.expiresAt.toISOString()
-    }), "system:epoch", false);
+    const next = createNextCoreEpochState(now, {
+      durationMinutes: durationStatus.value,
+      fronts,
+      forcedFrontId: parsed ? nextCoreEpochFrontId(enabledFronts, parsed.frontId) : enabledFronts[0]?.id ?? null
+    });
+    await this.writeRuntimeSetting(CORE_EPOCH_STATE_SETTING_KEY, serializeCoreEpochState(next), "system:epoch", false);
     return next;
   }
 
   async rotateCoreEpoch(frontId?: CoreEpochFrontId, updatedBy?: string): Promise<CoreEpochState> {
     const current = await this.getCoreEpochState();
-    const next = createNextCoreEpochState(new Date(), frontId ?? nextCoreEpochFrontId(current.frontId));
-    await this.writeRuntimeSetting(CORE_EPOCH_STATE_SETTING_KEY, JSON.stringify({
-      epochId: next.epochId,
-      frontId: next.frontId,
-      startedAt: next.startedAt.toISOString(),
-      expiresAt: next.expiresAt.toISOString()
-    }), updatedBy ?? "system:epoch");
+    const [fronts, durationStatus] = await Promise.all([
+      this.listCoreEpochFronts(),
+      this.getCoreEpochDurationMinutesStatus()
+    ]);
+    const enabledFronts = resolveEnabledCoreEpochFronts(fronts);
+    const forcedFrontId = frontId
+      ? resolveRequestedCoreEpochFrontId(enabledFronts, frontId)
+      : nextCoreEpochFrontId(enabledFronts, current.frontId);
+    const next = createNextCoreEpochState(new Date(), {
+      durationMinutes: durationStatus.value,
+      fronts,
+      forcedFrontId
+    });
+    await this.writeRuntimeSetting(CORE_EPOCH_STATE_SETTING_KEY, serializeCoreEpochState(next), updatedBy ?? "system:epoch", false);
     return next;
   }
 
@@ -1272,12 +1512,7 @@ export class RuntimeConfigService {
     await this.deleteRuntimeSetting(CORE_EPOCH_STATE_SETTING_KEY);
     return this.getCoreEpochState().then(async (state) => {
       if (updatedBy) {
-        await this.writeRuntimeSetting(CORE_EPOCH_STATE_SETTING_KEY, JSON.stringify({
-          epochId: state.epochId,
-          frontId: state.frontId,
-          startedAt: state.startedAt.toISOString(),
-          expiresAt: state.expiresAt.toISOString()
-        }), updatedBy);
+        await this.writeRuntimeSetting(CORE_EPOCH_STATE_SETTING_KEY, serializeCoreEpochState(state), updatedBy, false);
       }
       return state;
     });
@@ -1413,6 +1648,16 @@ export class RuntimeConfigService {
     const now = new Date();
     const rows = await this.coreOverrides.findMany({ where: { guildId } }).catch(() => [] as never[]);
     return rows.filter((r) => !r.expiresAt || r.expiresAt > now);
+  }
+
+  private async persistCoreEpochFronts(fronts: CoreEpochFrontStatus[], updatedBy?: string) {
+    const storedEntries = extractStoredCoreEpochFronts(fronts);
+    if (!storedEntries.length) {
+      await this.deleteRuntimeSetting(CORE_EPOCH_FRONTS_SETTING_KEY);
+      return;
+    }
+
+    await this.writeRuntimeSetting(CORE_EPOCH_FRONTS_SETTING_KEY, JSON.stringify(storedEntries), updatedBy, false);
   }
 
   private async recordRuntimeSettingAudit(entry: {
@@ -1836,10 +2081,18 @@ function parseStylePresetMode(value: string) {
 }
 
 function isCoreEpochFrontId(value: unknown): value is CoreEpochFrontId {
-  return typeof value === "string" && value in CORE_EPOCH_FRONTS;
+  return typeof value === "string" && value.trim().length > 0;
 }
 
-function parseCoreEpochState(value: string | null | undefined): CoreEpochState | null {
+function parseCoreEpochDurationMinutes(value: string) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 15 && parsed <= 1440 ? parsed : undefined;
+}
+
+function parseCoreEpochState(
+  value: string | null | undefined,
+  frontLookup: ReadonlyMap<string, { content: string }>
+): CoreEpochState | null {
   if (!value) {
     return null;
   }
@@ -1855,6 +2108,11 @@ function parseCoreEpochState(value: string | null | undefined): CoreEpochState |
       return null;
     }
 
+    const front = frontLookup.get(parsed.frontId);
+    if (!front) {
+      return null;
+    }
+
     const startedAt = new Date(typeof parsed.startedAt === "string" ? parsed.startedAt : 0);
     const expiresAt = new Date(typeof parsed.expiresAt === "string" ? parsed.expiresAt : 0);
     if (Number.isNaN(startedAt.getTime()) || Number.isNaN(expiresAt.getTime())) {
@@ -1866,36 +2124,261 @@ function parseCoreEpochState(value: string | null | undefined): CoreEpochState |
       frontId: parsed.frontId,
       startedAt,
       expiresAt,
-      frontText: CORE_EPOCH_FRONTS[parsed.frontId]
+      frontText: front.content
     };
   } catch {
     return null;
   }
 }
 
-function createNextCoreEpochState(now: Date, forcedFrontId?: CoreEpochFrontId): CoreEpochState {
-  const epochIndex = Math.floor(now.getTime() / CORE_EPOCH_DURATION_MS);
-  const frontIds = Object.keys(CORE_EPOCH_FRONTS) as CoreEpochFrontId[];
-  const frontId = forcedFrontId ?? frontIds[epochIndex % frontIds.length] ?? "dry_echo";
-  const startedAt = new Date(epochIndex * CORE_EPOCH_DURATION_MS);
-  const expiresAt = new Date(startedAt.getTime() + CORE_EPOCH_DURATION_MS);
+function createNextCoreEpochState(now: Date, options: {
+  durationMinutes: number;
+  fronts: CoreEpochFrontStatus[];
+  forcedFrontId?: string | null;
+}): CoreEpochState {
+  const enabledFronts = resolveEnabledCoreEpochFronts(options.fronts);
+  const frontId = options.forcedFrontId && enabledFronts.some((front) => front.id === options.forcedFrontId)
+    ? options.forcedFrontId
+    : enabledFronts[0]?.id ?? CORE_EPOCH_FALLBACK_FRONT_ID;
+  const front = enabledFronts.find((entry) => entry.id === frontId) ?? buildFallbackCoreEpochFrontStatus();
+  const startedAt = new Date(now);
+  const expiresAt = new Date(startedAt.getTime() + options.durationMinutes * 60 * 1000);
 
   return {
-    epochId: `${frontId}:${startedAt.toISOString()}`,
-    frontId,
+    epochId: `${front.id}:${startedAt.toISOString()}`,
+    frontId: front.id,
     startedAt,
     expiresAt,
-    frontText: CORE_EPOCH_FRONTS[frontId]
+    frontText: front.content
   };
 }
 
-function nextCoreEpochFrontId(current: CoreEpochFrontId): CoreEpochFrontId {
-  const frontIds = Object.keys(CORE_EPOCH_FRONTS) as CoreEpochFrontId[];
+function nextCoreEpochFrontId(fronts: Array<{ id: string }>, current: string): string {
+  const frontIds = fronts.map((front) => front.id);
   const currentIndex = frontIds.indexOf(current);
   if (currentIndex < 0) {
-    return frontIds[0] ?? "dry_echo";
+    return frontIds[0] ?? CORE_EPOCH_FALLBACK_FRONT_ID;
   }
-  return frontIds[(currentIndex + 1) % frontIds.length] ?? "dry_echo";
+  return frontIds[(currentIndex + 1) % frontIds.length] ?? CORE_EPOCH_FALLBACK_FRONT_ID;
+}
+
+function serializeCoreEpochState(state: CoreEpochState) {
+  return JSON.stringify({
+    epochId: state.epochId,
+    frontId: state.frontId,
+    startedAt: state.startedAt.toISOString(),
+    expiresAt: state.expiresAt.toISOString()
+  });
+}
+
+function parseStoredCoreEpochFronts(value: string | null | undefined): Array<{ id: string; label: string; content: string; enabled: boolean }> {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    const seen = new Set<string>();
+    const fronts: Array<{ id: string; label: string; content: string; enabled: boolean }> = [];
+    for (const entry of parsed) {
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+
+      const record = entry as {
+        id?: unknown;
+        label?: unknown;
+        content?: unknown;
+        enabled?: unknown;
+      };
+      const id = normalizeCoreEpochFrontId(record.id);
+      const label = sanitizeCoreEpochFrontLabel(record.label);
+      const content = sanitizeCoreEpochFrontContent(record.content);
+
+      if (!id || !label || !content || seen.has(id)) {
+        continue;
+      }
+
+      seen.add(id);
+      fronts.push({
+        id,
+        label,
+        content,
+        enabled: record.enabled !== false
+      });
+    }
+
+    return fronts;
+  } catch {
+    return [];
+  }
+}
+
+function mergeCoreEpochFronts(
+  storedEntries: Array<{ id: string; label: string; content: string; enabled: boolean }>,
+  row?: { updatedBy?: string | null; updatedAt?: Date | null } | null
+): CoreEpochFrontStatus[] {
+  const storedById = new Map(storedEntries.map((entry) => [entry.id, entry]));
+  const fronts: CoreEpochFrontStatus[] = DEFAULT_CORE_EPOCH_FRONTS.map((front) => {
+    const stored = storedById.get(front.id);
+    if (stored) {
+      storedById.delete(front.id);
+      return {
+        id: front.id,
+        label: stored.label,
+        content: stored.content,
+        enabled: stored.enabled,
+        builtIn: true,
+        source: "runtime_setting",
+        updatedBy: row?.updatedBy ?? null,
+        updatedAt: row?.updatedAt ?? null
+      };
+    }
+
+    return {
+      id: front.id,
+      label: front.label,
+      content: front.content,
+      enabled: true,
+      builtIn: true,
+      source: "default",
+      updatedBy: null,
+      updatedAt: null
+    };
+  });
+
+  for (const stored of storedEntries) {
+    if (DEFAULT_CORE_EPOCH_FRONT_BY_ID.has(stored.id)) {
+      continue;
+    }
+
+    fronts.push({
+      id: stored.id,
+      label: stored.label,
+      content: stored.content,
+      enabled: stored.enabled,
+      builtIn: false,
+      source: "runtime_setting",
+      updatedBy: row?.updatedBy ?? null,
+      updatedAt: row?.updatedAt ?? null
+    });
+  }
+
+  return fronts;
+}
+
+function extractStoredCoreEpochFronts(fronts: CoreEpochFrontStatus[]) {
+  return fronts.flatMap((front) => {
+    const builtIn = DEFAULT_CORE_EPOCH_FRONT_BY_ID.get(front.id);
+    if (builtIn) {
+      if (front.label === builtIn.label && front.content === builtIn.content && front.enabled) {
+        return [];
+      }
+      return [{
+        id: front.id,
+        label: front.label,
+        content: front.content,
+        enabled: front.enabled
+      }];
+    }
+
+    return [{
+      id: front.id,
+      label: front.label,
+      content: front.content,
+      enabled: front.enabled
+    }];
+  });
+}
+
+function buildCoreEpochFrontLookup(fronts: CoreEpochFrontStatus[]) {
+  return new Map(fronts.map((front) => [front.id, { content: front.content }]));
+}
+
+function buildFallbackCoreEpochFrontStatus(): CoreEpochFrontStatus {
+  const fallback = DEFAULT_CORE_EPOCH_FRONT_BY_ID.get(CORE_EPOCH_FALLBACK_FRONT_ID) ?? DEFAULT_CORE_EPOCH_FRONTS[0];
+  return {
+    id: fallback.id,
+    label: fallback.label,
+    content: fallback.content,
+    enabled: true,
+    builtIn: true,
+    source: "default",
+    updatedBy: null,
+    updatedAt: null
+  };
+}
+
+function resolveEnabledCoreEpochFronts(fronts: CoreEpochFrontStatus[]) {
+  const enabled = fronts.filter((front) => front.enabled && front.content.trim().length > 0);
+  return enabled.length ? enabled : [buildFallbackCoreEpochFrontStatus()];
+}
+
+function assertHasEnabledCoreEpochFront(fronts: CoreEpochFrontStatus[]) {
+  if (!fronts.some((front) => front.enabled && front.content.trim().length > 0)) {
+    throw new Error("Нужен хотя бы один включённый core front в rotation.");
+  }
+}
+
+function normalizeCoreEpochFrontId(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40);
+
+  return normalized || null;
+}
+
+function sanitizeCoreEpochFrontLabel(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.replace(/\r\n/g, "\n").trim();
+  return trimmed ? trimmed.slice(0, 80) : null;
+}
+
+function sanitizeCoreEpochFrontContent(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.replace(/\r\n/g, "\n").trim();
+  return normalized || null;
+}
+
+function createCoreEpochFrontId(label: string, usedIds: ReadonlySet<string>) {
+  const base = normalizeCoreEpochFrontId(label) ?? "epoch_front";
+  if (!usedIds.has(base)) {
+    return base;
+  }
+
+  let suffix = 2;
+  let candidate = `${base}_${suffix}`;
+  while (usedIds.has(candidate)) {
+    suffix += 1;
+    candidate = `${base}_${suffix}`;
+  }
+
+  return candidate;
+}
+
+function resolveRequestedCoreEpochFrontId(fronts: Array<{ id: string }>, requestedId: string) {
+  const normalizedId = normalizeCoreEpochFrontId(requestedId);
+  if (!normalizedId || !fronts.some((front) => front.id === normalizedId)) {
+    throw new Error(`Core front ${requestedId} не найден или выключен.`);
+  }
+  return normalizedId;
 }
 
 function parseMaxTimeoutMinutes(value: string) {

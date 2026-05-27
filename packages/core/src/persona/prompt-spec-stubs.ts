@@ -42,17 +42,74 @@ export interface CorePromptDefinition {
   defaultContent: string;
 }
 
-export const CORE_PROMPT_DEFINITIONS: Record<CorePromptKey, CorePromptDefinition> = CORE_PROMPT_KEYS.reduce(
-  (acc, key) => {
-    acc[key] = { key, label: key, title: key, description: "", defaultContent: "" };
-    return acc;
-  },
-  {} as Record<CorePromptKey, CorePromptDefinition>
-);
+const MEMORY_SUMMARIZER_PROMPT_DEFAULT =
+  "Сделай сжатое резюме диалога на русском. Только факты из текста. Не придумывай. Если данных мало — скажи прямо.";
+
+const AGGRESSION_CHECKER_PROMPT_DEFAULT =
+  "Ты модератор. Последнее сообщение пользователя: {last_user_message}\nОтвет Хори: {hori_response}\nЕсли ответ Хори содержит прямую агрессию, угрозы, оскорбления или травлю — ответь AGGRESSIVE. Иначе — OK. Только одно слово.";
+
+const RELATIONSHIP_EVALUATOR_PROMPT_DEFAULT =
+  "Ты оцениваешь, как изменилось отношение пользователя к Хори после сессии диалога.\nПредыдущая характеристика: {previous_characteristic}\nДиалог:\n{session_messages}\n\nОтветь строго JSON без лишних полей:\n{\"verdict\":\"A|B|V\",\"characteristic\":\"краткое описание отношений (до 200 символов)\",\"lastChange\":\"что изменилось (до 100 символов)\"}\nverdict: A=стало хуже, B=без изменений, V=стало лучше.";
 
 export function getCorePromptDefaultContent(key: CorePromptKey): string {
-  return CORE_PROMPT_DEFINITIONS[key]?.defaultContent ?? "";
+  switch (key) {
+    case "commonCore":
+    case "common_core_base":
+      return coreText("core_base");
+    case "memorySummarizer":
+      return MEMORY_SUMMARIZER_PROMPT_DEFAULT;
+    case "aggressionChecker":
+      return AGGRESSION_CHECKER_PROMPT_DEFAULT;
+    case "relationshipEvaluator":
+    case "relationship_base":
+      return RELATIONSHIP_EVALUATOR_PROMPT_DEFAULT;
+  }
 }
+
+export const CORE_PROMPT_DEFINITIONS: Record<CorePromptKey, CorePromptDefinition> = {
+  commonCore: {
+    key: "commonCore",
+    label: "Базовый commonCore",
+    title: "Базовый commonCore",
+    description: "Главный production-блок stable core prompt. Всегда идёт первым system block в chat path.",
+    defaultContent: getCorePromptDefaultContent("commonCore")
+  },
+  memorySummarizer: {
+    key: "memorySummarizer",
+    label: "Memory summarizer",
+    title: "Memory summarizer",
+    description: "Service prompt для сжатого memory summary. Нужен для внутренних summarizer-задач.",
+    defaultContent: getCorePromptDefaultContent("memorySummarizer")
+  },
+  aggressionChecker: {
+    key: "aggressionChecker",
+    label: "Aggression checker",
+    title: "Aggression checker",
+    description: "Production prompt для post-check ответа Хори на прямую агрессию.",
+    defaultContent: getCorePromptDefaultContent("aggressionChecker")
+  },
+  relationshipEvaluator: {
+    key: "relationshipEvaluator",
+    label: "Relationship evaluator",
+    title: "Relationship evaluator",
+    description: "Production prompt для A/B/V оценки, как изменилась динамика отношений после сессии.",
+    defaultContent: getCorePromptDefaultContent("relationshipEvaluator")
+  },
+  common_core_base: {
+    key: "common_core_base",
+    label: "Legacy common_core_base",
+    title: "Legacy common_core_base",
+    description: "Совместимый alias для базового commonCore. Используй только для старых surface-ов.",
+    defaultContent: getCorePromptDefaultContent("common_core_base")
+  },
+  relationship_base: {
+    key: "relationship_base",
+    label: "Legacy relationship_base",
+    title: "Legacy relationship_base",
+    description: "Совместимый alias для relationship evaluator prompt. Нужен для старых runtime surface-ов.",
+    defaultContent: getCorePromptDefaultContent("relationship_base")
+  }
+};
 
 export interface CorePromptTemplates {
   commonCore: string;
@@ -70,12 +127,9 @@ export const DEFAULT_CORE_PROMPT_TEMPLATES: CorePromptTemplates = {
   memorySummarizer: "",
   aggressionChecker: "",
   relationshipEvaluator: "",
-  memorySummarizerPrompt:
-    "Сделай сжатое резюме диалога на русском. Только факты из текста. Не придумывай. Если данных мало — скажи прямо.",
-  aggressionCheckerPrompt:
-    "Ты модератор. Последнее сообщение пользователя: {last_user_message}\nОтвет Хори: {hori_response}\nЕсли ответ Хори содержит прямую агрессию, угрозы, оскорбления или травлю — ответь AGGRESSIVE. Иначе — OK. Только одно слово.",
-  relationshipEvaluatorPrompt:
-    "Ты оцениваешь, как изменилось отношение пользователя к Хори после сессии диалога.\nПредыдущая характеристика: {previous_characteristic}\nДиалог:\n{session_messages}\n\nОтветь строго JSON без лишних полей:\n{\"verdict\":\"A|B|V\",\"characteristic\":\"краткое описание отношений (до 200 символов)\",\"lastChange\":\"что изменилось (до 100 символов)\"}\nverdict: A=стало хуже, B=без изменений, V=стало лучше."
+  memorySummarizerPrompt: MEMORY_SUMMARIZER_PROMPT_DEFAULT,
+  aggressionCheckerPrompt: AGGRESSION_CHECKER_PROMPT_DEFAULT,
+  relationshipEvaluatorPrompt: RELATIONSHIP_EVALUATOR_PROMPT_DEFAULT
 };
 
 export function detectMessageKind(_input: unknown): MessageKind {

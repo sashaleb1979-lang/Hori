@@ -86,9 +86,13 @@ describe("Hori Panel V7: tab matrix", () => {
     const ownerActions = resolveTabActions(cores, owner).map((a) => a.id);
     const modActions = resolveTabActions(cores, moderator).map((a) => a.id);
     expect(ownerActions).toContain("cores_open_panel");
+    expect(ownerActions).toContain("cores_rotate_now");
+    expect(ownerActions).toContain("cores_rotation");
     expect(modActions).toContain("cores_override");
     expect(modActions).toContain("cores_overrides_list");
     expect(modActions).not.toContain("cores_open_panel");
+    expect(modActions).not.toContain("cores_rotate_now");
+    expect(modActions).not.toContain("cores_rotation");
   });
 
   it("slots tab exposes owner controls without legacy card button", () => {

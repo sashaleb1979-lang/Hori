@@ -1644,7 +1644,7 @@ async function routeStringSelectInteraction(
   }
 
   if (interaction.customId.startsWith(`${CORE_PROMPT_PANEL_PREFIX}:`)) {
-    await handleCorePromptPanelSelect(runtime, interaction, isOwner);
+    await handleCorePromptPanelSelect(runtime, interaction, isOwner, hasManageGuild(interaction));
     return;
   }
 
@@ -1801,10 +1801,42 @@ async function handleLlmPanelSelect(
 async function handleCorePromptPanelSelect(
   runtime: BotRuntime,
   interaction: StringSelectMenuInteraction,
-  isOwner: boolean
+  isOwner: boolean,
+  isModerator: boolean
 ) {
   if (!interaction.guildId) {
     await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (!isOwner && !isModerator) {
+    await interaction.reply({ content: "Эта панель только для модеров.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const [, action] = interaction.customId.split(":");
+  if (action === "select") {
+    await safeCorePromptPanelUpdate(
+      runtime,
+      interaction,
+      interaction.guildId,
+      { view: isOwner ? "base" : "preview" },
+      interaction.channelId,
+      isOwner
+    );
+    return;
+  }
+
+  if (action === "view") {
+    const requestedView = isCorePromptStudioView(interaction.values[0]) ? interaction.values[0] : "base";
+    if (!canAccessCoreStudioView(requestedView, isOwner)) {
+      await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, {
+      view: requestedView
+    }, interaction.channelId, isOwner);
     return;
   }
 
@@ -1813,43 +1845,67 @@ async function handleCorePromptPanelSelect(
     return;
   }
 
-  const [, action] = interaction.customId.split(":");
-  if (action !== "select") {
-    await interaction.reply({ content: "Неизвестный select core prompt panel.", flags: MessageFlags.Ephemeral });
+  if (action === "front") {
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, {
+      view: "rotation",
+      frontId: interaction.values[0] ?? null
+    }, interaction.channelId, isOwner);
     return;
   }
 
-  const selectedKey = isCorePromptKey(interaction.values[0]) ? interaction.values[0] : "common_core_base";
-  await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, selectedKey);
+  if (action === "service") {
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, {
+      view: "services",
+      promptKey: isCoreStudioServiceKey(interaction.values[0]) ? interaction.values[0] : "aggressionChecker"
+    }, interaction.channelId, isOwner);
+    return;
+  }
+
+  await interaction.reply({ content: "Неизвестный select core prompt panel.", flags: MessageFlags.Ephemeral });
 }
 
 async function handleCorePromptPanelButton(
   runtime: BotRuntime,
   interaction: ButtonInteraction,
-  isOwner: boolean
+  isOwner: boolean,
+  isModerator: boolean
 ) {
   if (!interaction.guildId) {
     await interaction.reply({ content: "Только внутри сервера.", flags: MessageFlags.Ephemeral });
     return;
   }
 
-  if (!isOwner) {
+  const [, action, rawKey] = interaction.customId.split(":");
+  const selectedFrontId = rawKey ?? null;
+  const moderatorAllowed = action === "show_preview"
+    || action === "show_overrides"
+    || action === "show_override_modal"
+    || action === "back";
+
+  if (!isOwner && !isModerator) {
+    await interaction.reply({ content: "Эта панель только для модеров.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (!isOwner && !moderatorAllowed) {
     await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
     return;
   }
 
-  const [, action, rawKey] = interaction.customId.split(":");
-  const selectedKey = isCorePromptKey(rawKey) ? rawKey : "common_core_base";
-
-  if (action === "edit") {
+  if (action === "edit" || action === "edit_base") {
     try {
+      const templates = await runtime.runtimeConfig.getCorePromptTemplates(interaction.guildId);
       await interaction.showModal(
-        buildCorePromptModal(await runtime.runtimeConfig.getCorePromptTemplate(interaction.guildId, selectedKey))
+        buildCorePromptModal({
+          key: "commonCore",
+          label: "Базовый core",
+          content: templates.commonCore
+        })
       );
     } catch (error) {
       console.error("[core-prompt-panel] failed to open edit modal", {
         guildId: interaction.guildId,
-        selectedKey,
+        selectedFrontId,
         error: error instanceof Error ? { message: error.message, stack: error.stack } : error
       });
       const message = error instanceof Error ? error.message : "unknown error";
@@ -1861,9 +1917,131 @@ async function handleCorePromptPanelButton(
     return;
   }
 
-  if (action === "reset") {
-    await runtime.runtimeConfig.resetCorePromptTemplate(interaction.guildId, selectedKey);
-    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, selectedKey);
+  if (action === "reset" || action === "reset_base") {
+    await runtime.runtimeConfig.resetCorePromptTemplate(interaction.guildId, "commonCore", interaction.user.id);
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, { view: "base" }, interaction.channelId, isOwner);
+    return;
+  }
+
+  if (action === "show_rotation") {
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, { view: "rotation" }, interaction.channelId, isOwner);
+    return;
+  }
+
+  if (action === "show_base") {
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, { view: "base" }, interaction.channelId, isOwner);
+    return;
+  }
+
+  if (action === "show_preview") {
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, { view: "preview" }, interaction.channelId, isOwner);
+    return;
+  }
+
+  if (action === "show_services") {
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, { view: "services" }, interaction.channelId, isOwner);
+    return;
+  }
+
+  if (action === "show_overrides") {
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, { view: "overrides" }, interaction.channelId, isOwner);
+    return;
+  }
+
+  if (action === "show_override_modal") {
+    await interaction.showModal(buildCoreOverrideModal());
+    return;
+  }
+
+  if (action === "edit_service") {
+    if (!isCoreStudioServiceKey(rawKey)) {
+      await interaction.reply({ content: "Неизвестный service prompt.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.showModal(buildCorePromptModal(await runtime.runtimeConfig.getCorePromptTemplate(interaction.guildId, rawKey)));
+    return;
+  }
+
+  if (action === "reset_service") {
+    if (!isCoreStudioServiceKey(rawKey)) {
+      await interaction.reply({ content: "Неизвестный service prompt.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await runtime.runtimeConfig.resetCorePromptTemplate(interaction.guildId, rawKey, interaction.user.id);
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, {
+      view: "services",
+      promptKey: rawKey
+    }, interaction.channelId, isOwner);
+    return;
+  }
+
+  if (action === "add_front") {
+    await interaction.showModal(buildCoreEpochFrontModal());
+    return;
+  }
+
+  if (action === "edit_front") {
+    const rotation = await runtime.runtimeConfig.getCoreEpochRotationStatus();
+    const selectedFront = rotation.fronts.find((front) => front.id === selectedFrontId);
+    if (!selectedFront) {
+      await interaction.reply({ content: "Неизвестный epoch front.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.showModal(buildCoreEpochFrontModal(selectedFront));
+    return;
+  }
+
+  if (action === "toggle_front") {
+    const rotation = await runtime.runtimeConfig.getCoreEpochRotationStatus();
+    const selectedFront = rotation.fronts.find((front) => front.id === selectedFrontId);
+    if (!selectedFront) {
+      await interaction.reply({ content: "Неизвестный epoch front.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await runtime.runtimeConfig.setCoreEpochFrontEnabled(selectedFront.id, !selectedFront.enabled, interaction.user.id);
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, {
+      view: "rotation",
+      frontId: selectedFront.id
+    }, interaction.channelId, isOwner);
+    return;
+  }
+
+  if (action === "reset_front") {
+    if (!selectedFrontId) {
+      await interaction.reply({ content: "Неизвестный epoch front.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await runtime.runtimeConfig.resetCoreEpochFront(selectedFrontId, interaction.user.id);
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, {
+      view: "rotation",
+      frontId: selectedFrontId
+    }, interaction.channelId, isOwner);
+    return;
+  }
+
+  if (action === "rotate_front") {
+    await runtime.runtimeConfig.rotateCoreEpoch(selectedFrontId ?? undefined, interaction.user.id);
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, {
+      view: selectedFrontId ? "rotation" : "preview",
+      frontId: selectedFrontId
+    }, interaction.channelId, isOwner);
+    return;
+  }
+
+  if (action === "duration") {
+    const rotation = await runtime.runtimeConfig.getCoreEpochRotationStatus();
+    await interaction.showModal(buildCoreEpochDurationModal(rotation.durationMinutes));
+    return;
+  }
+
+  if (action === "duration_reset") {
+    await runtime.runtimeConfig.resetCoreEpochDurationMinutes(interaction.user.id);
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, { view: "rotation" }, interaction.channelId, isOwner);
     return;
   }
 
@@ -2188,6 +2366,11 @@ async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubm
     const durationRaw = interaction.fields.getTextInputValue("duration").trim().toLowerCase();
     const reason = interaction.fields.getTextInputValue("reason").trim() || null;
 
+    if (!userId) {
+      await interaction.reply({ content: "Нужен Discord user ID.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
     const validCoreIds = ["core_annoyed", "core_base", "core_warm", "core_close", "core_teasing", "core_sweet", "core_serious"];
     if (coreId === "clear") {
       await runtime.runtimeConfig.clearCoreOverride(interaction.guildId, userId);
@@ -2198,11 +2381,15 @@ async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubm
       await interaction.reply({ content: `Неизвестный coreId: \`${coreId}\`. Допустимые: ${validCoreIds.join(", ")} или clear.`, flags: MessageFlags.Ephemeral });
       return;
     }
-    const durationMs: number | null = durationRaw === "forever" || durationRaw === "" ? null
+    const durationMs: number | null | undefined = durationRaw === "forever" || durationRaw === "" ? null
       : durationRaw === "1h" ? 3_600_000
       : durationRaw === "6h" ? 21_600_000
       : durationRaw === "24h" ? 86_400_000
-      : null;
+      : undefined;
+    if (durationMs === undefined) {
+      await interaction.reply({ content: "duration должен быть пустым, forever, 1h, 6h или 24h.", flags: MessageFlags.Ephemeral });
+      return;
+    }
     await runtime.runtimeConfig.setCoreOverride(interaction.guildId, userId, coreId, durationMs, reason, interaction.user.id);
     const exp = durationMs ? `на ${durationRaw}` : "бессрочно";
     await interaction.reply({ content: `✅ Mood override выставлен для <@${userId}>: \`${coreId}\` ${exp}.`, flags: MessageFlags.Ephemeral });
@@ -2354,18 +2541,53 @@ async function handleHoriModalSubmit(runtime: BotRuntime, interaction: ModalSubm
       return;
     }
 
-    const updated = await runtime.runtimeConfig.setCorePromptTemplate(
+    await runtime.runtimeConfig.setCorePromptTemplate(
       interaction.guildId,
       promptKey,
       interaction.fields.getTextInputValue("content"),
       interaction.user.id
     );
     await interaction.reply({
-      content: [
-        `Сохранён ${updated.label}.`,
-        `source=${updated.source}`,
-        updated.updatedAt ? `updated=${updated.updatedAt.toISOString()}` : null
-      ].filter(Boolean).join("\n"),
+      ...(await buildCorePromptPanelResponse(runtime, interaction.guildId, {
+        view: promptKey === "commonCore" ? "base" : "services",
+        ...(promptKey !== "commonCore" ? { promptKey } : {})
+      }, interaction.channelId)),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (modalKind === "core-epoch-front") {
+    const frontId = channelIdFromModal === "new" ? null : channelIdFromModal ?? null;
+    const label = interaction.fields.getTextInputValue("label").trim();
+    const content = interaction.fields.getTextInputValue("content").trim();
+    const enabled = readOptionalBoolean(interaction.fields.getTextInputValue("enabled")) ?? true;
+    const saved = await runtime.runtimeConfig.upsertCoreEpochFront({
+      id: frontId,
+      label,
+      content,
+      enabled
+    }, interaction.user.id);
+    await interaction.reply({
+      ...(await buildCorePromptPanelResponse(runtime, interaction.guildId, {
+        view: "rotation",
+        frontId: saved.id
+      }, interaction.channelId)),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (modalKind === "core-epoch-duration") {
+    const minutes = readIntegerText(interaction.fields.getTextInputValue("minutes"), 15, 1440);
+    if (minutes === undefined) {
+      await interaction.reply({ content: "Частота ротации должна быть целым числом от 15 до 1440 минут.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await runtime.runtimeConfig.setCoreEpochDurationMinutes(minutes, interaction.user.id);
+    await interaction.reply({
+      ...(await buildCorePromptPanelResponse(runtime, interaction.guildId, { view: "rotation" }, interaction.channelId)),
       flags: MessageFlags.Ephemeral
     });
     return;
@@ -2858,7 +3080,7 @@ async function routeButtonInteraction(runtime: BotRuntime, interaction: ButtonIn
   }
 
   if (interaction.customId.startsWith(`${CORE_PROMPT_PANEL_PREFIX}:`)) {
-    await handleCorePromptPanelButton(runtime, interaction, isOwner);
+    await handleCorePromptPanelButton(runtime, interaction, isOwner, hasManageGuild(interaction));
     return;
   }
 
@@ -3000,7 +3222,7 @@ async function handleHoriPanelAction(
   }
 
   if (action === "core_prompt_panel") {
-    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, "common_core_base");
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, { view: "base" }, interaction.channelId);
     return;
   }
 
@@ -3171,22 +3393,43 @@ async function handleHoriPanelAction(
   }
 
   // V7: actions that open a sub-panel instead of a detail embed.
-  if (action === "cores_open_panel" || action === "cores_evaluator" || action === "cores_aggression_checker") {
+  if (action === "cores_open_panel" || action === "cores_rotation"
+    || action === "cores_preview" || action === "cores_overrides_list"
+    || action === "cores_evaluator" || action === "cores_aggression_checker") {
+    const moderatorAllowed = action === "cores_preview" || action === "cores_overrides_list";
+    if (moderatorAllowed ? (!isOwner && !isModerator) : !isOwner) {
+      await interaction.reply({
+        content: moderatorAllowed ? "Эта панель только для модеров." : HORI_PANEL_OWNER_ONLY_MESSAGE,
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, {
+      view: action === "cores_rotation"
+        ? "rotation"
+        : action === "cores_preview"
+          ? "preview"
+          : action === "cores_overrides_list"
+            ? "overrides"
+            : action === "cores_evaluator" || action === "cores_aggression_checker"
+              ? "services"
+              : "base",
+      ...(action === "cores_evaluator"
+        ? { promptKey: "relationshipEvaluator" }
+        : action === "cores_aggression_checker"
+          ? { promptKey: "aggressionChecker" }
+          : {})
+    }, interaction.channelId);
+    return;
+  }
+
+  if (action === "cores_rotate_now") {
     if (!isOwner) {
       await interaction.reply({ content: HORI_PANEL_OWNER_ONLY_MESSAGE, flags: MessageFlags.Ephemeral });
       return;
     }
-    const coreKeyMap: Record<string, string> = {
-      cores_open_panel: "common_core_base",
-      cores_evaluator: "evaluator",
-      cores_aggression_checker: "aggression_checker"
-    };
-    const key = coreKeyMap[action] ?? "common_core_base";
-    if (!isCorePromptKey(key)) {
-      await interaction.reply({ content: "Неизвестный ключ core prompt.", flags: MessageFlags.Ephemeral });
-      return;
-    }
-    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, key);
+    await runtime.runtimeConfig.rotateCoreEpoch(undefined, interaction.user.id);
+    await safeCorePromptPanelUpdate(runtime, interaction, interaction.guildId, { view: "preview" }, interaction.channelId);
     return;
   }
 
@@ -3810,11 +4053,13 @@ function horiActionTitle(action: string) {
     home_audit_recent: "Свежий аудит",
     home_help: "Справка",
     cores_preview: "Превью сборки",
-    cores_evaluator: "Evaluator",
-    cores_aggression_checker: "Aggression checker",
-    cores_open_panel: "Редактор кор",
+    cores_open_panel: "Core Studio V2",
     cores_override: "Mood override",
     cores_overrides_list: "Список overrides",
+    cores_rotate_now: "Сменить эпоху",
+    cores_rotation: "Ротация и частота",
+    cores_evaluator: "Core Studio V2",
+    cores_aggression_checker: "Core Studio V2",
     people_self: "Моё отношение",
     people_lookup: "Найти пользователя",
     people_set_state: "Поставить уровень",
@@ -4237,82 +4482,173 @@ async function buildLlmTelemetry(runtime: BotRuntime, guildId: string) {
   ].join("\n"), 1000);
 }
 
+const CORE_STUDIO_SERVICE_KEYS = ["aggressionChecker", "relationshipEvaluator", "memorySummarizer"] as const;
+
+type CorePromptStudioView = "base" | "rotation" | "preview" | "services" | "overrides";
+type CoreStudioServiceKey = (typeof CORE_STUDIO_SERVICE_KEYS)[number];
+
+interface CorePromptStudioState {
+  view?: CorePromptStudioView;
+  frontId?: string | null;
+  promptKey?: CorePromptKey | null;
+}
+
+function isCorePromptStudioView(value: unknown): value is CorePromptStudioView {
+  return value === "base" || value === "rotation" || value === "preview" || value === "services" || value === "overrides";
+}
+
+function isCoreStudioServiceKey(value: unknown): value is CoreStudioServiceKey {
+  return typeof value === "string" && (CORE_STUDIO_SERVICE_KEYS as readonly string[]).includes(value);
+}
+
 async function buildCorePromptPanelResponse(
   runtime: BotRuntime,
   guildId: string,
-  selectedKey: CorePromptKey
+  requestedState: CorePromptStudioState = {},
+  channelId?: string | null,
+  isOwner = true
 ) {
-  const templates = await runtime.runtimeConfig.listCorePromptTemplates(guildId);
+  const [commonCoreStatus, serviceStatuses, compiledTemplates, rotation, coreEpoch, overrides, activePromptSlot] = await Promise.all([
+    runtime.runtimeConfig.getCorePromptTemplate(guildId, "commonCore"),
+    Promise.all(CORE_STUDIO_SERVICE_KEYS.map((key) => runtime.runtimeConfig.getCorePromptTemplate(guildId, key))),
+    runtime.runtimeConfig.getCorePromptTemplates(guildId),
+    runtime.runtimeConfig.getCoreEpochRotationStatus(),
+    runtime.runtimeConfig.getCoreEpochState(),
+    runtime.runtimeConfig.listCoreOverrides(guildId),
+    channelId ? runtime.promptSlots.getActiveSlot(guildId, channelId) : Promise.resolve(null)
+  ]);
 
-  if (!templates.length) {
-    return {
-      content: "",
-      embeds: [
-        new EmbedBuilder()
-          .setTitle("🧩 Hori Core Prompts")
-          .setColor(0xED4245)
-          .setDescription(
-            [
-              "Список core prompts пустой. Возможно не накатились миграции БД или сборка устарела.",
-              `Guild: \`${guildId}\``
-            ].join("\n")
-          )
-      ],
-      components: [
-        new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`${HORI_ACTION_PREFIX}:panel_home`)
-            .setLabel("Panel")
-            .setEmoji("🏠")
-            .setStyle(ButtonStyle.Secondary)
-        )
-      ]
-    };
-  }
-
-  const selected = templates.find((entry) => entry.key === selectedKey) ?? templates[0];
-  const overriddenCount = templates.filter((entry) => entry.source === "runtime_setting").length;
-  const lines = templates.map((entry) => {
-    const marker = entry.key === selected.key ? ">" : " ";
-    const source = entry.source === "runtime_setting" ? "override" : "default";
-    return `${marker} ${entry.label} · ${source}`;
+  const state = resolveCorePromptStudioState(rotation, requestedState, isOwner);
+  const selectedFront = rotation.fronts.find((front) => front.id === state.frontId) ?? null;
+  const selectedService = serviceStatuses.find((entry) => entry.key === state.promptKey) ?? serviceStatuses[0]!;
+  const baseContent = compiledTemplates.commonCore.trim() || "Базовый commonCore пока пустой.";
+  const enabledFronts = rotation.fronts.filter((front) => front.enabled).length;
+  const stableCorePreview = buildCoreStudioStableCorePrompt({
+    commonCore: compiledTemplates.commonCore,
+    coreEpoch,
+    activePromptSlot: activePromptSlot
+      ? { title: activePromptSlot.title, content: activePromptSlot.content, strength: activePromptSlot.strength }
+      : null
   });
 
-  const updatedAtIso = selected.updatedAt instanceof Date
-    ? selected.updatedAt.toISOString()
-    : selected.updatedAt
-      ? new Date(selected.updatedAt as unknown as string | number).toISOString()
-      : null;
+  const summaryEmbed = new EmbedBuilder()
+    .setTitle("🧩 Core Studio V2")
+    .setColor(resolveCoreStudioColor(state.view))
+    .setDescription([
+      "Production stable core сейчас = базовый commonCore + active epoch front + optional prompt slot.",
+      `Режим: **${describeCoreStudioView(state.view)}**`,
+      `Активная эпоха: **${rotation.activeFrontLabel}** до ${formatCoreStudioTime(rotation.activeExpiresAt)}.`
+    ].join("\n"))
+    .addFields(
+      {
+        name: "Базовый commonCore",
+        value: clipFieldText([
+          `source=${formatCoreStudioSource(commonCoreStatus.source)}`,
+          commonCoreStatus.updatedAt
+            ? `updated=${formatCoreStudioTime(commonCoreStatus.updatedAt)}${commonCoreStatus.updatedBy ? ` by ${commonCoreStatus.updatedBy}` : ""}`
+            : "using built-in default",
+          `chars=${baseContent.length}`
+        ].join("\n"), 1024),
+        inline: true
+      },
+      {
+        name: "Epoch rotation",
+        value: clipFieldText([
+          `duration=${rotation.durationMinutes} min (${rotation.durationSource})`,
+          `enabled=${enabledFronts}/${rotation.fronts.length}`,
+          `active=${rotation.activeFrontLabel}`
+        ].join("\n"), 1024),
+        inline: true
+      },
+      {
+        name: "Service prompts",
+        value: clipFieldText(formatCoreStudioServiceList(serviceStatuses), 1024),
+        inline: true
+      },
+      {
+        name: "Mood overrides",
+        value: clipFieldText([
+          `active=${overrides.length}`,
+          channelId ? `channel=<#${channelId}>` : "channel=unknown",
+          activePromptSlot
+            ? `slot=${activePromptSlot.title ?? activePromptSlot.id.slice(0, 8)} strength=${activePromptSlot.strength}`
+            : "slot=none"
+        ].join("\n"), 1024),
+        inline: true
+      }
+    );
+
+  const detailEmbed = state.view === "rotation"
+    ? buildDetailEmbed(
+        `🎛️ ${selectedFront?.label ?? "Epoch front"}`,
+        selectedFront
+          ? [
+              `${selectedFront.enabled ? "Включён" : "Выключен"} · ${selectedFront.builtIn ? "built-in" : "custom"} · source=${formatCoreStudioSource(selectedFront.source)}`,
+              selectedFront.id === rotation.activeFrontId
+                ? `Сейчас активен до ${formatCoreStudioTime(rotation.activeExpiresAt)}.`
+                : `Сейчас активен front: ${rotation.activeFrontLabel}.`,
+              selectedFront.updatedAt
+                ? `updated=${formatCoreStudioTime(selectedFront.updatedAt)}${selectedFront.updatedBy ? ` by ${selectedFront.updatedBy}` : ""}`
+                : selectedFront.source === "default"
+                  ? "using built-in default"
+                  : null,
+              "",
+              clipCoreStudioText(selectedFront.content)
+            ].filter(Boolean).join("\n")
+          : "Нет выбранного epoch front."
+      )
+    : state.view === "preview"
+      ? buildDetailEmbed(
+          "🔎 Stable core preview",
+          [
+            `frontId=${coreEpoch.frontId}`,
+            activePromptSlot
+              ? `slot=${activePromptSlot.title ?? activePromptSlot.id.slice(0, 8)} · strength=${activePromptSlot.strength} · ${activePromptSlot.channelId ? `channel <#${activePromptSlot.channelId}>` : "global"}`
+              : "slot=none",
+            "",
+            clipCoreStudioText(stableCorePreview)
+          ].join("\n")
+        )
+      : state.view === "services"
+        ? buildDetailEmbed(
+            `🧪 ${selectedService.label}`,
+            [
+              selectedService.description || "Service prompt для внутреннего runtime-пути.",
+              "",
+              `source=${formatCoreStudioSource(selectedService.source)}`,
+              selectedService.updatedAt
+                ? `updated=${formatCoreStudioTime(selectedService.updatedAt)}${selectedService.updatedBy ? ` by ${selectedService.updatedBy}` : ""}`
+                : "using built-in default",
+              "",
+              clipCoreStudioText(selectedService.content)
+            ].join("\n")
+          )
+        : state.view === "overrides"
+          ? buildDetailEmbed(
+              "🎭 Mood overrides",
+              formatCoreStudioOverrides(overrides)
+            )
+          : buildDetailEmbed(
+              "✍️ Базовый commonCore",
+              [
+                "Этот блок всегда стоит в начале production stable core prompt.",
+                commonCoreStatus.updatedAt
+                  ? `updated=${formatCoreStudioTime(commonCoreStatus.updatedAt)}${commonCoreStatus.updatedBy ? ` by ${commonCoreStatus.updatedBy}` : ""}`
+                  : "using built-in default",
+                "",
+                clipCoreStudioText(baseContent)
+              ].join("\n")
+            );
 
   return {
     content: "",
-    embeds: [
-      new EmbedBuilder()
-        .setTitle("🧩 Hori Core Prompts")
-        .setColor(0xEB459E)
-        .setDescription([
-          "Редактируется только то, что реально участвует в V5 core prompt-ах.",
-          "Chat payload сейчас идёт как один system prompt + реальные сообщения чата.",
-          `Guild: \`${guildId}\` · overrides: ${overriddenCount}/${templates.length}`
-        ].join("\n"))
-        .addFields(
-          {
-            name: "Prompt list",
-            value: clipFieldText(lines.join("\n"))
-          },
-          {
-            name: `${selected.label} · ${selected.source === "runtime_setting" ? "override" : "default"}`,
-            value: clipFieldText([
-              selected.description,
-              "",
-              updatedAtIso ? `updated=${updatedAtIso}${selected.updatedBy ? ` by ${selected.updatedBy}` : ""}` : "using built-in default",
-              "",
-              selected.content
-            ].join("\n"), 1024)
-          }
-        )
-    ],
-    components: buildCorePromptPanelRows(selected)
+    embeds: [summaryEmbed, detailEmbed],
+    components: buildCorePromptPanelRows(state, rotation, {
+      commonCoreSource: commonCoreStatus.source,
+      selectedService,
+      hasActiveSlot: Boolean(activePromptSlot),
+      overrideCount: overrides.length
+    }, isOwner)
   };
 }
 
@@ -4320,69 +4656,357 @@ async function safeCorePromptPanelUpdate(
   runtime: BotRuntime,
   interaction: StringSelectMenuInteraction | ButtonInteraction,
   guildId: string,
-  selectedKey: CorePromptKey
+  state: CorePromptStudioState = {},
+  channelId?: string | null,
+  isOwner = true
 ) {
   try {
-    await interaction.update(await buildCorePromptPanelResponse(runtime, guildId, selectedKey));
+    await interaction.update(await buildCorePromptPanelResponse(runtime, guildId, state, channelId, isOwner));
   } catch (error) {
     console.error("[core-prompt-panel] failed to render", {
       guildId,
-      selectedKey,
+      state,
       error: error instanceof Error ? { message: error.message, stack: error.stack } : error
     });
     const message = error instanceof Error ? error.message : "unknown error";
     if (interaction.replied || interaction.deferred) {
       await interaction.followUp({
-        content: `Не смогла открыть Core prompts: ${message}`,
+        content: `Не смогла открыть Core Studio V2: ${message}`,
         flags: MessageFlags.Ephemeral
       });
     } else {
       await interaction.reply({
-        content: `Не смогла открыть Core prompts: ${message}`,
+        content: `Не смогла открыть Core Studio V2: ${message}`,
         flags: MessageFlags.Ephemeral
       });
     }
   }
 }
 
-function buildCorePromptPanelRows(selected: {
-  key: CorePromptKey;
-  source: "default" | "runtime_setting";
-}) {
-  return [
+function buildCorePromptPanelRows(
+  state: { view: CorePromptStudioView; frontId: string | null; promptKey: CoreStudioServiceKey },
+  rotation: {
+    durationMinutes: number;
+    durationSource: "default" | "runtime_setting";
+    activeFrontId: string;
+    fronts: Array<{
+      id: string;
+      label: string;
+      enabled: boolean;
+      builtIn: boolean;
+      source: "default" | "runtime_setting";
+    }>;
+  },
+  context: {
+    commonCoreSource: "default" | "runtime_setting";
+    selectedService: {
+      key: CoreStudioServiceKey;
+      source: "default" | "runtime_setting";
+    };
+    hasActiveSlot: boolean;
+    overrideCount: number;
+  },
+  isOwner: boolean
+) {
+  const viewOptions = isOwner
+    ? [
+        {
+          label: "Базовый core",
+          value: "base",
+          description: "Главная база stable core prompt",
+          default: state.view === "base"
+        },
+        {
+          label: "Epoch fronts",
+          value: "rotation",
+          description: "Ротация, частота и каталог front-вариантов",
+          default: state.view === "rotation"
+        },
+        {
+          label: "Stable preview",
+          value: "preview",
+          description: "Как production stable core выглядит прямо сейчас",
+          default: state.view === "preview"
+        },
+        {
+          label: "Service prompts",
+          value: "services",
+          description: "Aggression checker, evaluator и summarizer",
+          default: state.view === "services"
+        },
+        {
+          label: "Mood overrides",
+          value: "overrides",
+          description: "Активные персональные override-ы по людям",
+          default: state.view === "overrides"
+        }
+      ]
+    : [
+        {
+          label: "Stable preview",
+          value: "preview",
+          description: "Как production stable core выглядит прямо сейчас",
+          default: state.view === "preview"
+        },
+        {
+          label: "Mood overrides",
+          value: "overrides",
+          description: "Активные персональные override-ы по людям",
+          default: state.view === "overrides"
+        }
+      ];
+
+  const rows: Array<ActionRowBuilder<StringSelectMenuBuilder | ButtonBuilder>> = [
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
-        .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:select`)
-        .setPlaceholder("Выбери core prompt")
-        .addOptions(
-          ...CORE_PROMPT_KEYS.map((key) => {
-            const def = CORE_PROMPT_DEFINITIONS[key];
-            const description = def.description.slice(0, 100).trim();
-            return {
-              label: def.label,
+        .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:view`)
+        .setPlaceholder("Режим Core Studio")
+        .addOptions(...viewOptions)
+    )
+  ];
+
+  if (state.view === "services") {
+    rows.push(
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:service`)
+          .setPlaceholder("Выбери service prompt")
+          .addOptions(
+            ...CORE_STUDIO_SERVICE_KEYS.map((key) => ({
+              label: CORE_PROMPT_DEFINITIONS[key].label.slice(0, 100),
               value: key,
-              ...(description ? { description } : {}),
-              default: key === selected.key
-            };
-          })
-        )
-    ),
+              description: CORE_PROMPT_DEFINITIONS[key].description.slice(0, 100),
+              default: key === context.selectedService.key
+            }))
+          )
+      )
+    );
+
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:edit_service:${context.selectedService.key}`)
+          .setLabel("Редактировать")
+          .setEmoji("✏️")
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:reset_service:${context.selectedService.key}`)
+          .setLabel("Сбросить")
+          .setEmoji("♻️")
+          .setDisabled(context.selectedService.source !== "runtime_setting")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_preview:${context.selectedService.key}`)
+          .setLabel("Preview")
+          .setEmoji("🔎")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_overrides:${context.selectedService.key}`)
+          .setLabel("Overrides")
+          .setEmoji("🎭")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_base:${context.selectedService.key}`)
+          .setLabel("База")
+          .setEmoji("🧱")
+          .setStyle(ButtonStyle.Secondary)
+      )
+    );
+  } else if (state.view === "rotation") {
+    const selectedFront = rotation.fronts.find((front) => front.id === state.frontId) ?? rotation.fronts[0] ?? null;
+    const enabledFrontCount = rotation.fronts.filter((front) => front.enabled).length;
+    const disableToggle = !selectedFront || (selectedFront.enabled && enabledFrontCount <= 1);
+    const disableReset = !selectedFront || (selectedFront.builtIn
+      ? selectedFront.source === "default" && selectedFront.enabled
+      : selectedFront.enabled && enabledFrontCount <= 1);
+
+    rows.push(
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:front`)
+          .setPlaceholder("Выбери epoch front")
+          .addOptions(
+            ...rotation.fronts.slice(0, 25).map((front) => ({
+              label: front.label.slice(0, 100),
+              value: front.id,
+              description: `${front.enabled ? "on" : "off"} · ${front.builtIn ? "built-in" : "custom"}`.slice(0, 100),
+              default: front.id === selectedFront?.id
+            }))
+          )
+      )
+    );
+
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:add_front:new`)
+          .setLabel("Добавить")
+          .setEmoji("➕")
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:edit_front:${selectedFront?.id ?? "missing"}`)
+          .setLabel("Править")
+          .setEmoji("✏️")
+          .setDisabled(!selectedFront)
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:toggle_front:${selectedFront?.id ?? "missing"}`)
+          .setLabel(selectedFront?.enabled ? "Выключить" : "Включить")
+          .setEmoji(selectedFront?.enabled ? "🛑" : "🟢")
+          .setDisabled(disableToggle)
+          .setStyle(selectedFront?.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:reset_front:${selectedFront?.id ?? "missing"}`)
+          .setLabel(selectedFront?.builtIn ? "Сбросить" : "Удалить")
+          .setEmoji(selectedFront?.builtIn ? "♻️" : "🗑️")
+          .setDisabled(disableReset)
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:rotate_front:${selectedFront?.id ?? "missing"}`)
+          .setLabel("Сделать активным")
+          .setEmoji("🔄")
+          .setDisabled(!selectedFront)
+          .setStyle(ButtonStyle.Secondary)
+      )
+    );
+
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:duration:${selectedFront?.id ?? "missing"}`)
+          .setLabel(`Частота ${rotation.durationMinutes}м`)
+          .setEmoji("⏱️")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:duration_reset:${selectedFront?.id ?? "missing"}`)
+          .setLabel("Сбросить частоту")
+          .setEmoji("♻️")
+          .setDisabled(rotation.durationSource !== "runtime_setting")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_preview:${selectedFront?.id ?? "missing"}`)
+          .setLabel("Preview")
+          .setEmoji("🔎")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_services:${selectedFront?.id ?? "missing"}`)
+          .setLabel("Service")
+          .setEmoji("🧪")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_overrides:${selectedFront?.id ?? "missing"}`)
+          .setLabel(`Overrides ${context.overrideCount}`)
+          .setEmoji("🎭")
+          .setStyle(ButtonStyle.Secondary)
+      )
+    );
+  } else if (state.view === "preview") {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(isOwner ? `${CORE_PROMPT_PANEL_PREFIX}:rotate_front` : `${CORE_PROMPT_PANEL_PREFIX}:show_override_modal:new`)
+          .setLabel(isOwner ? "Сменить эпоху" : "Новый override")
+          .setEmoji(isOwner ? "🔄" : "🎭")
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(isOwner ? `${CORE_PROMPT_PANEL_PREFIX}:show_rotation:${rotation.activeFrontId}` : `${CORE_PROMPT_PANEL_PREFIX}:show_overrides:${rotation.activeFrontId}`)
+          .setLabel(isOwner ? "Epoch fronts" : `Overrides ${context.overrideCount}`)
+          .setEmoji(isOwner ? "🎛️" : "📋")
+          .setStyle(ButtonStyle.Secondary),
+        ...(isOwner
+          ? [
+              new ButtonBuilder()
+                .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_services:${rotation.activeFrontId}`)
+                .setLabel("Service")
+                .setEmoji("🧪")
+                .setStyle(ButtonStyle.Secondary),
+              new ButtonBuilder()
+                .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_overrides:${rotation.activeFrontId}`)
+                .setLabel(`Overrides ${context.overrideCount}`)
+                .setEmoji("🎭")
+                .setStyle(ButtonStyle.Secondary),
+              new ButtonBuilder()
+                .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_base:${rotation.activeFrontId}`)
+                .setLabel(context.hasActiveSlot ? "База + slot" : "База")
+                .setEmoji(context.hasActiveSlot ? "🎟️" : "🧱")
+                .setStyle(ButtonStyle.Secondary)
+            ]
+          : [])
+      )
+    );
+  } else if (state.view === "overrides") {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_override_modal:new`)
+          .setLabel("Новый override")
+          .setEmoji("🎭")
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_overrides:refresh`)
+          .setLabel(`Обновить ${context.overrideCount}`)
+          .setEmoji("🔄")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_preview:refresh`)
+          .setLabel("Preview")
+          .setEmoji("🔎")
+          .setStyle(ButtonStyle.Secondary),
+        ...(isOwner
+          ? [
+              new ButtonBuilder()
+                .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_services:refresh`)
+                .setLabel("Service")
+                .setEmoji("🧪")
+                .setStyle(ButtonStyle.Secondary),
+              new ButtonBuilder()
+                .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_base:refresh`)
+                .setLabel("База")
+                .setEmoji("🧱")
+                .setStyle(ButtonStyle.Secondary)
+            ]
+          : [])
+      )
+    );
+  } else {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:edit_base`)
+          .setLabel("Редактировать базу")
+          .setEmoji("✏️")
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:reset_base`)
+          .setLabel("Сбросить")
+          .setEmoji("♻️")
+          .setDisabled(context.commonCoreSource !== "runtime_setting")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_preview:base`)
+          .setLabel("Preview")
+          .setEmoji("🔎")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_services:base`)
+          .setLabel("Service")
+          .setEmoji("🧪")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:show_rotation:base`)
+          .setLabel("Epoch fronts")
+          .setEmoji("🎛️")
+          .setStyle(ButtonStyle.Secondary)
+      )
+    );
+  }
+
+  rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
-        .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:edit:${selected.key}`)
-        .setLabel("Edit")
-        .setEmoji("✏️")
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:reset:${selected.key}`)
-        .setLabel("Reset")
-        .setEmoji("🔄")
-        .setDisabled(selected.source !== "runtime_setting")
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:back:${selected.key}`)
-        .setLabel("Persona")
-        .setEmoji("🎭")
+        .setCustomId(`${CORE_PROMPT_PANEL_PREFIX}:back:${state.view}`)
+        .setLabel("Cores")
+        .setEmoji("↩️")
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(`${HORI_ACTION_PREFIX}:panel_home`)
@@ -4390,7 +5014,150 @@ function buildCorePromptPanelRows(selected: {
         .setEmoji("🏠")
         .setStyle(ButtonStyle.Secondary)
     )
-  ];
+  );
+
+  return rows;
+}
+
+function resolveCorePromptStudioState(
+  rotation: { activeFrontId: string; fronts: Array<{ id: string }> },
+  requestedState: CorePromptStudioState = {},
+  isOwner = true
+) {
+  const requestedView = isCorePromptStudioView(requestedState.view) ? requestedState.view : "base";
+  const view = canAccessCoreStudioView(requestedView, isOwner)
+    ? requestedView
+    : "preview";
+  const frontId = rotation.fronts.some((front) => front.id === requestedState.frontId)
+    ? requestedState.frontId ?? null
+    : rotation.fronts.find((front) => front.id === rotation.activeFrontId)?.id
+      ?? rotation.fronts[0]?.id
+      ?? null;
+  const promptKey = isCoreStudioServiceKey(requestedState.promptKey)
+    ? requestedState.promptKey
+    : "aggressionChecker";
+
+  return { view, frontId, promptKey };
+}
+
+function canAccessCoreStudioView(view: CorePromptStudioView, isOwner: boolean) {
+  return isOwner || view === "preview" || view === "overrides";
+}
+
+function formatCoreEpochFrontList(
+  fronts: Array<{ id: string; label: string; enabled: boolean; builtIn: boolean }>,
+  selectedFrontId: string | null,
+  activeFrontId: string
+) {
+  return fronts.map((front) => {
+    const selected = front.id === selectedFrontId ? ">" : " ";
+    const active = front.id === activeFrontId ? "★" : " ";
+    const enabled = front.enabled ? "on" : "off";
+    const kind = front.builtIn ? "built-in" : "custom";
+    return `${selected}${active} ${front.label} · ${enabled} · ${kind}`;
+  }).join("\n");
+}
+
+function formatCoreStudioServiceList(
+  services: Array<{ key: CoreStudioServiceKey; source: "default" | "runtime_setting" }>
+) {
+  return services
+    .map((service) => `${CORE_PROMPT_DEFINITIONS[service.key].label} · ${formatCoreStudioSource(service.source)}`)
+    .join("\n");
+}
+
+function formatCoreStudioOverrides(
+  overrides: Array<{ userId: string; coreId: string; expiresAt: Date | null; reason: string | null; by: string; createdAt: Date }>
+) {
+  if (!overrides.length) {
+    return "Активных mood overrides сейчас нет. Через кнопку ниже можно сразу открыть modal и добавить новый.";
+  }
+
+  return overrides
+    .slice(0, 25)
+    .map((entry) => {
+      const expires = entry.expiresAt ? formatCoreStudioTime(entry.expiresAt) : "без срока";
+      const reason = entry.reason ? ` · ${entry.reason}` : "";
+      return `• <@${entry.userId}> → ${entry.coreId} до ${expires}${reason}`;
+    })
+    .join("\n");
+}
+
+function buildCoreStudioStableCorePrompt(options: {
+  commonCore: string;
+  coreEpoch: { epochId: string; frontId: string; frontText: string };
+  activePromptSlot?: { title: string | null; content: string; strength: number } | null;
+}) {
+  const slotBlock = options.activePromptSlot?.content.trim()
+    ? (() => {
+        const strength = options.activePromptSlot?.strength ?? 1;
+        const prefix = strength === 2 ? "🎯 Главный фокус: " : strength === 0 ? "(слабая подсказка) " : "";
+        const label = options.activePromptSlot?.title ? `[${options.activePromptSlot.title}]` : "[Слот]";
+        return `${label}\n${prefix}${options.activePromptSlot.content}`;
+      })()
+    : null;
+
+  return [
+    options.commonCore.trim(),
+    [
+      "[CORE EPOCH]",
+      `epochId=${options.coreEpoch.epochId}`,
+      `frontId=${options.coreEpoch.frontId}`,
+      options.coreEpoch.frontText
+    ].join("\n"),
+    slotBlock
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function describeCoreStudioView(view: CorePromptStudioView) {
+  switch (view) {
+    case "rotation":
+      return "каталог epoch fronts";
+    case "preview":
+      return "production stable core preview";
+    case "services":
+      return "service prompts";
+    case "overrides":
+      return "mood overrides";
+    default:
+      return "базовый commonCore";
+  }
+}
+
+function resolveCoreStudioColor(view: CorePromptStudioView) {
+  switch (view) {
+    case "rotation":
+      return 0xED4245;
+    case "preview":
+      return 0xF39C12;
+    case "services":
+      return 0x57F287;
+    case "overrides":
+      return 0xE67E22;
+    default:
+      return 0xEB459E;
+  }
+}
+
+function formatCoreStudioSource(source: "default" | "runtime_setting") {
+  return source === "runtime_setting" ? "override" : "default";
+}
+
+function formatCoreStudioTime(value: Date | null | undefined) {
+  return value ? `${value.toISOString().slice(0, 16).replace("T", " ")} UTC` : "—";
+}
+
+function clipCoreStudioText(value: string, max = 3600) {
+  const normalized = value.trim();
+  if (!normalized) {
+    return "—";
+  }
+  if (normalized.length <= max) {
+    return normalized;
+  }
+  return `${normalized.slice(0, max - 1)}…`;
 }
 
 // ─── V5 Controls Panel ───────────────────────────────────────────────────────
@@ -5033,6 +5800,73 @@ function buildCorePromptModal(current: {
         .setValue(safeContent)
         .setMaxLength(4000)
         .setStyle(TextInputStyle.Paragraph)
+    )
+  );
+
+  return modal;
+}
+
+function buildCoreEpochFrontModal(current?: {
+  id: string;
+  label: string;
+  content: string;
+  enabled: boolean;
+}) {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:core-epoch-front:${current?.id ?? "new"}`)
+    .setTitle((current?.label ?? "Новый epoch front").slice(0, 45));
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("label")
+        .setLabel("Название front-а")
+        .setPlaceholder("Напр.: Ночная ирония")
+        .setRequired(true)
+        .setValue(current?.label ?? "")
+        .setMaxLength(80)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("enabled")
+        .setLabel("Включён")
+        .setPlaceholder("true / false")
+        .setRequired(false)
+        .setValue(booleanToFieldValue(current?.enabled ?? true))
+        .setMaxLength(10)
+        .setStyle(TextInputStyle.Short)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("content")
+        .setLabel("Текст epoch front")
+        .setPlaceholder("Эпоха: ...")
+        .setRequired(true)
+        .setValue((current?.content ?? "").slice(0, 4000))
+        .setMaxLength(4000)
+        .setStyle(TextInputStyle.Paragraph)
+    )
+  );
+
+  return modal;
+}
+
+function buildCoreEpochDurationModal(currentMinutes: number) {
+  const modal = new ModalBuilder()
+    .setCustomId(`${HORI_MODAL_PREFIX}:core-epoch-duration`)
+    .setTitle("Частота ротации эпох");
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("minutes")
+        .setLabel("Минут между сменами")
+        .setPlaceholder("120")
+        .setRequired(true)
+        .setValue(String(currentMinutes))
+        .setMaxLength(4)
+        .setStyle(TextInputStyle.Short)
     )
   );
 

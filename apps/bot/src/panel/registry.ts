@@ -39,17 +39,17 @@ export const PANEL_TABS: PanelTabDefinition[] = [
     emoji: "🧩",
     color: 0xED4245,
     description: [
-      "Базовый core, relationship-коры по уровням -1..4, sign-варианты (?, !, *, >, ^),",
-      "evaluator и aggression-checker prompts. Превью собранного промпта по контексту."
+      "Базовый stable core, список epoch-front вариантов, ручная ротация, частота смены эпох и",
+      "mood overrides по людям. V2-студия показывает, что реально попадает в production stable core prompt."
     ].join("\n"),
     access: "moderator",
     actions: [
-      { id: "cores_open_panel", label: "Редактор кор", emoji: "🧩", style: ButtonStyle.Primary, access: "owner" },
+      { id: "cores_open_panel", label: "Core Studio V2", emoji: "🧩", style: ButtonStyle.Primary, access: "owner" },
       { id: "cores_preview", label: "Превью сборки", emoji: "🔍", access: "moderator" },
       { id: "cores_override", label: "Mood override", emoji: "🎭", access: "moderator" },
       { id: "cores_overrides_list", label: "Overrides", emoji: "📋", access: "moderator" },
-      { id: "cores_evaluator", label: "Evaluator", emoji: "🧪", access: "owner" },
-      { id: "cores_aggression_checker", label: "Aggression checker", emoji: "🛡️", access: "owner" }
+      { id: "cores_rotate_now", label: "Сменить эпоху", emoji: "🔄", access: "owner" },
+      { id: "cores_rotation", label: "Ротация и частота", emoji: "⏱️", access: "owner" }
     ]
   },
   {
